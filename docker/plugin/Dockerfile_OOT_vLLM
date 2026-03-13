@@ -102,4 +102,114 @@ for p in pkgs:
         print(f"  {p}: <not installed>")
 PY
 
+# ========== Optional: RDMA support for Broadcom bnxt_re ==========
+# Pin rdma-core to match the host bnxt_re provider ABI (v39 on Ubuntu 22.04).
+# Ubuntu 24.04 ships rdma-core v50 whose struct ibv_qp layout differs from v39,
+# causing SEGFAULT when the v39-compiled bnxt_re provider is loaded.
+ARG INSTALL_RDMA=1
+ARG RDMA_CORE_VERSION=39.0
+# Step 1: Install apt rdma-core first (brings in all deps & creates directories),
+#          then overwrite with source-built v39 to match host bnxt_re ABI.
+RUN if [ "${INSTALL_RDMA}" = "1" ]; then \
+        echo "========== [RDMA] Install apt rdma-core (for deps & directory layout) =========="; \
+        apt-get update && \
+        apt-get install -y --no-install-recommends \
+            rdma-core libibverbs-dev librdmacm-dev ibverbs-utils \
+            build-essential cmake gcc libudev-dev libnl-3-dev libnl-route-3-dev \
+            ninja-build pkg-config python3-dev cython3 && \
+        echo "========== [RDMA] Build rdma-core v${RDMA_CORE_VERSION} from source (overwrite v50) =========="; \
+        git clone --branch v${RDMA_CORE_VERSION} --depth 1 \
+            https://github.com/linux-rdma/rdma-core.git /tmp/rdma-core && \
+        cd /tmp/rdma-core && mkdir build && cd build && \
+        cmake -GNinja \
+              -DCMAKE_INSTALL_PREFIX=/usr \
+              -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu \
+              -DCMAKE_BUILD_TYPE=Release \
+              .. && \
+        ninja -j$(nproc) && ninja install && \
+        ldconfig && \
+        echo "Installed rdma-core v${RDMA_CORE_VERSION} (overwriting apt v50):" && \
+        ls -la /usr/lib/x86_64-linux-gnu/libibverbs.so* && \
+        ibv_devices 2>/dev/null || true && \
+        rm -rf /tmp/rdma-core && \
+        rm -rf /var/lib/apt/lists/*; \
+    else \
+        echo "========== [RDMA] Skipped (INSTALL_RDMA=0) =========="; \
+    fi
+COPY libbnxt_re-rdmav34.so* /tmp/
+RUN if [ "${INSTALL_RDMA}" = "1" ] && [ -f /tmp/libbnxt_re-rdmav34.so ]; then \
+        echo "========== [RDMA] Installing Broadcom OOT bnxt_re provider (v39 ABI matched) =========="; \
+        mkdir -p /usr/lib/x86_64-linux-gnu/libibverbs && \
+        cp /tmp/libbnxt_re-rdmav34.so \
+           /usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so && \
+        ldconfig && \
+        echo "RDMA provider plugin installed successfully."; \
+    fi
+
+# ========== Optional: Mooncake TransferEngine (ROCm/HIP) ==========
+ARG INSTALL_MOONCAKE=1
+ARG MOONCAKE_REPO="https://github.com/kvcache-ai/Mooncake.git"
+ARG MOONCAKE_COMMIT=""
+
+# [MC 1/4] Clone Mooncake
+RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
+        echo "========== [MC 1/4] Clone Mooncake =========="; \
+        git clone --depth 1 ${MOONCAKE_REPO} /app/mooncake; \
+        if [ -n "${MOONCAKE_COMMIT}" ]; then \
+            cd /app/mooncake && git fetch --depth 1 origin "${MOONCAKE_COMMIT}" && git checkout "${MOONCAKE_COMMIT}"; \
+        fi; \
+        cd /app/mooncake && echo "Mooncake commit: $(git rev-parse HEAD)"; \
+    else \
+        echo "========== [MC] Skipped (INSTALL_MOONCAKE=0) =========="; \
+    fi
+
+# [MC 2/4] Install dependencies (system packages + yalantinglibs + Go + submodules)
+ENV PATH="/usr/local/go/bin:${PATH}"
+RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
+        echo "========== [MC 2/4] Install Mooncake dependencies =========="; \
+        cd /app/mooncake && bash dependencies.sh -y; \
+    fi
+
+# [MC 3/4] CMake build with HIP support + unit tests
+RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
+        echo "========== [MC 3/4] Build Mooncake (USE_HIP=ON) =========="; \
+        mkdir -p /app/mooncake/build && cd /app/mooncake/build \
+        && cmake .. \
+            -DUSE_HIP=ON \
+            -DUSE_TCP=ON \
+            -DUSE_HTTP=ON \
+            -DUSE_CUDA=OFF \
+            -DBUILD_UNIT_TESTS=ON \
+            -DBUILD_EXAMPLES=OFF \
+            -DWITH_STORE=OFF \
+            -DWITH_P2P_STORE=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+        && make -j$(nproc); \
+    fi
+
+# [MC 4/4] Install Python wheel, copy artifacts, then clean up build dir & source
+RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
+        echo "========== [MC 4/4] Install Mooncake Python package =========="; \
+        cd /app/mooncake \
+        && "${VENV_PYTHON}" -m pip install mooncake-wheel/ \
+        && MOONCAKE_PKG=$("${VENV_PYTHON}" -c "import mooncake, os; print(os.path.dirname(mooncake.__file__))") \
+        && cp build/mooncake-integration/engine.cpython-312-x86_64-linux-gnu.so \
+              "${MOONCAKE_PKG}/engine.so" \
+        && cp build/mooncake-asio/libasio.so \
+              "${MOONCAKE_PKG}/" \
+        && echo "Mooncake engine.so linkage:" \
+        && ldd "${MOONCAKE_PKG}/engine.so" | grep -E "hip|cuda" || true \
+        && echo "--- Save RDMA test binaries ---" \
+        && mkdir -p /usr/local/bin/mooncake-tests \
+        && cp build/mooncake-transfer-engine/tests/rdma_loopback_test \
+              build/mooncake-transfer-engine/tests/rdma_transport_test \
+              build/mooncake-transfer-engine/tests/rdma_transport_test2 \
+              /usr/local/bin/mooncake-tests/ 2>/dev/null || true \
+        && ls -lh /usr/local/bin/mooncake-tests/ \
+        && echo "--- Clean up build artifacts ---" \
+        && rm -rf /app/mooncake/build /app/mooncake/.git; \
+    fi
+
+ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/mooncake:${LD_LIBRARY_PATH}"
+
 CMD ["/bin/bash"]

@@ -20,6 +20,12 @@ IMAGE_REPO="${IMAGE_REPO:-rocm/atom-vllm-dev}"
 IMAGE_TAG="${IMAGE_TAG:-${IMAGE_REPO}:v${VLLM_VERSION}-${VLLM_COMMIT_SHORT}}"
 MAX_JOBS="${MAX_JOBS:-64}"
 INSTALL_LM_EVAL="${INSTALL_LM_EVAL:-1}"
+INSTALL_RDMA="${INSTALL_RDMA:-1}"
+RDMA_LIB_PATH="${RDMA_LIB_PATH:-/usr/local/lib/libbnxt_re-rdmav34.so}"
+RDMA_CORE_VERSION="${RDMA_CORE_VERSION:-39.0}"
+INSTALL_MOONCAKE="${INSTALL_MOONCAKE:-1}"
+MOONCAKE_REPO="${MOONCAKE_REPO:-https://github.com/kvcache-ai/Mooncake.git}"
+MOONCAKE_COMMIT="${MOONCAKE_COMMIT:-}"
 PULL_BASE_IMAGE="${PULL_BASE_IMAGE:-1}"
 BUILD_NO_CACHE="${BUILD_NO_CACHE:-1}"
 
@@ -41,6 +47,12 @@ echo "vLLM commit     : ${VLLM_COMMIT}"
 echo "commit short    : ${VLLM_COMMIT_SHORT}"
 echo "MAX_JOBS        : ${MAX_JOBS}"
 echo "INSTALL_LM_EVAL : ${INSTALL_LM_EVAL}"
+echo "INSTALL_RDMA    : ${INSTALL_RDMA}"
+echo "RDMA_LIB_PATH   : ${RDMA_LIB_PATH}"
+echo "RDMA_CORE_VER   : ${RDMA_CORE_VERSION}"
+echo "INSTALL_MOONCAKE: ${INSTALL_MOONCAKE}"
+echo "MOONCAKE_REPO   : ${MOONCAKE_REPO}"
+echo "MOONCAKE_COMMIT : ${MOONCAKE_COMMIT:-latest}"
 echo "BUILD_NO_CACHE  : ${BUILD_NO_CACHE}"
 echo
 echo "Build plan:"
@@ -68,6 +80,20 @@ else
 fi
 echo
 
+# Prepare RDMA library for build context if requested
+RDMA_STAGED=""
+if [[ "${INSTALL_RDMA}" == "1" ]]; then
+  print_banner "Prepare RDMA - Copy Broadcom provider plugin into build context"
+  if [[ ! -f "${RDMA_LIB_PATH}" ]]; then
+    echo "ERROR: RDMA library not found at ${RDMA_LIB_PATH}"
+    echo "Set RDMA_LIB_PATH to the path of libbnxt_re-rdmav34.so on the host."
+    exit 1
+  fi
+  RDMA_STAGED="${SCRIPT_DIR}/libbnxt_re-rdmav34.so"
+  cp "${RDMA_LIB_PATH}" "${RDMA_STAGED}"
+  echo "Staged RDMA library: $(ls -lh "${RDMA_STAGED}")"
+fi
+
 print_banner "Step 3/4 - Build target image: ${IMAGE_TAG}"
 NO_CACHE_FLAG=""
 if [[ "${BUILD_NO_CACHE}" == "1" ]]; then
@@ -83,8 +109,19 @@ DOCKER_BUILDKIT=1 docker build \
   --build-arg "VLLM_COMMIT=${VLLM_COMMIT}" \
   --build-arg "MAX_JOBS=${MAX_JOBS}" \
   --build-arg "INSTALL_LM_EVAL=${INSTALL_LM_EVAL}" \
+  --build-arg "INSTALL_RDMA=${INSTALL_RDMA}" \
+  --build-arg "RDMA_CORE_VERSION=${RDMA_CORE_VERSION}" \
+  --build-arg "INSTALL_MOONCAKE=${INSTALL_MOONCAKE}" \
+  --build-arg "MOONCAKE_REPO=${MOONCAKE_REPO}" \
+  --build-arg "MOONCAKE_COMMIT=${MOONCAKE_COMMIT}" \
   "$@" \
-  "${REPO_ROOT}"
+  "${SCRIPT_DIR}"
+
+# Clean up staged RDMA library from build context
+if [[ -n "${RDMA_STAGED}" && -f "${RDMA_STAGED}" ]]; then
+  rm -f "${RDMA_STAGED}"
+  echo "Cleaned up staged RDMA library."
+fi
 
 print_banner "Step 4/4 - Build completed"
 docker image inspect "${IMAGE_TAG}" --format 'Image={{.RepoTags}}  ID={{.Id}}  Created={{.Created}}'
