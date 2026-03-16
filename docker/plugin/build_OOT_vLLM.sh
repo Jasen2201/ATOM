@@ -24,7 +24,6 @@ ATOM_BRANCH="${ATOM_BRANCH:-atmo_pd_dev}"
 INSTALL_LM_EVAL="${INSTALL_LM_EVAL:-1}"
 INSTALL_RDMA="${INSTALL_RDMA:-1}"
 RDMA_LIB_PATH="${RDMA_LIB_PATH:-/usr/local/lib/libbnxt_re-rdmav34.so}"
-RDMA_CORE_VERSION="${RDMA_CORE_VERSION:-39.0}"
 INSTALL_MOONCAKE="${INSTALL_MOONCAKE:-1}"
 MOONCAKE_REPO="${MOONCAKE_REPO:-https://github.com/kvcache-ai/Mooncake.git}"
 MOONCAKE_COMMIT="${MOONCAKE_COMMIT:-}"
@@ -53,7 +52,6 @@ echo "MAX_JOBS        : ${MAX_JOBS}"
 echo "INSTALL_LM_EVAL : ${INSTALL_LM_EVAL}"
 echo "INSTALL_RDMA    : ${INSTALL_RDMA}"
 echo "RDMA_LIB_PATH   : ${RDMA_LIB_PATH}"
-echo "RDMA_CORE_VER   : ${RDMA_CORE_VERSION}"
 echo "INSTALL_MOONCAKE: ${INSTALL_MOONCAKE}"
 echo "MOONCAKE_REPO   : ${MOONCAKE_REPO}"
 echo "MOONCAKE_COMMIT : ${MOONCAKE_COMMIT:-latest}"
@@ -84,18 +82,40 @@ else
 fi
 echo
 
-# Prepare RDMA library for build context if requested
-RDMA_STAGED=""
+# Prepare RDMA libraries for build context if requested
+RDMA_STAGED_DIR=""
 if [[ "${INSTALL_RDMA}" == "1" ]]; then
-  print_banner "Prepare RDMA - Copy Broadcom provider plugin into build context"
-  if [[ ! -f "${RDMA_LIB_PATH}" ]]; then
-    echo "ERROR: RDMA library not found at ${RDMA_LIB_PATH}"
-    echo "Set RDMA_LIB_PATH to the path of libbnxt_re-rdmav34.so on the host."
-    exit 1
+  print_banner "Prepare RDMA - Copy host rdma-core v39 libraries into build context"
+  RDMA_STAGED_DIR="${SCRIPT_DIR}/rdma_host_libs"
+  mkdir -p "${RDMA_STAGED_DIR}/libibverbs"
+
+  # Core libraries
+  RDMA_HOST_DIR="/usr/lib/x86_64-linux-gnu"
+  for lib in libibverbs.so.1.14.39.0 librdmacm.so.1.3.39.0; do
+    if [[ ! -f "${RDMA_HOST_DIR}/${lib}" ]]; then
+      echo "ERROR: ${lib} not found at ${RDMA_HOST_DIR}/${lib}"
+      exit 1
+    fi
+    cp "${RDMA_HOST_DIR}/${lib}" "${RDMA_STAGED_DIR}/"
+  done
+  # Recreate symlinks
+  cd "${RDMA_STAGED_DIR}"
+  ln -sf libibverbs.so.1.14.39.0  libibverbs.so.1
+  ln -sf libibverbs.so.1          libibverbs.so
+  ln -sf librdmacm.so.1.3.39.0   librdmacm.so.1
+  ln -sf librdmacm.so.1           librdmacm.so
+  cd -
+
+  # Broadcom bnxt_re provider plugin
+  if [[ -f "${RDMA_LIB_PATH}" ]]; then
+    cp "${RDMA_LIB_PATH}" "${RDMA_STAGED_DIR}/libibverbs/libbnxt_re-rdmav34.so"
+    echo "Staged bnxt_re provider: ${RDMA_LIB_PATH}"
+  else
+    echo "WARNING: RDMA provider not found at ${RDMA_LIB_PATH}, skipping bnxt_re."
   fi
-  RDMA_STAGED="${SCRIPT_DIR}/libbnxt_re-rdmav34.so"
-  cp "${RDMA_LIB_PATH}" "${RDMA_STAGED}"
-  echo "Staged RDMA library: $(ls -lh "${RDMA_STAGED}")"
+
+  echo "Staged RDMA libraries:"
+  ls -lhR "${RDMA_STAGED_DIR}"
 fi
 
 print_banner "Step 3/4 - Build target image: ${IMAGE_TAG}"
@@ -116,17 +136,16 @@ DOCKER_BUILDKIT=1 docker build \
   --build-arg "MAX_JOBS=${MAX_JOBS}" \
   --build-arg "INSTALL_LM_EVAL=${INSTALL_LM_EVAL}" \
   --build-arg "INSTALL_RDMA=${INSTALL_RDMA}" \
-  --build-arg "RDMA_CORE_VERSION=${RDMA_CORE_VERSION}" \
   --build-arg "INSTALL_MOONCAKE=${INSTALL_MOONCAKE}" \
   --build-arg "MOONCAKE_REPO=${MOONCAKE_REPO}" \
   --build-arg "MOONCAKE_COMMIT=${MOONCAKE_COMMIT}" \
   "$@" \
   "${SCRIPT_DIR}"
 
-# Clean up staged RDMA library from build context
-if [[ -n "${RDMA_STAGED}" && -f "${RDMA_STAGED}" ]]; then
-  rm -f "${RDMA_STAGED}"
-  echo "Cleaned up staged RDMA library."
+# Clean up staged RDMA libraries from build context
+if [[ -n "${RDMA_STAGED_DIR}" && -d "${RDMA_STAGED_DIR}" ]]; then
+  rm -rf "${RDMA_STAGED_DIR}"
+  echo "Cleaned up staged RDMA libraries."
 fi
 
 print_banner "Step 4/4 - Build completed"

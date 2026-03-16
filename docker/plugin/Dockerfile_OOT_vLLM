@@ -112,7 +112,6 @@ PY
 
 # ========== Optional: RDMA + Mooncake ==========
 ARG INSTALL_RDMA=1
-ARG RDMA_CORE_VERSION=39.0
 ARG INSTALL_MOONCAKE=1
 ARG MOONCAKE_REPO="https://github.com/kvcache-ai/Mooncake.git"
 ARG MOONCAKE_COMMIT=""
@@ -180,36 +179,29 @@ RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
 # Mooncake dependencies.sh may install rdma-core v50 from apt (Ubuntu 24.04).
 # The host bnxt_re provider is compiled against v39, and struct ibv_qp layout
 # differs between v50 and v39, causing SEGFAULT on qp->qp_num access.
-# We rebuild rdma-core v39 from source AFTER Mooncake to ensure it's the final version.
-COPY libbnxt_re-rdmav34.so* /tmp/
+# Copy pre-built rdma-core v39 libraries from host to overwrite v50.
+COPY rdma_host_libs* /tmp/rdma_host_libs/
 RUN if [ "${INSTALL_RDMA}" = "1" ]; then \
-        echo "========== [RDMA] Build rdma-core v${RDMA_CORE_VERSION} from source (overwrite v50) =========="; \
-        apt-get update && \
-        apt-get install -y --no-install-recommends \
-            libudev-dev libnl-3-dev libnl-route-3-dev \
-            pkg-config python3-dev cython3 && \
-        git clone --branch v${RDMA_CORE_VERSION} --depth 1 \
-            https://github.com/linux-rdma/rdma-core.git /tmp/rdma-core && \
-        cd /tmp/rdma-core && mkdir build && cd build && \
-        cmake -GNinja \
-              -DCMAKE_INSTALL_PREFIX=/usr \
-              -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu \
-              -DCMAKE_BUILD_TYPE=Release \
-              .. && \
-        ninja -j$(nproc) && ninja install && \
-        ldconfig && \
-        echo "Installed rdma-core v${RDMA_CORE_VERSION}:" && \
-        ls -la /usr/lib/x86_64-linux-gnu/libibverbs.so* && \
-        rm -rf /tmp/rdma-core && \
-        rm -rf /var/lib/apt/lists/* && \
-        if [ -f /tmp/libbnxt_re-rdmav34.so ]; then \
+        echo "========== [RDMA] Install host rdma-core v39 libraries (overwrite v50) =========="; \
+        RDMA_DST=/usr/lib/x86_64-linux-gnu && \
+        echo "--- Before: remove all libibverbs/librdmacm files ---" && \
+        rm -f "${RDMA_DST}"/libibverbs.so* "${RDMA_DST}"/librdmacm.so* && \
+        cp /tmp/rdma_host_libs/libibverbs.so.1.14.39.0 "${RDMA_DST}/" && \
+        cp /tmp/rdma_host_libs/librdmacm.so.1.3.39.0   "${RDMA_DST}/" && \
+        ln -sf libibverbs.so.1.14.39.0  "${RDMA_DST}/libibverbs.so.1" && \
+        ln -sf libibverbs.so.1          "${RDMA_DST}/libibverbs.so"   && \
+        ln -sf librdmacm.so.1.3.39.0   "${RDMA_DST}/librdmacm.so.1"  && \
+        ln -sf librdmacm.so.1           "${RDMA_DST}/librdmacm.so"    && \
+        if [ -f /tmp/rdma_host_libs/libibverbs/libbnxt_re-rdmav34.so ]; then \
             echo "========== [RDMA] Installing Broadcom bnxt_re provider =========="; \
-            mkdir -p /usr/lib/x86_64-linux-gnu/libibverbs && \
-            cp /tmp/libbnxt_re-rdmav34.so \
-               /usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so && \
-            ldconfig && \
-            echo "bnxt_re provider installed."; \
-        fi; \
+            mkdir -p "${RDMA_DST}/libibverbs" && \
+            cp /tmp/rdma_host_libs/libibverbs/libbnxt_re-rdmav34.so \
+               "${RDMA_DST}/libibverbs/libbnxt_re-rdmav34.so"; \
+        fi && \
+        ldconfig && \
+        echo "Installed rdma-core libraries:" && \
+        ls -la "${RDMA_DST}"/libibverbs.so* "${RDMA_DST}"/librdmacm.so* && \
+        rm -rf /tmp/rdma_host_libs; \
     else \
         echo "========== [RDMA] Skipped (INSTALL_RDMA=0) =========="; \
     fi
