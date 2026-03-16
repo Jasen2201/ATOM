@@ -19,6 +19,8 @@ VLLM_COMMIT_SHORT="$(printf '%s' "${VLLM_COMMIT}" | cut -c1-6)"
 IMAGE_REPO="${IMAGE_REPO:-rocm/atom-vllm-dev}"
 IMAGE_TAG="${IMAGE_TAG:-${IMAGE_REPO}:v${VLLM_VERSION}-${VLLM_COMMIT_SHORT}}"
 MAX_JOBS="${MAX_JOBS:-64}"
+ATOM_REPO="${ATOM_REPO:-https://github.com/zhyajie/ATOM.git}"
+ATOM_BRANCH="${ATOM_BRANCH:-atmo_pd_dev}"
 INSTALL_LM_EVAL="${INSTALL_LM_EVAL:-1}"
 INSTALL_RDMA="${INSTALL_RDMA:-1}"
 RDMA_LIB_PATH="${RDMA_LIB_PATH:-/usr/local/lib/libbnxt_re-rdmav34.so}"
@@ -45,6 +47,8 @@ echo "vLLM repo       : ${VLLM_REPO}"
 echo "vLLM version    : ${VLLM_VERSION}"
 echo "vLLM commit     : ${VLLM_COMMIT}"
 echo "commit short    : ${VLLM_COMMIT_SHORT}"
+echo "ATOM repo       : ${ATOM_REPO}"
+echo "ATOM branch     : ${ATOM_BRANCH}"
 echo "MAX_JOBS        : ${MAX_JOBS}"
 echo "INSTALL_LM_EVAL : ${INSTALL_LM_EVAL}"
 echo "INSTALL_RDMA    : ${INSTALL_RDMA}"
@@ -105,6 +109,8 @@ DOCKER_BUILDKIT=1 docker build \
   -f "${DOCKERFILE_PATH}" \
   -t "${IMAGE_TAG}" \
   --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+  --build-arg "ATOM_REPO=${ATOM_REPO}" \
+  --build-arg "ATOM_BRANCH=${ATOM_BRANCH}" \
   --build-arg "VLLM_REPO=${VLLM_REPO}" \
   --build-arg "VLLM_COMMIT=${VLLM_COMMIT}" \
   --build-arg "MAX_JOBS=${MAX_JOBS}" \

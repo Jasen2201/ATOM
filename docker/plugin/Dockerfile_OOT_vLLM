@@ -6,6 +6,8 @@ ARG VLLM_COMMIT="b31e9326a7d9394aab8c767f8ebe225c65594b60"
 ARG MAX_JOBS=64
 ARG INSTALL_LM_EVAL=1
 ARG INSTALL_FASTSAFETENSORS=1
+ARG ATOM_REPO="https://github.com/zhyajie/ATOM.git"
+ARG ATOM_BRANCH="atmo_pd_dev"
 ARG VENV_PYTHON="/opt/venv/bin/python"
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -25,8 +27,13 @@ RUN echo "========== [1/7] Prepare build tools ==========" \
     && /usr/local/bin/ninja --version \
     && rm -rf /var/lib/apt/lists/*
 
-RUN echo "========== [2/7] Verify base packages (atom/aiter/mori) ==========" \
-    && "${VENV_PYTHON}" -m pip show atom || true \
+RUN echo "========== [2/7] Reinstall ATOM from source (${ATOM_REPO} @ ${ATOM_BRANCH}) ==========" \
+    && "${VENV_PYTHON}" -m pip uninstall -y atom || true \
+    && git clone --branch "${ATOM_BRANCH}" --depth 1 "${ATOM_REPO}" /app/atom \
+    && cd /app/atom \
+    && echo "ATOM commit: $(git rev-parse HEAD)" \
+    && "${VENV_PYTHON}" -m pip install . \
+    && echo "ATOM installed:" && "${VENV_PYTHON}" -m pip show atom \
     && "${VENV_PYTHON}" -m pip show amd-aiter || true \
     && "${VENV_PYTHON}" -m pip show mori || true
 
@@ -69,6 +76,7 @@ RUN echo "========== [7/7] Install vLLM runtime dependencies ==========" \
 RUN echo "========== [8/8] Optional tools and final checks ==========" \
     && if [ "${INSTALL_LM_EVAL}" = "1" ]; then "${VENV_PYTHON}" -m pip install "lm-eval[api]"; else echo "Skip lm-eval install"; fi \
     && if [ "${INSTALL_FASTSAFETENSORS}" = "1" ]; then "${VENV_PYTHON}" -m pip install "git+https://github.com/foundation-model-stack/fastsafetensors.git"; else echo "Skip fastsafetensors install"; fi \
+    && "${VENV_PYTHON}" -m pip install botocore s3transfer \
     && "${VENV_PYTHON}" - <<'PY'
 import importlib.metadata as m
 import glob
@@ -102,51 +110,9 @@ for p in pkgs:
         print(f"  {p}: <not installed>")
 PY
 
-# ========== Optional: RDMA support for Broadcom bnxt_re ==========
-# Pin rdma-core to match the host bnxt_re provider ABI (v39 on Ubuntu 22.04).
-# Ubuntu 24.04 ships rdma-core v50 whose struct ibv_qp layout differs from v39,
-# causing SEGFAULT when the v39-compiled bnxt_re provider is loaded.
+# ========== Optional: RDMA + Mooncake ==========
 ARG INSTALL_RDMA=1
 ARG RDMA_CORE_VERSION=39.0
-# Step 1: Install apt rdma-core first (brings in all deps & creates directories),
-#          then overwrite with source-built v39 to match host bnxt_re ABI.
-RUN if [ "${INSTALL_RDMA}" = "1" ]; then \
-        echo "========== [RDMA] Install apt rdma-core (for deps & directory layout) =========="; \
-        apt-get update && \
-        apt-get install -y --no-install-recommends \
-            rdma-core libibverbs-dev librdmacm-dev ibverbs-utils \
-            build-essential cmake gcc libudev-dev libnl-3-dev libnl-route-3-dev \
-            ninja-build pkg-config python3-dev cython3 && \
-        echo "========== [RDMA] Build rdma-core v${RDMA_CORE_VERSION} from source (overwrite v50) =========="; \
-        git clone --branch v${RDMA_CORE_VERSION} --depth 1 \
-            https://github.com/linux-rdma/rdma-core.git /tmp/rdma-core && \
-        cd /tmp/rdma-core && mkdir build && cd build && \
-        cmake -GNinja \
-              -DCMAKE_INSTALL_PREFIX=/usr \
-              -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu \
-              -DCMAKE_BUILD_TYPE=Release \
-              .. && \
-        ninja -j$(nproc) && ninja install && \
-        ldconfig && \
-        echo "Installed rdma-core v${RDMA_CORE_VERSION} (overwriting apt v50):" && \
-        ls -la /usr/lib/x86_64-linux-gnu/libibverbs.so* && \
-        ibv_devices 2>/dev/null || true && \
-        rm -rf /tmp/rdma-core && \
-        rm -rf /var/lib/apt/lists/*; \
-    else \
-        echo "========== [RDMA] Skipped (INSTALL_RDMA=0) =========="; \
-    fi
-COPY libbnxt_re-rdmav34.so* /tmp/
-RUN if [ "${INSTALL_RDMA}" = "1" ] && [ -f /tmp/libbnxt_re-rdmav34.so ]; then \
-        echo "========== [RDMA] Installing Broadcom OOT bnxt_re provider (v39 ABI matched) =========="; \
-        mkdir -p /usr/lib/x86_64-linux-gnu/libibverbs && \
-        cp /tmp/libbnxt_re-rdmav34.so \
-           /usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so && \
-        ldconfig && \
-        echo "RDMA provider plugin installed successfully."; \
-    fi
-
-# ========== Optional: Mooncake TransferEngine (ROCm/HIP) ==========
 ARG INSTALL_MOONCAKE=1
 ARG MOONCAKE_REPO="https://github.com/kvcache-ai/Mooncake.git"
 ARG MOONCAKE_COMMIT=""
@@ -208,6 +174,44 @@ RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
         && ls -lh /usr/local/bin/mooncake-tests/ \
         && echo "--- Clean up build artifacts ---" \
         && rm -rf /app/mooncake/build /app/mooncake/.git; \
+    fi
+
+# ========== RDMA: Pin rdma-core to v39 for Broadcom bnxt_re ABI compat ==========
+# Mooncake dependencies.sh may install rdma-core v50 from apt (Ubuntu 24.04).
+# The host bnxt_re provider is compiled against v39, and struct ibv_qp layout
+# differs between v50 and v39, causing SEGFAULT on qp->qp_num access.
+# We rebuild rdma-core v39 from source AFTER Mooncake to ensure it's the final version.
+COPY libbnxt_re-rdmav34.so* /tmp/
+RUN if [ "${INSTALL_RDMA}" = "1" ]; then \
+        echo "========== [RDMA] Build rdma-core v${RDMA_CORE_VERSION} from source (overwrite v50) =========="; \
+        apt-get update && \
+        apt-get install -y --no-install-recommends \
+            libudev-dev libnl-3-dev libnl-route-3-dev \
+            pkg-config python3-dev cython3 && \
+        git clone --branch v${RDMA_CORE_VERSION} --depth 1 \
+            https://github.com/linux-rdma/rdma-core.git /tmp/rdma-core && \
+        cd /tmp/rdma-core && mkdir build && cd build && \
+        cmake -GNinja \
+              -DCMAKE_INSTALL_PREFIX=/usr \
+              -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu \
+              -DCMAKE_BUILD_TYPE=Release \
+              .. && \
+        ninja -j$(nproc) && ninja install && \
+        ldconfig && \
+        echo "Installed rdma-core v${RDMA_CORE_VERSION}:" && \
+        ls -la /usr/lib/x86_64-linux-gnu/libibverbs.so* && \
+        rm -rf /tmp/rdma-core && \
+        rm -rf /var/lib/apt/lists/* && \
+        if [ -f /tmp/libbnxt_re-rdmav34.so ]; then \
+            echo "========== [RDMA] Installing Broadcom bnxt_re provider =========="; \
+            mkdir -p /usr/lib/x86_64-linux-gnu/libibverbs && \
+            cp /tmp/libbnxt_re-rdmav34.so \
+               /usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so && \
+            ldconfig && \
+            echo "bnxt_re provider installed."; \
+        fi; \
+    else \
+        echo "========== [RDMA] Skipped (INSTALL_RDMA=0) =========="; \
     fi
 
 ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/mooncake:${LD_LIBRARY_PATH}"
