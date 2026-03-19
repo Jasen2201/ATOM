@@ -131,6 +131,7 @@ cython_debug/
 
 # Logs
 *.log
+**/logs/
 
 # Sphinx documentation
 docs/_build/
