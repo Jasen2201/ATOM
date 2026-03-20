@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Script 4: GSM8K Evaluation via PD Proxy - Single Node 1P1D
+# Script 4: GSM8K Evaluation via PD Proxy - Multi-Node 1P1D
+# Run this after the proxy (script 3) is up.
+# Uses the shared eval_gsm8k.py from evaluation/common/.
 # =============================================================================
 set -euo pipefail
 
 # ---- Configuration ----
-PROXY_HOST="${PROXY_HOST:-127.0.0.1}"
+PROXY_HOST="${PROXY_HOST:-10.36.41.138}"
 PROXY_PORT="${PROXY_PORT:-8080}"
-SERVED_MODEL="${SERVED_MODEL:-qwen3-8b}"
+SERVED_MODEL="${SERVED_MODEL:-deepseek-r1}"
 GSM8K_QUESTIONS="${GSM8K_QUESTIONS:-50}"
 WORKERS="${WORKERS:-4}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-120}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/logs"
+COMMON_DIR="$(cd "${SCRIPT_DIR}/../../common" && pwd)"
 mkdir -p "${LOG_DIR}"
 
-COMMON_DIR="$(cd "${SCRIPT_DIR}/../../common" && pwd)"
 EVAL_STANDALONE="${COMMON_DIR}/eval_gsm8k.py"
 
 echo ""
 echo "============================================================"
-echo "  GSM8K Evaluation - Single Node 1P1D"
+echo "  GSM8K Evaluation - Multi-Node 1P1D"
 echo "============================================================"
 echo " Proxy:     http://${PROXY_HOST}:${PROXY_PORT}"
 echo " Model:     ${SERVED_MODEL}"

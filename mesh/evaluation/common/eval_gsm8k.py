@@ -4,8 +4,8 @@ Standalone GSM8K evaluation - no vLLM source dependency.
 Downloads GSM8K dataset from HuggingFace and evaluates via OpenAI-compatible API.
 
 Usage:
-  python eval_gsm8k_standalone.py --host http://10.36.41.138 --port 8000 --model qwen3-235b
-  python eval_gsm8k_standalone.py --host http://10.36.41.138 --port 8000 --model qwen3-235b --num-questions 50
+  python eval_gsm8k.py --host http://10.36.41.138 --port 8000 --model qwen3-235b
+  python eval_gsm8k.py --host http://10.36.41.138 --port 8000 --model qwen3-235b --num-questions 50
 """
 
 import argparse

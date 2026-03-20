@@ -71,7 +71,7 @@ Scripts 3 and 4 will automatically wait for upstream services to be ready before
 | `2_start_decode.sh` | vLLM decode server (kv_consumer, GPU 1) | 8020 |
 | `3_start_proxy_smg.sh` | SMG PD proxy, routes prefill→decode | 8080 |
 | `4_eval_gsm8k.sh` | GSM8K 5-shot evaluation (50 questions) | — |
-| `eval_gsm8k_standalone.py` | Standalone evaluator (no vLLM source dependency) | — |
+| `eval_gsm8k.py` | Shared GSM8K evaluator (in `evaluation/common/`) | — |
 
 ## Configuration
 
