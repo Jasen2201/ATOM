@@ -27,6 +27,9 @@ RDMA_LIB_PATH="${RDMA_LIB_PATH:-/usr/local/lib/libbnxt_re-rdmav34.so}"
 INSTALL_MOONCAKE="${INSTALL_MOONCAKE:-1}"
 MOONCAKE_REPO="${MOONCAKE_REPO:-https://github.com/kvcache-ai/Mooncake.git}"
 MOONCAKE_COMMIT="${MOONCAKE_COMMIT:-}"
+INSTALL_SMG="${INSTALL_SMG:-1}"
+MESH_REPO="${MESH_REPO:-https://github.com/zhyajie/MESH.git}"
+MESH_BRANCH="${MESH_BRANCH:-main}"
 PULL_BASE_IMAGE="${PULL_BASE_IMAGE:-1}"
 BUILD_NO_CACHE="${BUILD_NO_CACHE:-1}"
 
@@ -55,6 +58,9 @@ echo "RDMA_LIB_PATH   : ${RDMA_LIB_PATH}"
 echo "INSTALL_MOONCAKE: ${INSTALL_MOONCAKE}"
 echo "MOONCAKE_REPO   : ${MOONCAKE_REPO}"
 echo "MOONCAKE_COMMIT : ${MOONCAKE_COMMIT:-latest}"
+echo "INSTALL_SMG     : ${INSTALL_SMG}"
+echo "MESH_REPO       : ${MESH_REPO}"
+echo "MESH_BRANCH     : ${MESH_BRANCH}"
 echo "BUILD_NO_CACHE  : ${BUILD_NO_CACHE}"
 echo
 echo "Build plan:"
@@ -139,6 +145,9 @@ DOCKER_BUILDKIT=1 docker build \
   --build-arg "INSTALL_MOONCAKE=${INSTALL_MOONCAKE}" \
   --build-arg "MOONCAKE_REPO=${MOONCAKE_REPO}" \
   --build-arg "MOONCAKE_COMMIT=${MOONCAKE_COMMIT}" \
+  --build-arg "INSTALL_SMG=${INSTALL_SMG}" \
+  --build-arg "MESH_REPO=${MESH_REPO}" \
+  --build-arg "MESH_BRANCH=${MESH_BRANCH}" \
   "$@" \
   "${SCRIPT_DIR}"
 
