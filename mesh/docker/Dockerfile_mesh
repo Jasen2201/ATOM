@@ -13,8 +13,10 @@ ENV MAX_JOBS=${MAX_JOBS}
 ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH}"
 WORKDIR /app
 
-# ========== [1/4] ATOM: reinstall from source ==========
-RUN echo "========== [1/4] Reinstall ATOM from source (${ATOM_REPO} @ ${ATOM_BRANCH}) ==========" \
+RUN apt-get update && apt-get install -y --no-install-recommends vim && rm -rf /var/lib/apt/lists/*
+
+# ========== [1/5] ATOM: reinstall from source ==========
+RUN echo "========== [1/5] Reinstall ATOM from source (${ATOM_REPO} @ ${ATOM_BRANCH}) ==========" \
     && "${VENV_PYTHON}" -m pip uninstall -y atom || true \
     && git clone --branch "${ATOM_BRANCH}" --depth 1 "${ATOM_REPO}" /app/atom \
     && cd /app/atom \
@@ -24,7 +26,7 @@ RUN echo "========== [1/4] Reinstall ATOM from source (${ATOM_REPO} @ ${ATOM_BRA
     && "${VENV_PYTHON}" -m pip show amd-aiter || true \
     && "${VENV_PYTHON}" -m pip show mori || true
 
-# ========== [2/4] RDMA: pin rdma-core to v39 for Broadcom bnxt_re ABI compat ==========
+# ========== [2/5] RDMA: pin rdma-core to v39 for Broadcom bnxt_re ABI compat ==========
 # Mooncake dependencies.sh may install rdma-core v50 from apt (Ubuntu 24.04).
 # The host bnxt_re provider is compiled against v39, and struct ibv_qp layout
 # differs between v50 and v39, causing SEGFAULT on qp->qp_num access.
@@ -32,7 +34,7 @@ RUN echo "========== [1/4] Reinstall ATOM from source (${ATOM_REPO} @ ${ATOM_BRA
 ARG INSTALL_RDMA=1
 COPY rdma_host_libs* /tmp/rdma_host_libs/
 RUN if [ "${INSTALL_RDMA}" = "1" ]; then \
-        echo "========== [2/4] Install host rdma-core v39 libraries (overwrite v50) =========="; \
+        echo "========== [2/5] Install host rdma-core v39 libraries (overwrite v50) =========="; \
         RDMA_DST=/usr/lib/x86_64-linux-gnu && \
         echo "--- Remove existing libibverbs/librdmacm files ---" && \
         rm -f "${RDMA_DST}"/libibverbs.so* "${RDMA_DST}"/librdmacm.so* && \
@@ -53,30 +55,30 @@ RUN if [ "${INSTALL_RDMA}" = "1" ]; then \
         ls -la "${RDMA_DST}"/libibverbs.so* "${RDMA_DST}"/librdmacm.so* && \
         rm -rf /tmp/rdma_host_libs; \
     else \
-        echo "========== [2/4] Skipped RDMA (INSTALL_RDMA=0) =========="; \
+        echo "========== [2/5] Skipped RDMA (INSTALL_RDMA=0) =========="; \
     fi
 
-# ========== [3/4] Mooncake TransferEngine ==========
+# ========== [3/5] Mooncake TransferEngine ==========
 ARG INSTALL_MOONCAKE=1
 ARG MOONCAKE_REPO="https://github.com/kvcache-ai/Mooncake.git"
 ARG MOONCAKE_COMMIT=""
 
 # [MC 1/4] Clone
 RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
-        echo "========== [3/4 MC 1/4] Clone Mooncake =========="; \
+        echo "========== [3/5 MC 1/4] Clone Mooncake =========="; \
         git clone --depth 1 ${MOONCAKE_REPO} /app/mooncake; \
         if [ -n "${MOONCAKE_COMMIT}" ]; then \
             cd /app/mooncake && git fetch --depth 1 origin "${MOONCAKE_COMMIT}" && git checkout "${MOONCAKE_COMMIT}"; \
         fi; \
         cd /app/mooncake && echo "Mooncake commit: $(git rev-parse HEAD)"; \
     else \
-        echo "========== [3/4] Skipped Mooncake (INSTALL_MOONCAKE=0) =========="; \
+        echo "========== [3/5] Skipped Mooncake (INSTALL_MOONCAKE=0) =========="; \
     fi
 
 # [MC 2/4] Install dependencies (system packages + yalantinglibs + Go + submodules)
 ENV PATH="/usr/local/go/bin:${PATH}"
 RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
-        echo "========== [3/4 MC 2/4] Install Mooncake dependencies =========="; \
+        echo "========== [3/5 MC 2/4] Install Mooncake dependencies =========="; \
         apt-get update \
         && apt --fix-broken install -y \
         && apt-mark hold rccl rccl-dev rocm-hip 2>/dev/null || true \
@@ -85,7 +87,7 @@ RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
 
 # [MC 3/4] CMake build with HIP support
 RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
-        echo "========== [3/4 MC 3/4] Build Mooncake (USE_HIP=ON) =========="; \
+        echo "========== [3/5 MC 3/4] Build Mooncake (USE_HIP=ON) =========="; \
         mkdir -p /app/mooncake/build && cd /app/mooncake/build \
         && cmake .. \
             -DUSE_HIP=ON \
@@ -102,7 +104,7 @@ RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
 
 # [MC 4/4] Install Python wheel, copy artifacts, clean up
 RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
-        echo "========== [3/4 MC 4/4] Install Mooncake Python package =========="; \
+        echo "========== [3/5 MC 4/4] Install Mooncake Python package =========="; \
         cd /app/mooncake \
         && "${VENV_PYTHON}" -m pip install mooncake-wheel/ \
         && MOONCAKE_PKG=$("${VENV_PYTHON}" -c "import mooncake, os; print(os.path.dirname(mooncake.__file__))") \
@@ -125,14 +127,14 @@ RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
 
 ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/mooncake:${LD_LIBRARY_PATH}"
 
-# ========== [4/4] SMG (sgl-model-gateway) PD Proxy ==========
+# ========== [4/5] SMG (sgl-model-gateway) PD Proxy ==========
 ARG INSTALL_SMG=1
 ARG MESH_REPO="https://github.com/Jasen2201/MESH.git"
 ARG MESH_BRANCH="main"
 ARG RUST_VERSION="1.94.0"
 
 RUN if [ "${INSTALL_SMG}" = "1" ]; then \
-        echo "========== [4/4 SMG 1/3] Install Rust toolchain =========="; \
+        echo "========== [4/5 SMG 1/3] Install Rust toolchain =========="; \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
             | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal \
         && . "$HOME/.cargo/env" \
@@ -140,7 +142,7 @@ RUN if [ "${INSTALL_SMG}" = "1" ]; then \
     fi
 
 RUN if [ "${INSTALL_SMG}" = "1" ]; then \
-        echo "========== [4/4 SMG 2/3] Clone and build smg (release) =========="; \
+        echo "========== [4/5 SMG 2/3] Clone and build smg (release) =========="; \
         . "$HOME/.cargo/env" \
         && git clone --branch "${MESH_BRANCH}" --depth 1 "${MESH_REPO}" /app/mesh \
         && cd /app/mesh \
@@ -152,12 +154,70 @@ RUN if [ "${INSTALL_SMG}" = "1" ]; then \
     fi
 
 RUN if [ "${INSTALL_SMG}" = "1" ]; then \
-        echo "========== [4/4 SMG 3/3] Clean up build artifacts =========="; \
+        echo "========== [4/5 SMG 3/3] Clean up build artifacts =========="; \
         rm -rf /app/mesh/target /app/mesh/.git \
         && rustup self uninstall -y 2>/dev/null || true \
         && rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" \
         && echo "smg binary:" && ls -lh /usr/local/bin/smg \
         && echo "smg dependencies:" && ldd /usr/local/bin/smg; \
     fi
+
+# ========== [5/5] SGLang: install from source with sgl-kernel (ROCm) ==========
+ARG INSTALL_SGLANG=1
+ARG SGLANG_REPO="https://github.com/sgl-project/sglang.git"
+ARG SGLANG_BRANCH="main"
+
+# Pre-install sglang runtime deps (before cloning, to leverage cache)
+RUN if [ "${INSTALL_SGLANG}" = "1" ]; then \
+        echo "========== [5/5 SGL 1/4] Install sglang pre-deps =========="; \
+        "${VENV_PYTHON}" -m pip install --no-cache-dir \
+            IPython orjson python-multipart pybind11; \
+    fi
+
+# Clone sglang
+RUN if [ "${INSTALL_SGLANG}" = "1" ]; then \
+        echo "========== [5/5 SGL 2/4] Clone sglang =========="; \
+        "${VENV_PYTHON}" -m pip uninstall -y sglang sgl-kernel 2>/dev/null || true \
+        && git clone --branch "${SGLANG_BRANCH}" --depth 1 "${SGLANG_REPO}" /app/sglang \
+        && cd /app/sglang \
+        && echo "sglang commit: $(git rev-parse HEAD)"; \
+    else \
+        echo "========== [5/5] Skipped SGLang (INSTALL_SGLANG=0) =========="; \
+    fi
+
+# Build sgl-kernel with ROCm pyproject
+ARG SGL_GPU_ARCH="gfx942"
+RUN if [ "${INSTALL_SGLANG}" = "1" ]; then \
+        echo "========== [5/5 SGL 3/4] Build sgl-kernel (ROCm, arch=${SGL_GPU_ARCH}) =========="; \
+        cd /app/sglang/sgl-kernel \
+        && rm -f pyproject.toml \
+        && mv pyproject_rocm.toml pyproject.toml \
+        && AMDGPU_TARGET="${SGL_GPU_ARCH}" "${VENV_PYTHON}" setup_rocm.py install; \
+    fi
+
+# Install sglang Python package and runtime deps, then restore ROCm torch
+RUN if [ "${INSTALL_SGLANG}" = "1" ]; then \
+        echo "========== [5/5 SGL 4/4] Install sglang + deps, restore ROCm torch =========="; \
+        cd /app/sglang \
+        && rm -f python/pyproject.toml \
+        && mv python/pyproject_other.toml python/pyproject.toml \
+        && echo "--- Backup ROCm torch ---" \
+        && TORCH_PKG=$("${VENV_PYTHON}" -c "import torch, os; print(os.path.dirname(torch.__file__))") \
+        && TORCH_DIST=$(find /opt/venv/lib -path "*/torch-*.dist-info" -maxdepth 3 | head -1) \
+        && cp -a "${TORCH_PKG}" /tmp/torch_rocm_backup \
+        && cp -a "${TORCH_DIST}" /tmp/torch_dist_backup \
+        && echo "--- Install sglang (all_hip) ---" \
+        && "${VENV_PYTHON}" -m pip install --no-cache-dir -e "python[all_hip]" \
+        && echo "--- Restore ROCm torch over CUDA torch ---" \
+        && TORCH_PKG_NEW=$("${VENV_PYTHON}" -c "import torch, os; print(os.path.dirname(torch.__file__))") \
+        && TORCH_DIST_NEW=$(find /opt/venv/lib -path "*/torch-*.dist-info" -maxdepth 3 | head -1) \
+        && rm -rf "${TORCH_PKG_NEW}" "${TORCH_DIST_NEW}" \
+        && cp -a /tmp/torch_rocm_backup "${TORCH_PKG_NEW}" \
+        && cp -a /tmp/torch_dist_backup "${TORCH_DIST_NEW}" \
+        && rm -rf /tmp/torch_rocm_backup /tmp/torch_dist_backup \
+        && echo "torch restored:" && "${VENV_PYTHON}" -c "import torch; print(torch.__version__, 'hip:', torch.version.hip)"; \
+    fi
+
+ENV PYTHONPATH="/app/sglang/python:${PYTHONPATH}"
 
 CMD ["/bin/bash"]
