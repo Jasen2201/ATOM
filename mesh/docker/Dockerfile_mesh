@@ -1,0 +1,163 @@
+ARG BASE_IMAGE="rocm/atom-dev:latest"
+FROM ${BASE_IMAGE}
+
+ARG ATOM_REPO="https://github.com/Jasen2201/ATOM.git"
+ARG ATOM_BRANCH="pd_distributed"
+ARG MAX_JOBS=64
+ARG VENV_PYTHON="/opt/venv/bin/python"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/opt/venv/bin:${PATH}"
+ENV CMAKE_MAKE_PROGRAM=/usr/local/bin/ninja
+ENV MAX_JOBS=${MAX_JOBS}
+ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH}"
+WORKDIR /app
+
+# ========== [1/4] ATOM: reinstall from source ==========
+RUN echo "========== [1/4] Reinstall ATOM from source (${ATOM_REPO} @ ${ATOM_BRANCH}) ==========" \
+    && "${VENV_PYTHON}" -m pip uninstall -y atom || true \
+    && git clone --branch "${ATOM_BRANCH}" --depth 1 "${ATOM_REPO}" /app/atom \
+    && cd /app/atom \
+    && echo "ATOM commit: $(git rev-parse HEAD)" \
+    && "${VENV_PYTHON}" -m pip install . \
+    && echo "ATOM installed:" && "${VENV_PYTHON}" -m pip show atom \
+    && "${VENV_PYTHON}" -m pip show amd-aiter || true \
+    && "${VENV_PYTHON}" -m pip show mori || true
+
+# ========== [2/4] RDMA: pin rdma-core to v39 for Broadcom bnxt_re ABI compat ==========
+# Mooncake dependencies.sh may install rdma-core v50 from apt (Ubuntu 24.04).
+# The host bnxt_re provider is compiled against v39, and struct ibv_qp layout
+# differs between v50 and v39, causing SEGFAULT on qp->qp_num access.
+# Copy pre-built rdma-core v39 libraries from host to overwrite v50.
+ARG INSTALL_RDMA=1
+COPY rdma_host_libs* /tmp/rdma_host_libs/
+RUN if [ "${INSTALL_RDMA}" = "1" ]; then \
+        echo "========== [2/4] Install host rdma-core v39 libraries (overwrite v50) =========="; \
+        RDMA_DST=/usr/lib/x86_64-linux-gnu && \
+        echo "--- Remove existing libibverbs/librdmacm files ---" && \
+        rm -f "${RDMA_DST}"/libibverbs.so* "${RDMA_DST}"/librdmacm.so* && \
+        cp /tmp/rdma_host_libs/libibverbs.so.1.14.39.0 "${RDMA_DST}/" && \
+        cp /tmp/rdma_host_libs/librdmacm.so.1.3.39.0   "${RDMA_DST}/" && \
+        ln -sf libibverbs.so.1.14.39.0  "${RDMA_DST}/libibverbs.so.1" && \
+        ln -sf libibverbs.so.1          "${RDMA_DST}/libibverbs.so"   && \
+        ln -sf librdmacm.so.1.3.39.0   "${RDMA_DST}/librdmacm.so.1"  && \
+        ln -sf librdmacm.so.1           "${RDMA_DST}/librdmacm.so"    && \
+        if [ -f /tmp/rdma_host_libs/libibverbs/libbnxt_re-rdmav34.so ]; then \
+            echo "Installing Broadcom bnxt_re provider"; \
+            mkdir -p "${RDMA_DST}/libibverbs" && \
+            cp /tmp/rdma_host_libs/libibverbs/libbnxt_re-rdmav34.so \
+               "${RDMA_DST}/libibverbs/libbnxt_re-rdmav34.so"; \
+        fi && \
+        ldconfig && \
+        echo "Installed rdma-core libraries:" && \
+        ls -la "${RDMA_DST}"/libibverbs.so* "${RDMA_DST}"/librdmacm.so* && \
+        rm -rf /tmp/rdma_host_libs; \
+    else \
+        echo "========== [2/4] Skipped RDMA (INSTALL_RDMA=0) =========="; \
+    fi
+
+# ========== [3/4] Mooncake TransferEngine ==========
+ARG INSTALL_MOONCAKE=1
+ARG MOONCAKE_REPO="https://github.com/kvcache-ai/Mooncake.git"
+ARG MOONCAKE_COMMIT=""
+
+# [MC 1/4] Clone
+RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
+        echo "========== [3/4 MC 1/4] Clone Mooncake =========="; \
+        git clone --depth 1 ${MOONCAKE_REPO} /app/mooncake; \
+        if [ -n "${MOONCAKE_COMMIT}" ]; then \
+            cd /app/mooncake && git fetch --depth 1 origin "${MOONCAKE_COMMIT}" && git checkout "${MOONCAKE_COMMIT}"; \
+        fi; \
+        cd /app/mooncake && echo "Mooncake commit: $(git rev-parse HEAD)"; \
+    else \
+        echo "========== [3/4] Skipped Mooncake (INSTALL_MOONCAKE=0) =========="; \
+    fi
+
+# [MC 2/4] Install dependencies (system packages + yalantinglibs + Go + submodules)
+ENV PATH="/usr/local/go/bin:${PATH}"
+RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
+        echo "========== [3/4 MC 2/4] Install Mooncake dependencies =========="; \
+        apt-get update \
+        && apt --fix-broken install -y \
+        && apt-mark hold rccl rccl-dev rocm-hip 2>/dev/null || true \
+        && cd /app/mooncake && bash dependencies.sh -y; \
+    fi
+
+# [MC 3/4] CMake build with HIP support
+RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
+        echo "========== [3/4 MC 3/4] Build Mooncake (USE_HIP=ON) =========="; \
+        mkdir -p /app/mooncake/build && cd /app/mooncake/build \
+        && cmake .. \
+            -DUSE_HIP=ON \
+            -DUSE_TCP=ON \
+            -DUSE_HTTP=ON \
+            -DUSE_CUDA=OFF \
+            -DBUILD_UNIT_TESTS=ON \
+            -DBUILD_EXAMPLES=OFF \
+            -DWITH_STORE=OFF \
+            -DWITH_P2P_STORE=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+        && make -j$(nproc); \
+    fi
+
+# [MC 4/4] Install Python wheel, copy artifacts, clean up
+RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
+        echo "========== [3/4 MC 4/4] Install Mooncake Python package =========="; \
+        cd /app/mooncake \
+        && "${VENV_PYTHON}" -m pip install mooncake-wheel/ \
+        && MOONCAKE_PKG=$("${VENV_PYTHON}" -c "import mooncake, os; print(os.path.dirname(mooncake.__file__))") \
+        && cp build/mooncake-integration/engine.cpython-312-x86_64-linux-gnu.so \
+              "${MOONCAKE_PKG}/engine.so" \
+        && cp build/mooncake-asio/libasio.so \
+              "${MOONCAKE_PKG}/" \
+        && echo "Mooncake engine.so linkage:" \
+        && ldd "${MOONCAKE_PKG}/engine.so" | grep -E "hip|cuda" || true \
+        && echo "--- Save RDMA test binaries ---" \
+        && mkdir -p /usr/local/bin/mooncake-tests \
+        && cp build/mooncake-transfer-engine/tests/rdma_loopback_test \
+              build/mooncake-transfer-engine/tests/rdma_transport_test \
+              build/mooncake-transfer-engine/tests/rdma_transport_test2 \
+              /usr/local/bin/mooncake-tests/ 2>/dev/null || true \
+        && ls -lh /usr/local/bin/mooncake-tests/ \
+        && echo "--- Clean up build artifacts ---" \
+        && rm -rf /app/mooncake/build /app/mooncake/.git; \
+    fi
+
+ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/mooncake:${LD_LIBRARY_PATH}"
+
+# ========== [4/4] SMG (sgl-model-gateway) PD Proxy ==========
+ARG INSTALL_SMG=1
+ARG MESH_REPO="https://github.com/Jasen2201/MESH.git"
+ARG MESH_BRANCH="main"
+ARG RUST_VERSION="1.94.0"
+
+RUN if [ "${INSTALL_SMG}" = "1" ]; then \
+        echo "========== [4/4 SMG 1/3] Install Rust toolchain =========="; \
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal \
+        && . "$HOME/.cargo/env" \
+        && rustc --version && cargo --version; \
+    fi
+
+RUN if [ "${INSTALL_SMG}" = "1" ]; then \
+        echo "========== [4/4 SMG 2/3] Clone and build smg (release) =========="; \
+        . "$HOME/.cargo/env" \
+        && git clone --branch "${MESH_BRANCH}" --depth 1 "${MESH_REPO}" /app/mesh \
+        && cd /app/mesh \
+        && echo "mesh commit: $(git rev-parse HEAD)" \
+        && cargo build --release \
+        && strip target/release/smg \
+        && cp target/release/smg /usr/local/bin/smg \
+        && echo "smg installed:" && smg --version-verbose; \
+    fi
+
+RUN if [ "${INSTALL_SMG}" = "1" ]; then \
+        echo "========== [4/4 SMG 3/3] Clean up build artifacts =========="; \
+        rm -rf /app/mesh/target /app/mesh/.git \
+        && rustup self uninstall -y 2>/dev/null || true \
+        && rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" \
+        && echo "smg binary:" && ls -lh /usr/local/bin/smg \
+        && echo "smg dependencies:" && ldd /usr/local/bin/smg; \
+    fi
+
+CMD ["/bin/bash"]
