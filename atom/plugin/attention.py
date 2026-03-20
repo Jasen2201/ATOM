@@ -21,6 +21,19 @@ _PARTITION_SIZE_ROCM = 256
 _CP_TOKENS_PER_ITER_ROCM = 32 * 1024
 disable_vllm_plugin_attention = envs.ATOM_DISABLE_VLLM_PLUGIN_ATTENTION
 
+# vLLM uses different kv_cache_dtype strings than aiter's d_dtypes keys.
+# This mapping bridges the gap.
+_VLLM_CACHE_DTYPE_ALIASES = {
+    "auto": "bf16",
+    "bfloat16": "bf16",
+    "float16": "fp16",
+}
+
+
+def _resolve_cache_dtype(vllm_dtype_str: str) -> str:
+    """Map vLLM's cache_dtype string to an aiter d_dtypes key."""
+    return _VLLM_CACHE_DTYPE_ALIASES.get(vllm_dtype_str, vllm_dtype_str)
+
 
 @dataclass
 class AiterFlashAttentionPhaseMetadata:
@@ -1182,7 +1195,7 @@ def create_mla_attn_metadata_builder_init_method(base_class):
             1,
             self.padded_num_attention_heads,
             torch.bfloat16,
-            dtypes.d_dtypes[config.cache_config.cache_dtype],
+            dtypes.d_dtypes[_resolve_cache_dtype(config.cache_config.cache_dtype)],
             is_sparse=False,  # TODO: support sparse
             fast_mode=True,
         )
