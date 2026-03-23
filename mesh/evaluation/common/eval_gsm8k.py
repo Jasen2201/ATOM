@@ -46,8 +46,22 @@ FEW_SHOT_EXAMPLES = [
 ]
 
 
-def load_gsm8k(num_questions=None):
-    """Load GSM8K test set from HuggingFace datasets."""
+def load_gsm8k(num_questions=None, dataset_path=None):
+    """Load GSM8K test set from local file, HuggingFace datasets, or direct download."""
+    # Option 1: Load from local JSONL file
+    if dataset_path:
+        print(f"Loading from local file: {dataset_path}", flush=True)
+        data = []
+        with open(dataset_path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    data.append(json.loads(line))
+                    if num_questions and len(data) >= num_questions:
+                        break
+        return data
+
+    # Option 2: Try HuggingFace datasets library
     try:
         from datasets import load_dataset
 
@@ -55,8 +69,11 @@ def load_gsm8k(num_questions=None):
         if num_questions and num_questions < len(ds):
             ds = ds.select(range(num_questions))
         return list(ds)
-    except ImportError:
-        pass
+    except (ImportError, Exception) as e:
+        print(
+            f"HuggingFace datasets unavailable ({e}), trying direct download...",
+            flush=True,
+        )
 
     # Fallback: download JSONL directly
     import urllib.request
@@ -64,7 +81,7 @@ def load_gsm8k(num_questions=None):
     url = "https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/test.jsonl"
     print(f"Downloading GSM8K test set...", flush=True)
     data = []
-    with urllib.request.urlopen(url) as resp:
+    with urllib.request.urlopen(url, timeout=30) as resp:
         for line in resp:
             data.append(json.loads(line))
             if num_questions and len(data) >= num_questions:
@@ -144,6 +161,12 @@ def main():
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--save-results", type=str, default=None)
+    parser.add_argument(
+        "--dataset-path",
+        type=str,
+        default=None,
+        help="Path to local GSM8K JSONL file (bypasses download)",
+    )
     args = parser.parse_args()
 
     base_url = f"{args.host}:{args.port}"
@@ -177,7 +200,7 @@ def main():
 
     # Load dataset
     print("Loading GSM8K dataset...", flush=True)
-    dataset = load_gsm8k(args.num_questions)
+    dataset = load_gsm8k(args.num_questions, dataset_path=args.dataset_path)
     print(f"Loaded {len(dataset)} questions", flush=True)
 
     correct = 0
