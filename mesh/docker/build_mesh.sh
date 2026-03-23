@@ -20,7 +20,7 @@ ATOM_BRANCH="${ATOM_BRANCH:-pd_distributed}"
 INSTALL_RDMA="${INSTALL_RDMA:-1}"
 RDMA_LIB_PATH="${RDMA_LIB_PATH:-/usr/local/lib/libbnxt_re-rdmav34.so}"
 INSTALL_MOONCAKE="${INSTALL_MOONCAKE:-1}"
-MOONCAKE_REPO="${MOONCAKE_REPO:-https://github.com/kvcache-ai/Mooncake.git}"
+MOONCAKE_REPO="${MOONCAKE_REPO:-https://github.com/Jasen2201/Mooncake.git}"
 MOONCAKE_COMMIT="${MOONCAKE_COMMIT:-}"
 INSTALL_SMG="${INSTALL_SMG:-1}"
 MESH_REPO="${MESH_REPO:-https://github.com/Jasen2201/MESH.git}"
@@ -90,33 +90,55 @@ echo
 # Prepare RDMA libraries for build context if requested
 RDMA_STAGED_DIR=""
 if [[ "${INSTALL_RDMA}" == "1" ]]; then
-  print_banner "Prepare RDMA - Copy host rdma-core v39 libraries into build context"
+  print_banner "Prepare RDMA - Copy host rdma-core libraries into build context"
   RDMA_STAGED_DIR="${SCRIPT_DIR}/rdma_host_libs"
   mkdir -p "${RDMA_STAGED_DIR}/libibverbs"
 
-  # Core libraries
+  # Core libraries — auto-detect versioned .so from host
   RDMA_HOST_DIR="/usr/lib/x86_64-linux-gnu"
-  for lib in libibverbs.so.1.14.39.0 librdmacm.so.1.3.39.0; do
-    if [[ ! -f "${RDMA_HOST_DIR}/${lib}" ]]; then
-      echo "ERROR: ${lib} not found at ${RDMA_HOST_DIR}/${lib}"
-      exit 1
-    fi
-    cp "${RDMA_HOST_DIR}/${lib}" "${RDMA_STAGED_DIR}/"
-  done
+
+  LIBIBVERBS_REAL=$(ls "${RDMA_HOST_DIR}"/libibverbs.so.1.*.0 2>/dev/null | head -1)
+  LIBRDMACM_REAL=$(ls "${RDMA_HOST_DIR}"/librdmacm.so.1.*.0 2>/dev/null | head -1)
+
+  if [[ -z "${LIBIBVERBS_REAL}" ]]; then
+    echo "ERROR: no libibverbs.so.1.*.0 found in ${RDMA_HOST_DIR}"
+    exit 1
+  fi
+  if [[ -z "${LIBRDMACM_REAL}" ]]; then
+    echo "ERROR: no librdmacm.so.1.*.0 found in ${RDMA_HOST_DIR}"
+    exit 1
+  fi
+
+  echo "Detected host RDMA libraries:"
+  echo "  libibverbs: ${LIBIBVERBS_REAL}"
+  echo "  librdmacm : ${LIBRDMACM_REAL}"
+
+  cp "${LIBIBVERBS_REAL}" "${RDMA_STAGED_DIR}/"
+  cp "${LIBRDMACM_REAL}" "${RDMA_STAGED_DIR}/"
+
   # Recreate symlinks
+  LIBIBVERBS_FILE=$(basename "${LIBIBVERBS_REAL}")
+  LIBRDMACM_FILE=$(basename "${LIBRDMACM_REAL}")
   cd "${RDMA_STAGED_DIR}"
-  ln -sf libibverbs.so.1.14.39.0  libibverbs.so.1
-  ln -sf libibverbs.so.1          libibverbs.so
-  ln -sf librdmacm.so.1.3.39.0   librdmacm.so.1
-  ln -sf librdmacm.so.1           librdmacm.so
+  ln -sf "${LIBIBVERBS_FILE}"  libibverbs.so.1
+  ln -sf libibverbs.so.1       libibverbs.so
+  ln -sf "${LIBRDMACM_FILE}"  librdmacm.so.1
+  ln -sf librdmacm.so.1       librdmacm.so
   cd -
 
-  # Broadcom bnxt_re provider plugin
-  if [[ -f "${RDMA_LIB_PATH}" ]]; then
-    cp "${RDMA_LIB_PATH}" "${RDMA_STAGED_DIR}/libibverbs/libbnxt_re-rdmav34.so"
-    echo "Staged bnxt_re provider: ${RDMA_LIB_PATH}"
+  # Copy ALL host provider plugins (ionic, bnxt_re, mlx5, etc.)
+  PROVIDER_DIR="${RDMA_HOST_DIR}/libibverbs"
+  if [[ -d "${PROVIDER_DIR}" ]]; then
+    cp -L "${PROVIDER_DIR}"/*.so "${RDMA_STAGED_DIR}/libibverbs/" 2>/dev/null || true
+    echo "Staged provider plugins from ${PROVIDER_DIR}:"
+    ls -lh "${RDMA_STAGED_DIR}/libibverbs/"
   else
-    echo "WARNING: RDMA provider not found at ${RDMA_LIB_PATH}, skipping bnxt_re."
+    echo "WARNING: Provider directory ${PROVIDER_DIR} not found."
+  fi
+  # Also copy from RDMA_LIB_PATH if it exists and was not already copied
+  if [[ -f "${RDMA_LIB_PATH}" && ! -f "${RDMA_STAGED_DIR}/libibverbs/$(basename "${RDMA_LIB_PATH}")" ]]; then
+    cp "${RDMA_LIB_PATH}" "${RDMA_STAGED_DIR}/libibverbs/"
+    echo "Staged extra provider: ${RDMA_LIB_PATH}"
   fi
 
   echo "Staged RDMA libraries:"
@@ -130,6 +152,7 @@ if [[ "${BUILD_NO_CACHE}" == "1" ]]; then
 fi
 
 DOCKER_BUILDKIT=1 docker build \
+  --ulimit nofile=65535:65535 \
   ${NO_CACHE_FLAG} \
   -f "${DOCKERFILE_PATH}" \
   -t "${IMAGE_TAG}" \
