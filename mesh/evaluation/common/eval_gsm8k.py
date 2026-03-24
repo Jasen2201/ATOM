@@ -131,7 +131,7 @@ def build_prompt(question):
     return prompt
 
 
-def query_model(base_url, model, prompt, max_tokens=512, temperature=0.0):
+def query_model(base_url, model, prompt, max_tokens=512, temperature=0.0, timeout=120):
     """Query the model via OpenAI-compatible completions API."""
     url = f"{base_url}/v1/completions"
     payload = {
@@ -142,7 +142,7 @@ def query_model(base_url, model, prompt, max_tokens=512, temperature=0.0):
         "stop": ["\n\nQuestion:"],
     }
     try:
-        resp = requests.post(url, json=payload, timeout=120)
+        resp = requests.post(url, json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
         return data["choices"][0]["text"]
@@ -160,6 +160,7 @@ def main():
     parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--timeout", type=int, default=120, help="API request timeout in seconds")
     parser.add_argument("--save-results", type=str, default=None)
     parser.add_argument(
         "--dataset-path",
@@ -214,7 +215,7 @@ def main():
         gold = extract_gold_answer(item["answer"])
         prompt = build_prompt(question)
         response = query_model(
-            base_url, args.model, prompt, args.max_tokens, args.temperature
+            base_url, args.model, prompt, args.max_tokens, args.temperature, args.timeout
         )
         predicted = extract_answer(response)
         tokens = len(response.split())  # rough estimate

@@ -225,4 +225,7 @@ RUN if [ "${INSTALL_SGLANG}" = "1" ]; then \
 
 ENV PYTHONPATH="/app/sglang/python:${PYTHONPATH}"
 
+# SGLang JIT kernels require tvm_ffi (not bundled with ROCm base image)
+RUN "${VENV_PYTHON}" -m pip install --no-cache-dir "apache-tvm-ffi>=0.1.0b15" --pre
+
 CMD ["/bin/bash"]
