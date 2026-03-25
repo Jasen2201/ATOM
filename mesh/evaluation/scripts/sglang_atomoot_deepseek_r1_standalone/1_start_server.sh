@@ -11,12 +11,14 @@ MODEL="${MODEL:-/mnt/nfs/huggingface/DeepSeek-R1}"
 TP_SIZE="${TP_SIZE:-8}"
 EP_SIZE="${EP_SIZE:-1}"
 SERVER_PORT="${SERVER_PORT:-8013}"
-SERVER_HOST="${SERVER_HOST:-localhost}"
+SERVER_HOST="${SERVER_HOST:-0.0.0.0}"
 KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8_e4m3}"
-MEM_FRACTION="${MEM_FRACTION:-0.8}"
+MEM_FRACTION="${MEM_FRACTION:-0.85}"
 PAGE_SIZE="${PAGE_SIZE:-1}"
-CUDA_GRAPH_MAX_BS="${CUDA_GRAPH_MAX_BS:-16}"
-DISABLE_CUDA_GRAPH="${DISABLE_CUDA_GRAPH:-0}"
+CUDA_GRAPH_BS_START="${CUDA_GRAPH_BS_START:-1}"
+CUDA_GRAPH_BS_END="${CUDA_GRAPH_BS_END:-32}"
+CHUNKED_PREFILL_SIZE="${CHUNKED_PREFILL_SIZE:-16384}"
+MAX_RUNNING_REQUESTS="${MAX_RUNNING_REQUESTS:-128}"
 QUICK_REDUCE_QUANT="${QUICK_REDUCE_QUANT:-INT4}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,9 +37,10 @@ echo " Host:               ${SERVER_HOST}"
 echo " KV cache dtype:     ${KV_CACHE_DTYPE}"
 echo " Mem fraction:       ${MEM_FRACTION}"
 echo " Page size:          ${PAGE_SIZE}"
-echo " CUDA graph max BS:  ${CUDA_GRAPH_MAX_BS}"
+echo " CUDA graph BS:      ${CUDA_GRAPH_BS_START}-${CUDA_GRAPH_BS_END}"
+echo " Chunked prefill:    ${CHUNKED_PREFILL_SIZE}"
+echo " Max running reqs:   ${MAX_RUNNING_REQUESTS}"
 echo " Quick reduce quant: ${QUICK_REDUCE_QUANT}"
-echo " Disable CUDA graph: ${DISABLE_CUDA_GRAPH}"
 echo "============================================================"
 
 # ---- Environment ----
@@ -59,6 +62,7 @@ python3 -m sglang.launch_server \
     --kv-cache-dtype "${KV_CACHE_DTYPE}" \
     --mem-fraction-static "${MEM_FRACTION}" \
     --page-size "${PAGE_SIZE}" \
-    --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" \
-    $([ "${DISABLE_CUDA_GRAPH}" = "1" ] && echo "--disable-cuda-graph") \
+    --cuda-graph-bs $(seq ${CUDA_GRAPH_BS_START} ${CUDA_GRAPH_BS_END}) \
+    --chunked-prefill-size "${CHUNKED_PREFILL_SIZE}" \
+    --max-running-requests "${MAX_RUNNING_REQUESTS}" \
     2>&1 | tee "${LOG_DIR}/server.log"
