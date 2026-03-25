@@ -1610,20 +1610,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
     def _process_block_quant(self, layer: nn.Module) -> None:
         assert self.quant_config["is_dynamic"]
-        print(
-            f"[DIAG][Fp8MoE._process_block_quant] BEFORE normalize: "
-            f"w13 dtype={layer.w13_weight.dtype} shape={tuple(layer.w13_weight.shape)} "
-            f"w13_scale dtype={layer.w13_weight_scale.dtype} shape={tuple(layer.w13_weight_scale.shape)} "
-            f"need_normalize={self.need_normalize_e4m3fn_to_e4m3fnuz}"
-        )
         self._normalize_weights_and_scales(layer)
-        print(
-            f"[DIAG][Fp8MoE._process_block_quant] AFTER normalize: "
-            f"w13 dtype={layer.w13_weight.dtype} "
-            f"w13_scale min={layer.w13_weight_scale.data.min().item():.6f} "
-            f"max={layer.w13_weight_scale.data.max().item():.6f} "
-            f"mean={layer.w13_weight_scale.data.float().mean().item():.6f}"
-        )
 
         if not self.need_normalize_e4m3fn_to_e4m3fnuz:
             layer.w13_weight = nn.Parameter(layer.w13_weight.data, requires_grad=False)
@@ -1636,7 +1623,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             )
 
         shuffle_weights(layer.w13_weight, layer.w2_weight)
-        print(f"[DIAG][Fp8MoE._process_block_quant] DONE shuffle")
 
     def _process_channel_quant(self, layer: nn.Module) -> None:
         """PTPTC"""
@@ -1767,17 +1753,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         # per_Tensor doesn't support num_local_tokens, so fallback to
         # rocm_aiter_fused_moe when using per-tensor or no modular kernel.
         if self.quant_type == QuantType.per_Tensor or self.fused_experts is None:
-            if not hasattr(self, "_diag_apply_printed"):
-                self._diag_apply_printed = True
-                print(
-                    f"[DIAG][Fp8MoE.apply] rocm_aiter path: "
-                    f"quant_type={self.quant_type} "
-                    f"w13 dtype={layer.w13_weight.dtype} shape={tuple(layer.w13_weight.shape)} "
-                    f"w13_scale shape={tuple(layer.w13_weight_scale.shape)} "
-                    f"w13_scale min={layer.w13_weight_scale.data.float().min().item():.6f} "
-                    f"max={layer.w13_weight_scale.data.float().max().item():.6f} "
-                    f"x dtype={x.dtype} shape={tuple(x.shape)}"
-                )
             return torch.ops.aiter.rocm_aiter_fused_moe(
                 x,
                 layer.w13_weight,

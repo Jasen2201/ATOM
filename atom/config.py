@@ -916,7 +916,7 @@ class Config:
             # Compatible with both transformers < 5
             rope_params = getattr(self.hf_config, "rope_scaling", {}) or {}
             rope_params["rope_theta"] = self.hf_config.rope_theta
-            rope_params["rope_type"] = getattr(rope_params, "rope_type", "default")
+            rope_params["rope_type"] = rope_params.get("rope_type", "default")
             self.hf_config.rope_parameters = rope_params
         self.quant_config = QuantizationConfig(
             self.hf_config,
