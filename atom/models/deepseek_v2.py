@@ -70,7 +70,6 @@ from atom.model_ops.linear import (
 from atom.model_ops.utils import MXFP4_QUANT_BLOCK_SIZE, _has_module, quark_post_load_weights
 from atom.model_ops.moe import FusedMoE
 from atom.model_ops.topK import is_rocm_aiter_fusion_shared_expert_enabled
-from atom.model_ops.utils import MXFP4_QUANT_BLOCK_SIZE
 from atom.models.utils import (
     IntermediateTensors,
     PPMissingLayer,
@@ -85,23 +84,6 @@ from atom.utils.forward_context import get_forward_context
 from torch import nn
 from transformers import PretrainedConfig
 from atom.plugin.prepare import is_sglang
-
-# from vllm.model_executor.layers.quantization.utils.fp8_utils import per_token_group_quant_fp8
-
-from sglang.srt.layers.communicator import AttentionInputs, get_attn_tp_context
-from sglang.srt.layers.attention.nsa.utils import nsa_use_prefill_cp
-from sglang.srt.model_executor.cuda_graph_runner import get_is_capture_mode
-from sglang.srt.configs.model_config import is_deepseek_nsa
-from sglang.srt.models.deepseek_common.utils import _use_aiter_gfx95, _use_aiter, _is_gfx95_supported, _is_hip
-from sglang.srt.layers.quantization.rocm_mxfp4_utils import batched_gemm_afp4wfp4_pre_quant
-from aiter.ops.triton.batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant import (
-        batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant,
-)
-from sglang.srt.layers.quantization.fp8_kernel import (
-    fp8_dtype,
-    per_tensor_quant_mla_fp8,
-    per_token_group_quant_mla_deep_gemm_masked_fp8,
-)
 
 logger = logging.getLogger("atom")
 if use_triton_gemm():
@@ -123,33 +105,6 @@ if use_triton_gemm():
         gemm_a8w8_blockscale_preshuffle = None
         gemm_a16w8_blockscale_preshuffle = None
 
-
-from sgl_kernel import bmm_fp8 as _raw_bmm_fp8
-
-from sglang.srt.utils.custom_op import register_custom_op
-
-# TODO(yuwei): remove this wrapper after sgl-kernel registers its own fake/meta impl
-# Wrap bmm_fp8 as a custom op so torch.compile does not trace into
-# torch.cuda.current_blas_handle() (which returns a non-Tensor).
-@register_custom_op(mutates_args=["out"])
-def _bmm_fp8_op(
-    A: torch.Tensor,
-    B: torch.Tensor,
-    out: torch.Tensor,
-    A_scale: torch.Tensor,
-    B_scale: torch.Tensor,
-) -> None:
-    _raw_bmm_fp8(A, B, A_scale, B_scale, out.dtype, out)
-
-def bmm_fp8(A, B, A_scale, B_scale, dtype, out=None):
-    if out is None:
-        out = torch.empty(
-            (A.shape[0], A.shape[1], B.shape[2]),
-            device=A.device,
-            dtype=dtype,
-        )
-    _bmm_fp8_op(A, B, out, A_scale, B_scale)
-    return out
 
 ENABLE_DS_QKNORM_QUANT_FUSION = envs.ATOM_ENABLE_DS_QKNORM_QUANT_FUSION
 ENABLE_ALLREDUCE_RMSNORM_FUSION = envs.ATOM_ENABLE_ALLREDUCE_RMSNORM_FUSION
@@ -1498,282 +1453,11 @@ class DeepseekV2MLAAttention(nn.Module):
                 self.quant_dtype = layer_quant_dtype
                 self.fuse_qknorm_quant = True
 
-        # for sglang plugin mode
-        self.use_nsa = is_deepseek_nsa(config)
-        self.use_deep_gemm_bmm = False
-        self.alt_stream = None
-        self.use_fused_qk_rope_concat_and_cache_mla = _use_aiter_gfx95
-        self.w_kc, self.w_vc = None, None
-        self.w_scale = None
-        self.w_scale_k = None
-        self.w_scale_v = None
+        # sglang plugin mode attributes (lazily initialised)
+        if is_sglang():
+            from atom.plugin.sglang.mla import init_sgl_attrs
 
-    def _mla_absorbed_bmm(self, inp, weight, weight_scale, weight_scale_k, out_dim):
-        """Shared batched matmul for MLA absorbed weights (w_kc / w_vc).
-
-        Handles deep_gemm, mxfp4, fp8-triton, fp8-cublas, and bf16 fallback paths.
-        inp: (num_tokens, num_heads, in_dim) — token-major
-        Returns: (num_tokens, num_heads, out_dim) — token-major
-        """
-        if self.use_deep_gemm_bmm:
-            val, scale, masked_m, expected_m, aligned_m = (
-                per_token_group_quant_mla_deep_gemm_masked_fp8(inp.transpose(0, 1))
-            )
-            out = inp.new_empty((self.num_local_heads, aligned_m, out_dim))
-            deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_masked(
-                (val, scale), (weight, weight_scale_k), out, masked_m, expected_m,
-            )
-            return out[:, :expected_m, :].transpose(0, 1)
-
-        if _is_hip:
-            if _use_aiter_gfx95 and weight.dtype == torch.uint8:
-                x = inp.transpose(0, 1)
-                out = torch.empty(
-                    x.shape[0], x.shape[1], weight.shape[2],
-                    device=x.device, dtype=torch.bfloat16,
-                )
-                batched_gemm_afp4wfp4_pre_quant(
-                    x, weight.transpose(-2, -1),
-                    weight_scale_k.transpose(-2, -1),
-                    torch.bfloat16, out,
-                )
-                return out.transpose(0, 1)
-
-            if (_use_aiter_gfx95 and weight.dtype == torch.float8_e4m3fn) or (
-                get_is_capture_mode() and weight.dtype == torch.float8_e4m3fnuz
-            ):
-                out = batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant(
-                    X=inp, WQ=weight.transpose(-1, -2),
-                    w_scale=weight_scale, group_size=128,
-                    YQ=None, transpose_bm=False, transpose_bm_in=True,
-                    dtype=torch.bfloat16,
-                )
-                return out.transpose(0, 1)
-
-            out = torch.bmm(
-                inp.to(torch.bfloat16).transpose(0, 1),
-                weight.to(torch.bfloat16) * weight_scale,
-            )
-            return out.transpose(0, 1)
-
-        # CUDA fp8 path
-        if weight.dtype == torch.float8_e4m3fn:
-            val, scale = per_tensor_quant_mla_fp8(
-                inp.transpose(0, 1),
-                torch.zeros((1,), dtype=torch.float32, device=inp.device),
-            )
-            out = bmm_fp8(val, weight, scale, weight_scale, torch.bfloat16)
-            return out.transpose(0, 1)
-
-        # bf16 fallback
-        return torch.bmm(inp.transpose(0, 1), weight).transpose(0, 1)
-
-    def _forward_sgl_prepare(
-        self,
-        positions: torch.Tensor,
-        hidden_states: torch.Tensor,
-        **model_kwargs: dict[str, Any] | None
-    ) -> torch.Tensor:
-        hidden_states_scale = None
-        if isinstance(hidden_states, tuple):
-            hidden_states, hidden_states_scale = hidden_states
-
-        forward_batch = model_kwargs.get("forward_batch", None)
-        zero_allocator = model_kwargs.get("zero_allocator", None)
-        llama_4_scaling = model_kwargs.get("llama_4_scaling", None)
-        q_lora = None
-        topk_indices = None
-        if self.q_lora_rank is not None:
-            q, latent_cache = (
-                get_attn_tp_context()
-                .fetch_qkv_latent()
-                .split(
-                    [self.q_lora_rank, self.kv_lora_rank + self.qk_rope_head_dim],
-                    dim=-1,
-                )
-            )
-
-            if q.shape[0] != positions.shape[0] and get_tensor_model_parallel_world_size() > 1:
-                qkv_lora = torch.cat([q, latent_cache], dim=-1)
-                qkv_lora = get_tp_group().all_gather(qkv_lora, dim=0)
-                if qkv_lora.shape[0] < positions.shape[0]:
-                    raise RuntimeError(
-                        f"qkv_lora gather mismatch: got {qkv_lora.shape[0]}, expected {positions.shape[0]}"
-                    )
-                qkv_lora = qkv_lora[: positions.shape[0]]
-                q, latent_cache = torch.split(
-                    qkv_lora,
-                    [self.q_lora_rank, self.kv_lora_rank + self.qk_rope_head_dim],
-                    dim=-1,
-                )
-
-            k_nope = latent_cache[..., : self.kv_lora_rank]
-
-            # overlap qk norm
-            if self.alt_stream is not None and get_is_capture_mode():
-                current_stream = torch.cuda.current_stream()
-                self.alt_stream.wait_stream(current_stream)
-                q = self.q_a_layernorm(q)
-                with torch.cuda.stream(self.alt_stream):
-                    k_nope = self.kv_a_layernorm(k_nope)
-                current_stream.wait_stream(self.alt_stream)
-            else:
-                q = self.q_a_layernorm(q)
-                k_nope = self.kv_a_layernorm(k_nope)
-
-            if self.use_nsa:
-                if q_lora is None:
-                    q_lora = q
-
-            # overlap q_b_proj and indexer during decode
-            if (
-                self.alt_stream is not None
-                and get_is_capture_mode()
-                and forward_batch.forward_mode.is_decode_or_idle()
-                and q_lora is not None
-            ):
-                current_stream = torch.cuda.current_stream()
-                self.alt_stream.wait_stream(current_stream)
-                with torch.cuda.stream(self.alt_stream):
-                    k_nope = k_nope.unsqueeze(1)
-                    q = self.q_b_proj(q).view(
-                        -1, self.num_local_heads, self.qk_head_dim
-                    )
-                topk_indices = self.indexer(
-                    x=hidden_states, q_lora=q_lora, positions=positions,
-                    forward_batch=forward_batch, layer_id=self.layer_num,
-                )
-                current_stream.wait_stream(self.alt_stream)
-            else:
-                k_nope = k_nope.unsqueeze(1)
-                q = self.q_b_proj(q).view(-1, self.num_local_heads, self.qk_head_dim)
-                if q_lora is not None:
-                    topk_indices = self.indexer(
-                        x=hidden_states, q_lora=q_lora, positions=positions,
-                        forward_batch=forward_batch, layer_id=self.layer_num,
-                    )
-        else:
-            q = self.q_proj(hidden_states).view(
-                -1, self.num_local_heads, self.qk_head_dim
-            )
-            latent_cache = self.kv_a_proj_with_mqa(hidden_states)[0]
-            k_nope = latent_cache[..., : self.kv_lora_rank]
-            k_nope = self.kv_a_layernorm(k_nope).unsqueeze(1)
-
-        q_nope, q_pe = q.split([self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
-        k_pe = latent_cache[..., self.kv_lora_rank :].unsqueeze(1)
-
-        q_nope_out = self._mla_absorbed_bmm(
-            q_nope, self.w_kc, self.w_scale, self.w_scale_k, self.kv_lora_rank,
-        )
-
-        if self.rotary_emb is not None and not self.use_fused_qk_rope_concat_and_cache_mla:
-            q_pe, k_pe = self.rotary_emb(positions, q_pe, k_pe)
-
-        if nsa_use_prefill_cp(forward_batch):
-            k_nope, k_pe = self.rebuild_cp_kv_cache(
-                latent_cache, forward_batch, k_nope, k_pe
-            )
-
-        return (
-            q_pe, k_pe, q_nope_out, k_nope,
-            forward_batch, zero_allocator, positions, topk_indices, llama_4_scaling,
-        )
-
-    def _forward_sgl_core(
-        self,
-        q_pe, k_pe, q_nope_out, k_nope,
-        forward_batch, zero_allocator, positions, topk_indices, llama_4_scaling,
-    ):
-        save_kv_cache = True
-
-        if self.use_fused_qk_rope_concat_and_cache_mla:
-            cos = self.rotary_emb.cos_cache
-            sin = self.rotary_emb.sin_cache
-            kv_cache = forward_batch.token_to_kv_pool.get_key_buffer(self.layer_num)
-            k_scale = self.mla_attn.attn.k_scale
-
-            q, _, k_pe_roped, _ = fused_qk_rope_cat_and_cache_mla(
-                q_nope_out, q_pe, k_nope, k_pe,
-                kv_cache, forward_batch.out_cache_loc, positions,
-                cos, sin, k_scale, self.rotary_emb.is_neox_style,
-                q_out_dtype=q_nope_out.dtype,
-            )
-            k = torch.cat([k_nope, k_pe_roped], dim=-1)
-            save_kv_cache = False
-        else:
-            q = torch.cat([q_nope_out, q_pe], dim=-1)
-            k = torch.cat([k_nope, k_pe], dim=-1)
-
-        if llama_4_scaling is not None:
-            q = q * llama_4_scaling
-
-        attn_output = self.mla_attn(
-            q, k, k_nope,
-            forward_batch=forward_batch,
-            save_kv_cache=save_kv_cache,
-            **(dict(topk_indices=topk_indices) if topk_indices is not None else {}),
-        )
-        attn_output = attn_output.view(-1, self.num_local_heads, self.kv_lora_rank)
-
-        # up-proj by w_vc
-        attn_bmm_output = self._mla_absorbed_bmm(
-            attn_output, self.w_vc, self.w_scale, self.w_scale_v, self.v_head_dim,
-        ).flatten(1, 2)
-
-        return self.o_proj(attn_bmm_output)
-
-    def prepare_qkv_latent(self, hidden_states: torch.Tensor, forward_batch):
-        assert self.q_lora_rank is not None
-        hidden_states_scale = None
-        if isinstance(hidden_states, tuple):
-            hidden_states, hidden_states_scale = hidden_states
-        qkv_lora = self.fused_qkv_a_proj(hidden_states, hidden_states_scale)
-
-        # Fallback: when communicator does not enable input_scattered gather,
-        # force qkv latent token dimension to align with positions.
-        expected_tokens = 0
-        if hasattr(forward_batch, "positions") and forward_batch.positions is not None:
-            expected_tokens = int(forward_batch.positions.shape[0])
-        if expected_tokens <= 0:
-            expected_tokens = int(getattr(forward_batch, "seq_lens_sum", 0) or 0)
-
-        if (
-            expected_tokens > 0
-            and qkv_lora.shape[0] != expected_tokens
-            and get_tensor_model_parallel_world_size() > 1
-        ):
-            qkv_lora = get_tp_group().all_gather(qkv_lora, dim=0)
-            if qkv_lora.shape[0] > expected_tokens:
-                qkv_lora = qkv_lora[:expected_tokens]
-            elif qkv_lora.shape[0] < expected_tokens:
-                raise RuntimeError(
-                    f"prepare_qkv_latent gather mismatch: got {qkv_lora.shape[0]}, "
-                    f"expected {expected_tokens}"
-                )
-        return qkv_lora
-
-    def forward_sgl_plugin_mode(
-        self,
-        positions: torch.Tensor,
-        hidden_states: torch.Tensor,
-        **model_kwargs: dict[str, Any] | None
-    ) -> torch.Tensor:
-        from sglang.srt.model_executor.cuda_graph_runner import get_is_capture_mode
-        forward_batch = model_kwargs.get("forward_batch", None)
-        if forward_batch is None:
-            raise RuntimeError("forward_batch is required in forward_sgl_plugin_mode")
-
-        attn_tp_context = get_attn_tp_context()
-        with attn_tp_context.maybe_input_scattered(forward_batch):
-            if self.q_lora_rank is not None:
-                attn_tp_context.set_attn_inputs(
-                    AttentionInputs(
-                        hidden_states, forward_batch, self.prepare_qkv_latent,
-                    )
-                )
-            prepared = self._forward_sgl_prepare(positions, hidden_states, **model_kwargs)
-            return self._forward_sgl_core(*prepared)
+            init_sgl_attrs(self, config)
 
     def forward_common(
         self,
@@ -1876,191 +1560,16 @@ class DeepseekV2MLAAttention(nn.Module):
         **model_kwargs: dict[str, Any] | None
     ) -> torch.Tensor:
         if is_sglang():
-            attn_output = self.forward_sgl_plugin_mode(positions, hidden_states, **model_kwargs)
-        else:
-            attn_output = self.forward_common(positions, hidden_states, **model_kwargs)
-        return attn_output
+            from atom.plugin.sglang.mla import forward_sgl_plugin_mode
+            return forward_sgl_plugin_mode(self, positions, hidden_states, **model_kwargs)
+        return self.forward_common(positions, hidden_states, **model_kwargs)
 
     def process_weights_after_loading(self) -> None:
         # only for sglang plugin mode
         if not is_sglang():
             return
-        self._process_mla_kv_b_proj_after_loading_sgl()
-
-    def _process_mla_kv_b_proj_after_loading_sgl(self) -> None:
-        # lazy imports: only needed for sglang plugin path
-        from atom.model_ops.utils import normalize_e4m3fn_to_e4m3fnuz
-        from sglang.srt.layers.quantization.fp8_utils import (
-            block_quant_dequant,
-            block_quant_to_tensor_quant,
-            channel_quant_to_tensor_quant,
-            inverse_transform_scale_ue8m0,
-        )
-        from sglang.srt.layers.quantization.int8_utils import (
-            block_dequant as int8_block_dequant,
-        )
-        from sglang.srt.layers.deep_gemm_wrapper import (
-            ENABLE_JIT_DEEPGEMM,
-            DEEPGEMM_BLACKWELL,
-        )
-        from sglang.srt.model_loader.utils import should_deepgemm_weight_requant_ue8m0
-        from sglang.srt.models.deepseek_common.utils import (
-            _is_cpu,
-            _is_cpu_amx_available,
-            _is_cuda,
-            _is_fp8_fnuz,
-            _is_hip,
-            _is_npu,
-            _use_aiter_gfx95,
-            awq_dequantize_func,
-        )
-        from sglang.srt.utils import bind_or_assign, get_bool_env_var
-
-        # read kv_b_proj weight (awq compatible)
-        if hasattr(self.kv_b_proj, "qweight"):
-            awq_dequantize_f = awq_dequantize_func()
-            if awq_dequantize_f is None:
-                raise ValueError("AWQ dequantize function is not supported for current device")
-            w = awq_dequantize_f(
-                self.kv_b_proj.qweight,
-                self.kv_b_proj.scales,
-                self.kv_b_proj.qzeros,
-            ).T
-        else:
-            w = self.kv_b_proj.weight
-
-        # On ROCm, ATOM creates parameters with fnuz dtype but loads fn bytes
-        # into them (weight_loader_process view-casts a detached copy, leaving
-        # the nn.Parameter as fnuz). At this point LinearBase's
-        # process_weights_after_loading hasn't run yet (parent module iterates
-        # before child in named_modules). View-cast back to fn so the
-        # normalize path works correctly.
-        if _is_fp8_fnuz and w.dtype == torch.float8_e4m3fnuz:
-            w = w.view(torch.float8_e4m3fn)
-
-        use_deep_gemm_bmm = False
-        block_scale = None
-        weight_block_size = None
-
-        # Derive weight_block_size from ATOM's quant_type system
-        from aiter import QuantType as _AiterQuantType
-        _atom_qt = getattr(self.kv_b_proj, "quant_type", None)
-        if _atom_qt == _AiterQuantType.per_1x128:
-            weight_block_size = [128, 128]
-        elif _atom_qt == _AiterQuantType.per_1x32:
-            weight_block_size = [1, 32]
-
-        # fp8 path
-        if w.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz):
-            if weight_block_size is not None:
-                assert hasattr(self.kv_b_proj, "weight_scale_inv") or hasattr(self.kv_b_proj, "weight_scale")
-                weight_scale = (
-                    self.kv_b_proj.weight_scale
-                    if hasattr(self.kv_b_proj, "weight_scale")
-                    else self.kv_b_proj.weight_scale_inv
-                )
-
-                if _is_fp8_fnuz and w.dtype == torch.float8_e4m3fn:
-                    weight, weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
-                        weight=w,
-                        weight_scale=weight_scale,
-                        input_scale=None,
-                    )
-                else:
-                    weight = w
-
-                if (
-                    should_deepgemm_weight_requant_ue8m0(
-                        weight_block_size=weight_block_size
-                    )
-                    and getattr(weight_scale, "format_ue8m0", False)
-                ):
-                    weight_scale = inverse_transform_scale_ue8m0(weight_scale, mn=weight.shape[-2])
-
-                if _is_cuda and weight_block_size[0] == 128 and weight_block_size[1] == 128:
-                    if (
-                        ENABLE_JIT_DEEPGEMM
-                        and not DEEPGEMM_BLACKWELL
-                        and get_bool_env_var("SGL_USE_DEEPGEMM_BMM", "false")
-                    ):
-                        block_scale = weight_scale
-                        use_deep_gemm_bmm = True
-                    else:
-                        w = block_quant_dequant(
-                            weight,
-                            weight_scale,
-                            weight_block_size,
-                            torch.bfloat16,
-                        )
-                else:
-                    w, scale = block_quant_to_tensor_quant(weight, weight_scale, weight_block_size)
-                    self.w_scale = scale
-            else:
-                if w.dtype == torch.float8_e4m3fn and _is_fp8_fnuz:
-                    weight, weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
-                        weight=w,
-                        weight_scale=self.kv_b_proj.weight_scale,
-                        input_scale=None,
-                    )
-                else:
-                    weight = w
-                    weight_scale = self.kv_b_proj.weight_scale
-
-                w, scale = channel_quant_to_tensor_quant(weight, weight_scale)
-                self.w_scale = scale
-
-        # int8 path
-        if w.dtype == torch.int8:
-            if weight_block_size is not None:
-                assert hasattr(self.kv_b_proj, "weight_scale_inv")
-                w = int8_block_dequant(
-                    w,
-                    self.kv_b_proj.weight_scale_inv,
-                    weight_block_size,
-                ).to(torch.bfloat16)
-            else:
-                w = w.to(torch.bfloat16) * self.kv_b_proj.weight_scale.to(torch.bfloat16)
-
-        # split to kc/vc
-        w_kc, w_vc = w.unflatten(
-            0, (-1, self.qk_nope_head_dim + self.v_head_dim)
-        ).split([self.qk_nope_head_dim, self.v_head_dim], dim=1)
-
-        # quark fp4 special path (ATOM utility)
-        quant_method = getattr(self.kv_b_proj, "quant_method", None)
-        quant_config = getattr(quant_method, "quant_config", None)
-        if _use_aiter_gfx95 and quant_config is not None and quant_config.get_name() == "quark":
-            w_kc, self.w_scale_k, w_vc, self.w_scale_v = quark_post_load_weights(self, w, "mxfp4")
-
-        if not use_deep_gemm_bmm:
-            self.w_kc = bind_or_assign(
-                self.w_kc, w_kc.transpose(1, 2).contiguous().transpose(1, 2)
-            )
-            w_vc = w_vc.contiguous().transpose(1, 2)
-            if _is_npu:
-                w_vc = w_vc.contiguous()
-            self.w_vc = bind_or_assign(self.w_vc, w_vc)
-
-            if hasattr(self.kv_b_proj, "weight_scale") and self.w_scale is None:
-                self.w_scale = bind_or_assign(self.w_scale, self.kv_b_proj.weight_scale)
-                if _is_hip:
-                    self.w_scale *= 2.0
-
-            if _is_cpu and _is_cpu_amx_available and w.dtype == torch.float8_e4m3fn:
-                self.w_kc = self.w_kc.to(torch.bfloat16) * self.w_scale
-                self.w_vc = self.w_vc.to(torch.bfloat16) * self.w_scale
-        else:
-            num_tiles_k = self.qk_nope_head_dim // weight_block_size[1]
-            num_tiles_n = self.v_head_dim // weight_block_size[0]
-            ws_kc, ws_vc = block_scale.unflatten(0, (-1, (num_tiles_k + num_tiles_n))).split(
-                [num_tiles_k, num_tiles_n], dim=1
-            )
-
-            self.w_scale_k = bind_or_assign(self.w_scale_k, ws_kc.transpose(1, 2).contiguous())
-            self.w_scale_v = bind_or_assign(self.w_scale_v, ws_vc.contiguous())
-            self.w_kc = bind_or_assign(self.w_kc, w_kc.transpose(1, 2).contiguous())
-            self.w_vc = bind_or_assign(self.w_vc, w_vc.contiguous())
-            self.use_deep_gemm_bmm = True
+        from atom.plugin.sglang.mla import process_mla_kv_b_proj_after_loading
+        process_mla_kv_b_proj_after_loading(self)
 
 
 class DeepseekV2DecoderLayer(nn.Module):
@@ -2262,6 +1771,7 @@ class DeepseekV2Model(nn.Module):
         prefix: str = "",
         layer_type: type[nn.Module] = DeepseekV2DecoderLayer,
     ):
+        # logger.info(f"atom call DeepseekV2Model")
         super().__init__()
 
         config = atom_config.hf_config
@@ -2415,6 +1925,7 @@ class DeepseekV2ForCausalLM(nn.Module):
 
         if is_sglang():
             from sglang.srt.configs.model_config import is_deepseek_nsa
+            from sglang.srt.layers.communicator import get_attn_tp_context
             get_attn_tp_context().init_context(config.q_lora_rank, is_deepseek_nsa(config))
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:

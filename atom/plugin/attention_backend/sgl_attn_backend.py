@@ -271,251 +271,210 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
 
     def init_forward_metadata(self, forward_batch: ForwardBatch):
         """Init auxiliary variables for triton attention backend."""
-        bs = forward_batch.batch_size
-        kv_indptr = self.kv_indptr
-        spec_info = forward_batch.spec_info
-        qo_indptr = None
-        kv_last_page_len = None
-        max_q_len = None
-        page_table = None
-
         if forward_batch.forward_mode.is_decode_or_idle():
-            if spec_info is None:
-                kv_indptr[1 : bs + 1] = torch.cumsum(forward_batch.seq_lens, dim=0)
-                kv_indptr = kv_indptr[: bs + 1]
-                kv_indices = torch.empty(
-                    forward_batch.seq_lens_sum, dtype=torch.int32, device=self.device
-                )
-                create_flashinfer_kv_indices_triton[(bs,)](
-                    self.req_to_token,
-                    forward_batch.req_pool_indices,
-                    forward_batch.seq_lens,
-                    kv_indptr,
-                    None,
-                    kv_indices,
-                    self.req_to_token.stride(0),
-                )
-            else:
-                kv_indptr, kv_indices = spec_info.kv_indptr, spec_info.kv_indices
-                bs = kv_indptr.shape[0] - 1
-
-            if self.use_mla:
-                qo_indptr = self.qo_indptr_[: bs + 1]
-                qo_indptr[1 : bs + 1] = torch.cumsum(self.kv_last_page_len[:bs], dim=0)
-                kv_last_page_len = self.kv_last_page_len[:bs]
-                max_q_len = 1
-
-                work_metadata = None
-                work_indptr = None
-                work_info_set = None
-                reduce_indptr = None
-                reduce_final_map = None
-                reduce_partial_map = None
-                num_kv_splits = None
-
-                if _sglang_aiter._use_mla_ps_kernel:
-                    (
-                        work_metadata,
-                        work_indptr,
-                        work_info_set,
-                        reduce_indptr,
-                        reduce_final_map,
-                        reduce_partial_map,
-                    ) = self.make_mla_decode_meta_data_buffer(max_q_len, bs)
-
-                    num_kv_splits = self.max_split_per_batch
-
-                    self.make_mla_meta_data(
-                        qo_indptr,
-                        kv_indptr,
-                        kv_last_page_len,
-                        work_metadata,
-                        work_info_set,
-                        work_indptr,
-                        reduce_indptr,
-                        reduce_final_map,
-                        reduce_partial_map,
-                        max_q_len,
-                        fast_mode=_sglang_aiter.fast_mode,
-                        max_split_per_batch=num_kv_splits,
-                        intra_batch_mode=_sglang_aiter.intra_batch_mode,
-                    )
-
-                self.forward_metadata = ForwardMetadata(
-                    kv_indptr,
-                    kv_indices,
-                    qo_indptr,
-                    kv_last_page_len,
-                    max_q_len,
-                    None,  # max_kv_len
-                    None,  # page_table
-                    None,  # kv_lens
-                    work_metadata=work_metadata,
-                    work_info_set=work_info_set,
-                    work_indptr=work_indptr,
-                    reduce_indptr=reduce_indptr,
-                    reduce_final_map=reduce_final_map,
-                    reduce_partial_map=reduce_partial_map,
-                    num_kv_splits=num_kv_splits,
-                )
-
-            else:
-                if self.decode_using_pa_ps:
-                    # Non-MLA decode mode: use same logic as CUDA Graph mode for page_table construction
-                    seq_lens_cpu = forward_batch.seq_lens_cpu
-                    if seq_lens_cpu is None:
-                        seq_lens_cpu = forward_batch.seq_lens.cpu()
-
-                    # Common setup consistent with CUDA Graph mode (init_forward_metadata_replay_cuda_graph)
-                    page_table_persistent = self.page_table
-                    seq_lens_persistent = self.seq_lens
-                    seq_lens_persistent.fill_(0)
-                    page_table_persistent.fill_(0)
-                    seq_lens_persistent[:bs].copy_(
-                        forward_batch.seq_lens, non_blocking=True
-                    )
-                    max_seq_pages = (
-                        seq_lens_cpu.max().item() + self.page_size - 1
-                    ) // self.page_size + 1
-                    page_table = self.req_to_token[
-                        forward_batch.req_pool_indices[:, None],
-                        self.strided_indices[:max_seq_pages][None, :],
-                    ]
-                    page_table_persistent[:bs, :max_seq_pages].copy_(
-                        page_table // self.page_size, non_blocking=True
-                    )
-                else:
-                    page_table = forward_batch.req_to_token_pool.req_to_token[
-                        forward_batch.req_pool_indices, :
-                    ]
-
-                self.forward_metadata = ForwardMetadata(
-                    kv_indptr,
-                    kv_indices,
-                    None,  # qo_indptr not used in non-MLA mode
-                    None,  # kv_last_page_len not used in non-MLA mode
-                    1,  # max_q_len = 1 for decode mode
-                    None,
-                    (
-                        page_table_persistent[:bs, :max_seq_pages]
-                        if self.decode_using_pa_ps
-                        else page_table
-                    ),
-                    (
-                        seq_lens_persistent[:bs]
-                        if self.decode_using_pa_ps
-                        else forward_batch.seq_lens
-                    ),
-                )
-
-                # Build pa_metadata for pa_persistent_fwd
-                if self.decode_using_pa_ps:
-                    self._build_pa_metadata_for_decode(bs, tp_q_head_num=self.num_head)
+            self._init_forward_metadata_decode(forward_batch)
         else:
-            prefix_lens = forward_batch.extend_prefix_lens
+            self._init_forward_metadata_extend(forward_batch)
+        self._fixup_page_table(forward_batch)
 
-            if self.use_mla:
-                self.mla_indices_updater_prefill.update(
-                    forward_batch.req_pool_indices,
-                    forward_batch.seq_lens,
-                    forward_batch.seq_lens_sum,
-                    forward_batch.extend_seq_lens,
-                    forward_batch.extend_seq_lens.max().item(),
-                    forward_batch.seq_lens.max().item(),
-                    spec_info=None
-                )
+    def _init_forward_metadata_decode(self, forward_batch: ForwardBatch):
+        bs = forward_batch.batch_size
+        spec_info = forward_batch.spec_info
 
-                max_q_len = self.mla_indices_updater_prefill.max_q_len
-                qo_indptr = self.mla_indices_updater_prefill.qo_indptr
+        if spec_info is None:
+            kv_indptr = self.kv_indptr
+            kv_indptr[1 : bs + 1] = torch.cumsum(forward_batch.seq_lens, dim=0)
+            kv_indptr = kv_indptr[: bs + 1]
+            kv_indices = torch.empty(
+                forward_batch.seq_lens_sum, dtype=torch.int32, device=self.device
+            )
+            create_flashinfer_kv_indices_triton[(bs,)](
+                self.req_to_token,
+                forward_batch.req_pool_indices,
+                forward_batch.seq_lens,
+                kv_indptr,
+                None,
+                kv_indices,
+                self.req_to_token.stride(0),
+            )
+        else:
+            kv_indptr, kv_indices = spec_info.kv_indptr, spec_info.kv_indices
+            bs = kv_indptr.shape[0] - 1
 
-                work_metadata = None
-                work_indptr = None
-                work_info_set = None
-                reduce_indptr = None
-                reduce_final_map = None
-                fp8_prefill_kv_indices = None
-                reduce_partial_map = None
+        if self.use_mla:
+            self._init_decode_mla(bs, kv_indptr, kv_indices)
+        else:
+            self._init_decode_mha(bs, kv_indptr, kv_indices, forward_batch)
 
-                from sglang.srt.utils import is_gfx95_supported
-                _use_fp8_prefill_attn = (
-                    get_bool_env_var("SGLANG_AITER_FP8_PREFILL_ATTN", "True") and is_gfx95_supported()
-                )
-                if _use_fp8_prefill_attn:
-                    tile_q = 256
-                    qlen_granularity = tile_q // (self.num_head // self.num_kv_head)
-                    (
-                        work_metadata,
-                        work_indptr,
-                        work_info_set,
-                        reduce_indptr,
-                        reduce_final_map,
-                        reduce_partial_map
-                    ) = self.make_mla_prefill_ps_meta_data_buffer(
-                        bs, max_q_len, qlen_granularity
-                    )
+    def _init_decode_mla(self, bs, kv_indptr, kv_indices):
+        qo_indptr = self.qo_indptr_[: bs + 1]
+        qo_indptr[1 : bs + 1] = torch.cumsum(self.kv_last_page_len[:bs], dim=0)
+        kv_last_page_len = self.kv_last_page_len[:bs]
+        max_q_len = 1
 
+        work_metadata = None
+        work_indptr = None
+        work_info_set = None
+        reduce_indptr = None
+        reduce_final_map = None
+        reduce_partial_map = None
+        num_kv_splits = None
 
-                    self.make_mla_prefill_ps_meta_data(
-                        qo_indptr,
-                        qo_indptr,
-                        forward_batch.seq_lens,
-                        work_metadata,
-                        work_indptr,
-                        work_info_set,
-                        reduce_indptr,
-                        reduce_final_map,
-                        reduce_partial_map,
-                        is_causal=True,
-                    )
+        if _sglang_aiter._use_mla_ps_kernel:
+            (
+                work_metadata, work_indptr, work_info_set,
+                reduce_indptr, reduce_final_map, reduce_partial_map,
+            ) = self.make_mla_decode_meta_data_buffer(max_q_len, bs)
+            num_kv_splits = self.max_split_per_batch
+            self.make_mla_meta_data(
+                qo_indptr, kv_indptr, kv_last_page_len,
+                work_metadata, work_info_set, work_indptr,
+                reduce_indptr, reduce_final_map, reduce_partial_map,
+                max_q_len,
+                fast_mode=_sglang_aiter.fast_mode,
+                max_split_per_batch=num_kv_splits,
+                intra_batch_mode=_sglang_aiter.intra_batch_mode,
+            )
 
-                    total_s = int(forward_batch.extend_seq_lens.sum())
-                    fp8_prefill_kv_indices = torch.arange(
-                        total_s, device=self.device, dtype=torch.int32
-                    )
+        self.forward_metadata = ForwardMetadata(
+            kv_indptr, kv_indices, qo_indptr, kv_last_page_len,
+            max_q_len, None, None, None,
+            work_metadata=work_metadata, work_info_set=work_info_set,
+            work_indptr=work_indptr, reduce_indptr=reduce_indptr,
+            reduce_final_map=reduce_final_map, reduce_partial_map=reduce_partial_map,
+            num_kv_splits=num_kv_splits,
+        )
 
-                self.forward_metadata = ForwardMetadata(
-                    self.mla_indices_updater_prefill.kv_indptr,
-                    self.mla_indices_updater_prefill.kv_indices,
-                    qo_indptr,
-                    self.kv_last_page_len[:bs],
-                    max_q_len,
-                    self.mla_indices_updater_prefill.max_kv_len,
-                    None,
-                    None,
-                    work_metadata=work_metadata,
-                    work_info_set=work_info_set,
-                    work_indptr=work_indptr,
-                    reduce_indptr=reduce_indptr,
-                    reduce_final_map=reduce_final_map,
-                    reduce_partial_map=reduce_partial_map,
-                    fp8_prefill_kv_indices=fp8_prefill_kv_indices,
-                )
-            else:
-                self.indices_updater_prefill.update(
-                    forward_batch.req_pool_indices,
-                    forward_batch.seq_lens,
-                    forward_batch.seq_lens_sum,
-                    prefix_lens,
-                    encoder_lens=forward_batch.encoder_lens,
-                    spec_info=None,
-                )
-                # Get page_table for mha_batch_prefill_func
-                page_table = forward_batch.req_to_token_pool.req_to_token[
-                    forward_batch.req_pool_indices, :
-                ]
-                self.forward_metadata = ForwardMetadata(
-                    self.indices_updater_prefill.kv_indptr,
-                    self.indices_updater_prefill.kv_indices,
-                    self.qo_indptr[
-                        : bs + 1
-                    ],  # qo_indptr is set by indices_updater_prefill
-                    None,
-                    self.indices_updater_prefill.max_q_len,
-                    self.indices_updater_prefill.max_kv_len,
-                    None,
-                    forward_batch.seq_lens,
-                )
+    def _init_decode_mha(self, bs, kv_indptr, kv_indices, forward_batch):
+        if self.decode_using_pa_ps:
+            seq_lens_cpu = forward_batch.seq_lens_cpu
+            if seq_lens_cpu is None:
+                seq_lens_cpu = forward_batch.seq_lens.cpu()
 
+            page_table_persistent = self.page_table
+            seq_lens_persistent = self.seq_lens
+            seq_lens_persistent.fill_(0)
+            page_table_persistent.fill_(0)
+            seq_lens_persistent[:bs].copy_(forward_batch.seq_lens, non_blocking=True)
+            max_seq_pages = (
+                seq_lens_cpu.max().item() + self.page_size - 1
+            ) // self.page_size + 1
+            page_table = self.req_to_token[
+                forward_batch.req_pool_indices[:, None],
+                self.strided_indices[:max_seq_pages][None, :],
+            ]
+            page_table_persistent[:bs, :max_seq_pages].copy_(
+                page_table // self.page_size, non_blocking=True
+            )
+            self.forward_metadata = ForwardMetadata(
+                kv_indptr, kv_indices, None, None, 1, None,
+                page_table_persistent[:bs, :max_seq_pages],
+                seq_lens_persistent[:bs],
+            )
+            self._build_pa_metadata_for_decode(bs, tp_q_head_num=self.num_head)
+        else:
+            page_table = forward_batch.req_to_token_pool.req_to_token[
+                forward_batch.req_pool_indices, :
+            ]
+            self.forward_metadata = ForwardMetadata(
+                kv_indptr, kv_indices, None, None, 1, None,
+                page_table, forward_batch.seq_lens,
+            )
+
+    def _init_forward_metadata_extend(self, forward_batch: ForwardBatch):
+        bs = forward_batch.batch_size
+
+        if self.use_mla:
+            self._init_extend_mla(bs, forward_batch)
+        else:
+            self._init_extend_mha(bs, forward_batch)
+
+    def _init_extend_mla(self, bs, forward_batch):
+        self.mla_indices_updater_prefill.update(
+            forward_batch.req_pool_indices,
+            forward_batch.seq_lens,
+            forward_batch.seq_lens_sum,
+            forward_batch.extend_seq_lens,
+            forward_batch.extend_seq_lens.max().item(),
+            forward_batch.seq_lens.max().item(),
+            spec_info=None,
+        )
+
+        max_q_len = self.mla_indices_updater_prefill.max_q_len
+        qo_indptr = self.mla_indices_updater_prefill.qo_indptr
+
+        work_metadata = None
+        work_indptr = None
+        work_info_set = None
+        reduce_indptr = None
+        reduce_final_map = None
+        reduce_partial_map = None
+        fp8_prefill_kv_indices = None
+
+        from sglang.srt.utils import is_gfx95_supported
+        _use_fp8_prefill_attn = (
+            get_bool_env_var("SGLANG_AITER_FP8_PREFILL_ATTN", "True")
+            and is_gfx95_supported()
+        )
+        if _use_fp8_prefill_attn:
+            tile_q = 256
+            qlen_granularity = tile_q // (self.num_head // self.num_kv_head)
+            (
+                work_metadata, work_indptr, work_info_set,
+                reduce_indptr, reduce_final_map, reduce_partial_map,
+            ) = self.make_mla_prefill_ps_meta_data_buffer(
+                bs, max_q_len, qlen_granularity
+            )
+            self.make_mla_prefill_ps_meta_data(
+                qo_indptr, qo_indptr, forward_batch.seq_lens,
+                work_metadata, work_indptr, work_info_set,
+                reduce_indptr, reduce_final_map, reduce_partial_map,
+                is_causal=True,
+            )
+            total_s = int(forward_batch.extend_seq_lens.sum())
+            fp8_prefill_kv_indices = torch.arange(
+                total_s, device=self.device, dtype=torch.int32
+            )
+
+        self.forward_metadata = ForwardMetadata(
+            self.mla_indices_updater_prefill.kv_indptr,
+            self.mla_indices_updater_prefill.kv_indices,
+            qo_indptr,
+            self.kv_last_page_len[:bs],
+            max_q_len,
+            self.mla_indices_updater_prefill.max_kv_len,
+            None, None,
+            work_metadata=work_metadata, work_info_set=work_info_set,
+            work_indptr=work_indptr, reduce_indptr=reduce_indptr,
+            reduce_final_map=reduce_final_map, reduce_partial_map=reduce_partial_map,
+            fp8_prefill_kv_indices=fp8_prefill_kv_indices,
+        )
+
+    def _init_extend_mha(self, bs, forward_batch):
+        self.indices_updater_prefill.update(
+            forward_batch.req_pool_indices,
+            forward_batch.seq_lens,
+            forward_batch.seq_lens_sum,
+            forward_batch.extend_prefix_lens,
+            encoder_lens=forward_batch.encoder_lens,
+            spec_info=None,
+        )
+        page_table = forward_batch.req_to_token_pool.req_to_token[
+            forward_batch.req_pool_indices, :
+        ]
+        self.forward_metadata = ForwardMetadata(
+            self.indices_updater_prefill.kv_indptr,
+            self.indices_updater_prefill.kv_indices,
+            self.qo_indptr[: bs + 1],
+            None,
+            self.indices_updater_prefill.max_q_len,
+            self.indices_updater_prefill.max_kv_len,
+            None,
+            forward_batch.seq_lens,
+        )
+
+    def _fixup_page_table(self, forward_batch: ForwardBatch):
+        """Post-process page_table for non-MLA extend mode."""
         if (
             forward_batch.forward_mode.is_extend()
             and not self.use_mla
@@ -546,109 +505,38 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
                 // self.page_size
             )
 
-    def _allocate_pa_metadata_buffers(
-        self,
-        work_metadata_ptrs_size,
-        work_metadata_ptrs_type,
-        work_indptr_size,
-        work_indptr_type,
-        work_info_size,
-        work_info_type,
-        reduce_indptr_size,
-        reduce_indptr_type,
-        reduce_final_map_size,
-        reduce_final_map_type,
-        reduce_partial_map_size,
-        reduce_partial_map_type,
-    ):
-        """Allocate or reuse pa_metadata buffers."""
+    def _ensure_buffer(self, name, size, dtype, zero=True):
+        """Allocate or reuse a pa_metadata buffer, growing if needed."""
         if self.pa_metadata_buffers is None:
             self.pa_metadata_buffers = {}
-
-        def _get_size_val(size):
-            return size[0] if isinstance(size, tuple) else size
-
-        # Allocate work_metadata_ptrs
-        size_val = _get_size_val(work_metadata_ptrs_size)
-        if (
-            "work_metadata_ptrs" not in self.pa_metadata_buffers
-            or self.pa_metadata_buffers["work_metadata_ptrs"].shape[0] < size_val
-        ):
-            self.pa_metadata_buffers["work_metadata_ptrs"] = torch.empty(
-                work_metadata_ptrs_size,
-                dtype=work_metadata_ptrs_type,
-                device=self.device,
-            )
-
-        # Allocate work_indptr
-        size_val = _get_size_val(work_indptr_size)
-        if (
-            "work_indptr" not in self.pa_metadata_buffers
-            or self.pa_metadata_buffers["work_indptr"].shape[0] < size_val
-        ):
-            self.pa_metadata_buffers["work_indptr"] = torch.zeros(
-                work_indptr_size, dtype=work_indptr_type, device=self.device
-            )
-        else:
-            self.pa_metadata_buffers["work_indptr"].zero_()
-
-        # Allocate work_info
-        size_val = _get_size_val(work_info_size)
-        if (
-            "work_info" not in self.pa_metadata_buffers
-            or len(self.pa_metadata_buffers["work_info"].shape) < len(work_info_size)
-            or self.pa_metadata_buffers["work_info"].shape[0] < size_val
-        ):
-            self.pa_metadata_buffers["work_info"] = torch.zeros(
-                work_info_size, dtype=work_info_type, device=self.device
-            )
-        else:
-            self.pa_metadata_buffers["work_info"].zero_()
-
-        # Allocate reduce_indptr
-        size_val = _get_size_val(reduce_indptr_size)
-        if (
-            "reduce_indptr" not in self.pa_metadata_buffers
-            or self.pa_metadata_buffers["reduce_indptr"].shape[0] < size_val
-        ):
-            self.pa_metadata_buffers["reduce_indptr"] = torch.zeros(
-                reduce_indptr_size, dtype=reduce_indptr_type, device=self.device
-            )
-        else:
-            self.pa_metadata_buffers["reduce_indptr"].zero_()
-
-        # Allocate reduce_final_map
-        size_val = _get_size_val(reduce_final_map_size)
-        if (
-            "reduce_final_map" not in self.pa_metadata_buffers
-            or len(self.pa_metadata_buffers["reduce_final_map"].shape)
-            < len(reduce_final_map_size)
-            or self.pa_metadata_buffers["reduce_final_map"].shape[0] < size_val
-        ):
-            self.pa_metadata_buffers["reduce_final_map"] = torch.zeros(
-                reduce_final_map_size, dtype=reduce_final_map_type, device=self.device
-            )
-        else:
-            self.pa_metadata_buffers["reduce_final_map"].zero_()
-
-        # Allocate reduce_partial_map
-        reduce_partial_map_size_val = (
-            reduce_partial_map_size
-            if isinstance(reduce_partial_map_size, int)
-            else reduce_partial_map_size[0]
+        size_val = size[0] if isinstance(size, (tuple, list)) else size
+        buf = self.pa_metadata_buffers.get(name)
+        needs_alloc = (
+            buf is None
+            or buf.shape[0] < size_val
+            or (isinstance(size, (tuple, list)) and len(buf.shape) < len(size))
         )
-        if (
-            "reduce_partial_map" not in self.pa_metadata_buffers
-            or self.pa_metadata_buffers["reduce_partial_map"].shape[0]
-            < reduce_partial_map_size_val
-        ):
-            self.pa_metadata_buffers["reduce_partial_map"] = torch.zeros(
-                reduce_partial_map_size,
-                dtype=reduce_partial_map_type,
-                device=self.device,
-            )
-        else:
-            self.pa_metadata_buffers["reduce_partial_map"].zero_()
+        if needs_alloc:
+            factory = torch.zeros if zero else torch.empty
+            self.pa_metadata_buffers[name] = factory(size, dtype=dtype, device=self.device)
+        elif zero:
+            self.pa_metadata_buffers[name].zero_()
+
+    def _allocate_pa_metadata_buffers(self, buffer_specs):
+        """Allocate or reuse pa_metadata buffers.
+
+        Args:
+            buffer_specs: sequence of ((size, dtype), ...) tuples from get_pa_metadata_info_v1,
+                          in order: work_metadata_ptrs, work_indptr, work_info,
+                          reduce_indptr, reduce_final_map, reduce_partial_map.
+        """
+        names = [
+            "work_metadata_ptrs", "work_indptr", "work_info",
+            "reduce_indptr", "reduce_final_map", "reduce_partial_map",
+        ]
+        zero_flags = [False, True, True, True, True, True]
+        for name, (size, dtype), zero in zip(names, buffer_specs, zero_flags):
+            self._ensure_buffer(name, size, dtype, zero=zero)
 
     def _build_pa_metadata_for_decode(
         self,
@@ -670,33 +558,8 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
         if tp_q_head_num is None:
             tp_q_head_num = self.num_head
 
-        # kv_dtype_for_metadata = dtypes.fp8
-        (
-            (work_metadata_ptrs_size, work_metadata_ptrs_type),
-            (work_indptr_size, work_indptr_type),
-            (work_info_size, work_info_type),
-            (reduce_indptr_size, reduce_indptr_type),
-            (reduce_final_map_size, reduce_final_map_type),
-            (reduce_partial_map_size, reduce_partial_map_type),
-        ) = get_pa_metadata_info_v1(
-            batch_size,
-            self.num_kv_head,
-        )
-        # Allocate metadata buffers with reuse optimization for multi-layer forward passes
-        self._allocate_pa_metadata_buffers(
-            work_metadata_ptrs_size,
-            work_metadata_ptrs_type,
-            work_indptr_size,
-            work_indptr_type,
-            work_info_size,
-            work_info_type,
-            reduce_indptr_size,
-            reduce_indptr_type,
-            reduce_final_map_size,
-            reduce_final_map_type,
-            reduce_partial_map_size,
-            reduce_partial_map_type,
-        )
+        buffer_specs = get_pa_metadata_info_v1(batch_size, self.num_kv_head)
+        self._allocate_pa_metadata_buffers(buffer_specs)
         qo_indptr = self.pa_decode_qo_indptr[: batch_size + 1]
 
         # Get context_lens (kv_lens is always set before calling _build_pa_metadata_for_decode)
@@ -837,32 +700,8 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
             self.reduce_partial_map = None
 
         if self.decode_using_pa_ps and not self.use_mla:
-            (
-                (work_metadata_ptrs_size, work_metadata_ptrs_type),
-                (work_indptr_size, work_indptr_type),
-                (work_info_size, work_info_type),
-                (reduce_indptr_size, reduce_indptr_type),
-                (reduce_final_map_size, reduce_final_map_type),
-                (reduce_partial_map_size, reduce_partial_map_type),
-            ) = get_pa_metadata_info_v1(
-                max_bs,
-                self.num_kv_head,
-            )
-
-            self._allocate_pa_metadata_buffers(
-                work_metadata_ptrs_size,
-                work_metadata_ptrs_type,
-                work_indptr_size,
-                work_indptr_type,
-                work_info_size,
-                work_info_type,
-                reduce_indptr_size,
-                reduce_indptr_type,
-                reduce_final_map_size,
-                reduce_final_map_type,
-                reduce_partial_map_size,
-                reduce_partial_map_type,
-            )
+            buffer_specs = get_pa_metadata_info_v1(max_bs, self.num_kv_head)
+            self._allocate_pa_metadata_buffers(buffer_specs)
 
     def _init_mla_cuda_graph_metadata(self, bs, req_pool_indices, seq_lens):
         """Shared MLA decode metadata setup for CUDA graph capture/replay."""
@@ -1132,211 +971,160 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
         kv_lora_rank, qk_rope_head_dim, qk_nope_head_dim,
         max_q_len, max_kv_len, kv_indptr, kv_indices, qo_indptr,
     ):
-        """Normal MLA extend (not target_verify, not draft_extend).
-
-        Three sub-paths mirroring sglang aiter_backend:
-        1) No prefix -> fp8 prefill kernel (mla_prefill_ps_asm_fwd) or flash_attn fallback
-        2) Has prefix, absorbed weights differ -> decompress via kv_b_proj + flash_attn
-        3) Has prefix, qk_head_dim matches -> mla_prefill_fwd kernel
-        """
+        """Normal MLA extend (not target_verify, not draft_extend)."""
         extend_no_prefix = not any(forward_batch.extend_prefix_lens_cpu)
 
         if kv_indices.shape[0] == 0 or extend_no_prefix:
-            # --- Sub-path 1: no prefix, pure prefill ---
-            use_fp8_prefill = (
-                self.forward_metadata.fp8_prefill_kv_indices is not None
+            return self._extend_mla_no_prefix(
+                q, k, v, layer, kv_lora_rank, qk_rope_head_dim,
+                max_q_len, qo_indptr,
             )
-            if use_fp8_prefill:
-                total_s = q.shape[0]
-                nhead = layer.tp_q_head_num
-                v_head_dim = layer.v_head_dim
-
-                if q.dtype != dtypes.fp8:
-                    q = q.to(dtypes.fp8)
-                if k.dtype != dtypes.fp8:
-                    k = k.to(dtypes.fp8)
-                if v.dtype != dtypes.fp8:
-                    v = v.to(dtypes.fp8)
-                one_scale = torch.ones(
-                    (), dtype=torch.float32, device=q.device
-                )
-
-                kv_indptr_asm = qo_indptr
-                kv_indices_asm = self.forward_metadata.fp8_prefill_kv_indices
-
-                tile_q = 256
-                reduce_indptr = self.forward_metadata.reduce_indptr
-                reduce_final_map = self.forward_metadata.reduce_final_map
-                reduce_partial_map = self.forward_metadata.reduce_partial_map
-
-                logits = torch.empty(
-                    (reduce_partial_map.size(0) * tile_q, nhead, v_head_dim),
-                    dtype=torch.float32,
-                    device=q.device,
-                )
-                attn_lse = torch.empty(
-                    (reduce_partial_map.size(0) * tile_q, nhead),
-                    dtype=torch.float32,
-                    device=q.device,
-                )
-                final_lse = torch.empty(
-                    (total_s, nhead),
-                    dtype=torch.float32,
-                    device=q.device,
-                )
-                output = q.new_empty(
-                    (total_s, nhead, v_head_dim),
-                    dtype=self.input_dtype,
-                )
-
-                mla_prefill_ps_asm_fwd(
-                    q,
-                    k,
-                    v,
-                    qo_indptr,
-                    kv_indptr_asm,
-                    kv_indices_asm,
-                    self.forward_metadata.work_indptr,
-                    self.forward_metadata.work_info_set,
-                    max_q_len,
-                    layer.scaling,
-                    True,
-                    logits,
-                    attn_lse,
-                    output,
-                    one_scale,
-                    one_scale,
-                    one_scale,
-                )
-                mla_reduce_v1(
-                    logits,
-                    attn_lse,
-                    reduce_indptr,
-                    reduce_final_map,
-                    reduce_partial_map,
-                    tile_q,
-                    output,
-                    final_lse,
-                )
-            elif layer.qk_head_dim == (kv_lora_rank + qk_rope_head_dim) and mla_prefill_fwd is not None:
-                # Absorbed MLA: head_dim (576) exceeds CK limit (256),
-                # use mla_prefill_fwd which natively supports large MLA head dims.
-                # For no-prefix, use input k (bfloat16) directly instead of K_Buffer
-                # (which may be FP8). mla_prefill_fwd doesn't support FP8 KV.
-                if layer.qk_head_dim != layer.v_head_dim:
-                    output = q.new_empty(
-                        (q.shape[0], layer.tp_q_head_num * layer.v_head_dim)
-                    )
-                else:
-                    output = torch.empty_like(q)
-                total_s = q.shape[0]
-                temp_kv_indices = torch.arange(
-                    total_s, device=q.device, dtype=torch.int32
-                )
-                mla_prefill_fwd(
-                    q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
-                    k.view(-1, 1, 1, layer.qk_head_dim),
-                    output.view(-1, layer.tp_q_head_num, layer.v_head_dim),
-                    qo_indptr,
-                    qo_indptr,
-                    temp_kv_indices,
-                    self.forward_metadata.kv_last_page_len,
-                    max_q_len,
-                    layer.scaling,
-                    layer.logit_cap,
-                )
-            else:
-                output = flash_attn_varlen_func(
-                    q,
-                    k,
-                    v,
-                    qo_indptr,
-                    qo_indptr,
-                    max_q_len,
-                    max_q_len,
-                    softmax_scale=layer.scaling,
-                    causal=True,
-                )
-            return output
-
         elif layer.qk_head_dim != (kv_lora_rank + qk_rope_head_dim):
-            # --- Sub-path 2: has prefix, need kv_b_proj decompress ---
-            K_Buffer = torch.index_select(K_Buffer, 0, kv_indices)
-            kvc, k_pe = torch.split(
-                K_Buffer, [kv_lora_rank, qk_rope_head_dim], dim=-1
+            return self._extend_mla_decompress_prefix(
+                q, layer, forward_batch, K_Buffer,
+                kv_lora_rank, qk_rope_head_dim, qk_nope_head_dim,
+                max_q_len, max_kv_len, kv_indptr, kv_indices, qo_indptr,
             )
-
-            if self.kv_cache_dtype == dtypes.fp8:
-                dtype = q.dtype
-                kvc = kvc.to(dtype)
-                k_pe = k_pe.to(dtype)
-
-            kvprefix = layer.kv_b_proj(kvc.contiguous())[0]
-            kvprefix = kvprefix.view(
-                -1, layer.tp_k_head_num, qk_nope_head_dim + layer.v_head_dim
-            )
-            k_prefix, v_prefix = torch.split(
-                kvprefix, [qk_nope_head_dim, layer.v_head_dim], dim=-1
-            )
-            k_prefix = torch.cat(
-                [
-                    k_prefix,
-                    torch.broadcast_to(
-                        k_pe,
-                        (k_pe.shape[0], layer.tp_k_head_num, k_pe.shape[2]),
-                    ),
-                ],
-                dim=-1,
-            )
-
-            assert (
-                forward_batch.extend_prefix_lens.shape
-                == forward_batch.extend_seq_lens.shape
-            )
-
-            o = flash_attn_varlen_func(
-                q,
-                k_prefix,
-                v_prefix,
-                qo_indptr,
-                kv_indptr,
-                max_q_len,
-                max_kv_len,
-                softmax_scale=layer.scaling,
-                causal=True,
-            )
-            return o
-
         else:
-            # --- Sub-path 3: has prefix, qk_head_dim == kv_lora_rank + qk_rope_head_dim ---
-            # Gather needed KV entries and cast to bf16 (K_Buffer may be FP8)
-            k_selected = torch.index_select(K_Buffer, 0, kv_indices)
-            if k_selected.dtype != q.dtype:
-                k_selected = k_selected.to(q.dtype)
-            compact_kv_indices = torch.arange(
-                k_selected.shape[0], device=q.device, dtype=torch.int32
+            return self._extend_mla_absorbed_prefix(
+                q, layer, K_Buffer, kv_indptr, kv_indices, qo_indptr,
             )
 
-            if layer.qk_head_dim != layer.v_head_dim:
-                o = q.new_empty(
-                    (q.shape[0], layer.tp_q_head_num * layer.v_head_dim)
-                )
-            else:
-                o = torch.empty_like(q)
+    def _extend_mla_no_prefix(
+        self, q, k, v, layer, kv_lora_rank, qk_rope_head_dim,
+        max_q_len, qo_indptr,
+    ):
+        """No-prefix prefill: FP8 kernel, mla_prefill_fwd, or flash_attn fallback."""
+        if self.forward_metadata.fp8_prefill_kv_indices is not None:
+            return self._extend_mla_fp8_prefill(q, k, v, layer, max_q_len, qo_indptr)
 
+        if layer.qk_head_dim == (kv_lora_rank + qk_rope_head_dim) and mla_prefill_fwd is not None:
+            # Absorbed MLA: head_dim (576) exceeds CK limit (256),
+            # use mla_prefill_fwd which natively supports large MLA head dims.
+            if layer.qk_head_dim != layer.v_head_dim:
+                output = q.new_empty((q.shape[0], layer.tp_q_head_num * layer.v_head_dim))
+            else:
+                output = torch.empty_like(q)
+            total_s = q.shape[0]
+            temp_kv_indices = torch.arange(total_s, device=q.device, dtype=torch.int32)
             mla_prefill_fwd(
                 q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
-                k_selected.view(-1, 1, 1, layer.qk_head_dim),
-                o.view(-1, layer.tp_q_head_num, layer.v_head_dim),
-                qo_indptr,
-                kv_indptr,
-                compact_kv_indices,
+                k.view(-1, 1, 1, layer.qk_head_dim),
+                output.view(-1, layer.tp_q_head_num, layer.v_head_dim),
+                qo_indptr, qo_indptr, temp_kv_indices,
                 self.forward_metadata.kv_last_page_len,
-                self.forward_metadata.max_q_len,
-                layer.scaling,
-                layer.logit_cap,
+                max_q_len, layer.scaling, layer.logit_cap,
             )
-            return o
+            return output
+
+        return flash_attn_varlen_func(
+            q, k, v, qo_indptr, qo_indptr, max_q_len, max_q_len,
+            softmax_scale=layer.scaling, causal=True,
+        )
+
+    def _extend_mla_fp8_prefill(self, q, k, v, layer, max_q_len, qo_indptr):
+        """FP8 prefill path using mla_prefill_ps_asm_fwd + mla_reduce_v1."""
+        total_s = q.shape[0]
+        nhead = layer.tp_q_head_num
+        v_head_dim = layer.v_head_dim
+        md = self.forward_metadata
+
+        if q.dtype != dtypes.fp8:
+            q = q.to(dtypes.fp8)
+        if k.dtype != dtypes.fp8:
+            k = k.to(dtypes.fp8)
+        if v.dtype != dtypes.fp8:
+            v = v.to(dtypes.fp8)
+        one_scale = torch.ones((), dtype=torch.float32, device=q.device)
+
+        tile_q = 256
+        logits = torch.empty(
+            (md.reduce_partial_map.size(0) * tile_q, nhead, v_head_dim),
+            dtype=torch.float32, device=q.device,
+        )
+        attn_lse = torch.empty(
+            (md.reduce_partial_map.size(0) * tile_q, nhead),
+            dtype=torch.float32, device=q.device,
+        )
+        final_lse = torch.empty((total_s, nhead), dtype=torch.float32, device=q.device)
+        output = q.new_empty((total_s, nhead, v_head_dim), dtype=self.input_dtype)
+
+        mla_prefill_ps_asm_fwd(
+            q, k, v, qo_indptr, qo_indptr,
+            md.fp8_prefill_kv_indices, md.work_indptr, md.work_info_set,
+            max_q_len, layer.scaling, True,
+            logits, attn_lse, output, one_scale, one_scale, one_scale,
+        )
+        mla_reduce_v1(
+            logits, attn_lse, md.reduce_indptr, md.reduce_final_map,
+            md.reduce_partial_map, tile_q, output, final_lse,
+        )
+        return output
+
+    def _extend_mla_decompress_prefix(
+        self, q, layer, forward_batch, K_Buffer,
+        kv_lora_rank, qk_rope_head_dim, qk_nope_head_dim,
+        max_q_len, max_kv_len, kv_indptr, kv_indices, qo_indptr,
+    ):
+        """Has prefix, absorbed weights differ: decompress via kv_b_proj + flash_attn."""
+        K_Buffer = torch.index_select(K_Buffer, 0, kv_indices)
+        kvc, k_pe = torch.split(K_Buffer, [kv_lora_rank, qk_rope_head_dim], dim=-1)
+
+        if self.kv_cache_dtype == dtypes.fp8:
+            dtype = q.dtype
+            kvc = kvc.to(dtype)
+            k_pe = k_pe.to(dtype)
+
+        kvprefix = layer.kv_b_proj(kvc.contiguous())[0]
+        kvprefix = kvprefix.view(
+            -1, layer.tp_k_head_num, qk_nope_head_dim + layer.v_head_dim
+        )
+        k_prefix, v_prefix = torch.split(
+            kvprefix, [qk_nope_head_dim, layer.v_head_dim], dim=-1
+        )
+        k_prefix = torch.cat(
+            [
+                k_prefix,
+                torch.broadcast_to(
+                    k_pe, (k_pe.shape[0], layer.tp_k_head_num, k_pe.shape[2]),
+                ),
+            ],
+            dim=-1,
+        )
+
+        assert forward_batch.extend_prefix_lens.shape == forward_batch.extend_seq_lens.shape
+
+        return flash_attn_varlen_func(
+            q, k_prefix, v_prefix, qo_indptr, kv_indptr,
+            max_q_len, max_kv_len, softmax_scale=layer.scaling, causal=True,
+        )
+
+    def _extend_mla_absorbed_prefix(
+        self, q, layer, K_Buffer, kv_indptr, kv_indices, qo_indptr,
+    ):
+        """Has prefix, qk_head_dim == kv_lora_rank + qk_rope_head_dim: mla_prefill_fwd."""
+        k_selected = torch.index_select(K_Buffer, 0, kv_indices)
+        if k_selected.dtype != q.dtype:
+            k_selected = k_selected.to(q.dtype)
+        compact_kv_indices = torch.arange(
+            k_selected.shape[0], device=q.device, dtype=torch.int32
+        )
+
+        if layer.qk_head_dim != layer.v_head_dim:
+            o = q.new_empty((q.shape[0], layer.tp_q_head_num * layer.v_head_dim))
+        else:
+            o = torch.empty_like(q)
+
+        mla_prefill_fwd(
+            q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
+            k_selected.view(-1, 1, 1, layer.qk_head_dim),
+            o.view(-1, layer.tp_q_head_num, layer.v_head_dim),
+            qo_indptr, kv_indptr, compact_kv_indices,
+            self.forward_metadata.kv_last_page_len,
+            self.forward_metadata.max_q_len,
+            layer.scaling, layer.logit_cap,
+        )
+        return o
 
     def _call_mla_decode_fwd(self, q, k_buffer, o, layer):
         """Common mla_decode_fwd invocation shared across decode/extend paths."""

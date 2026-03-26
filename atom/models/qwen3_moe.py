@@ -468,6 +468,9 @@ class Qwen3MoeModel(torch.nn.Module):
         inputs_embeds: torch.Tensor | None = None,
         **model_kwargs: dict[str, Any] | None,
     ) -> torch.Tensor | IntermediateTensors | tuple[torch.Tensor, list[torch.Tensor]]:
+        # import logging
+        # logger = logging.getLogger("atom.models.qwen3_moe")
+        # logger.info(f"atom call Qwen3MoeModel")
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
