@@ -18,7 +18,11 @@ _ATOM_SUPPORTED_MODELS = {
 
 
 def _register_custom_attention_to_sglang() -> None:
+    """Override sglang's built-in "aiter" attention backend with ATOM's implementation.
 
+    sglang only accepts pre-registered backend names, so we reuse the "aiter"
+    name to inject ATOMAttnBackendForSgl without modifying sglang source.
+    """
     from sglang.srt.layers.attention.attention_registry import (
         register_attention_backend,
     )
@@ -43,8 +47,10 @@ def register_ops_to_sglang(atom_config: Config) -> None:
 
 
 def set_attn_cls() -> None:
-    """
-    Set the attention class for constructing the model based on the framework
+    """Swap ``atom.model_ops.Attention`` to the framework-appropriate class.
+
+    ATOM models reference ``ops.Attention`` generically; this function binds
+    it to PagedAttention (vLLM) or RadixAttention (sglang) at plugin init time.
     """
     import atom.model_ops as ops
 

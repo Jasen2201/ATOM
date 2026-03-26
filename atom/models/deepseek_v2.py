@@ -1559,13 +1559,15 @@ class DeepseekV2MLAAttention(nn.Module):
         hidden_states: torch.Tensor,
         **model_kwargs: dict[str, Any] | None
     ) -> torch.Tensor:
+        # Sglang plugin mode uses its own forward path with absorbed MLA weights
+        # and sglang-specific attention backend.  See atom/plugin/sglang/mla.py.
         if is_sglang():
             from atom.plugin.sglang.mla import forward_sgl_plugin_mode
             return forward_sgl_plugin_mode(self, positions, hidden_states, **model_kwargs)
         return self.forward_common(positions, hidden_states, **model_kwargs)
 
     def process_weights_after_loading(self) -> None:
-        # only for sglang plugin mode
+        """Post-load hook: split kv_b_proj into absorbed w_kc / w_vc for sglang MLA."""
         if not is_sglang():
             return
         from atom.plugin.sglang.mla import process_mla_kv_b_proj_after_loading
@@ -1923,6 +1925,7 @@ class DeepseekV2ForCausalLM(nn.Module):
             self.model.make_empty_intermediate_tensors
         )
 
+        # Initialise sglang's TP attention context for MLA gather/scatter.
         if is_sglang():
             from sglang.srt.configs.model_config import is_deepseek_nsa
             from sglang.srt.layers.communicator import get_attn_tp_context

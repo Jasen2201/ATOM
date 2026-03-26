@@ -162,6 +162,7 @@ def reshape_and_cache_shuffle_triton(
 
 @dataclass
 class ForwardMetadata:
+    """Per-batch metadata consumed by ATOM's attention kernels (pa_fwd_asm, mla_decode_fwd, etc.)."""
     # kv_indptr and kv_indices are only used in MLA mode, optional for non-MLA mode
     kv_indptr: Optional[torch.Tensor]
     kv_indices: Optional[torch.Tensor]
@@ -191,6 +192,14 @@ class ForwardMetadata:
 
 
 class ATOMAttnBackendForSgl(AiterAttnBackend):
+    """ATOM's custom attention backend for sglang plugin mode.
+
+    Extends sglang's AiterAttnBackend with ATOM-specific optimisations:
+    page-table management, pa_persistent_fwd decode path, and MLA
+    prefill kernels (fp8, decompress, absorbed).  Registered to sglang
+    via atom.plugin.register._register_custom_attention_to_sglang().
+    """
+
     def __init__(
         self,
         model_runner: ModelRunner,
@@ -644,15 +653,6 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
             self.pa_kv_indices,
             page_table.stride(0),
         )
-        # kv_indices = self.pa_kv_indices
-
-        # Compute kv_last_page_lens for each sequence
-        # kv_last_page_lens = ((context_lens - 1) % block_size + 1).int()
-
-        # Store in ForwardMetadata for reuse in forward_extend
-        # self.forward_metadata.prefill_pages_kv_indptr = pages_kv_indptr
-        # self.forward_metadata.prefill_kv_indices = kv_indices
-        # self.forward_metadata.prefill_kv_last_page_lens = kv_last_page_lens
 
     def init_cuda_graph_state(
         self,

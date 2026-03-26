@@ -25,7 +25,6 @@ from sglang.srt.models.deepseek_common.utils import (
     _is_cuda,
     _is_fp8_fnuz,
     _is_npu,
-    _use_aiter_gfx95,
     awq_dequantize_func,
 )
 from sglang.srt.layers.quantization.rocm_mxfp4_utils import (

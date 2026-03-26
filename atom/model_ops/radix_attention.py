@@ -13,8 +13,10 @@ from atom.utils import envs
 
 
 class RadixAttention(BaseAttention):
-    """
-    Attention radix implementation
+    """Attention wrapper for sglang plugin mode.
+
+    Delegates to sglang's RadixAttention internally, adapting ATOM's
+    attention interface to sglang's forward_batch-based API.
     """
 
     def __init__(
@@ -63,6 +65,8 @@ class RadixAttention(BaseAttention):
                 v_head_dim=_v_head_dim,
                 prefix=maybe_prefix(prefix, "attn"),
             )
+            # sglang's RadixAttention expects k_scale/v_scale on device;
+            # ensure they exist with identity scaling for non-quantised KV cache.
             if self.attn.k_scale is None:
                 self.attn.k_scale = torch.nn.Parameter(
                     torch.tensor([1.0], dtype=torch.float32, device="cuda"),
@@ -96,6 +100,8 @@ class RadixAttention(BaseAttention):
         if is_sglang():
             # for sglang, forward_batch is required
             forward_batch = kwargs.get("forward_batch", None)
+            # When fused rope+qknorm is active, KV cache is saved inside the
+            # fused kernel, so we skip the separate save step in sglang's attn.
             save_kv_cache = kwargs.get("save_kv_cache", not self.use_aiter_rope_fused_qknorm)
             assert forward_batch is not None, "forward_batch is required for sglang"
             # forward_batch contains the filed attn_backend, which will find the backend registered in ATOM

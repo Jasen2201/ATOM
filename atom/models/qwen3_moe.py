@@ -241,6 +241,7 @@ class Qwen3MoeAttention(nn.Module):
         qkv: torch.Tensor,
         **model_kwargs: dict[str, Any] | None,
     ):
+        """Sglang forward path: fused rope+qknorm+cache or split+norm+rope."""
         if ENABLE_AITER_ROPE_FUSED_QKNORM_FOR_SGL_PLUGIN_MODE:
             forward_batch = model_kwargs.get("forward_batch", None)
             assert forward_batch is not None, "forward_batch is required for sglang"
@@ -299,7 +300,6 @@ class Qwen3MoeAttention(nn.Module):
         **model_kwargs: dict[str, Any] | None,
     ) -> torch.Tensor:
         qkv = self.qkv_proj(hidden_states)
-        q, k, v = torch.split(qkv, [self.q_size, self.kv_size, self.kv_size], dim=-1)
         if ATOM_ENABLE_QK_NORM_ROPE_CACHE_QUANT_FUSION:
             q, k, v = torch.split(
                 qkv, [self.q_size, self.kv_size, self.kv_size], dim=-1
@@ -307,19 +307,21 @@ class Qwen3MoeAttention(nn.Module):
             attn_output = self.attn(
                 query=q, key=k, value=v, positions=positions, q_scale=None, qkv=qkv
             )
+        elif is_sglang():
+            attn_output = self.forward_sgl_plugin_mode(
+                positions, qkv, **model_kwargs
+            )
         else:
-            if is_sglang():
-                attn_output = self.forward_sgl_plugin_mode(
-                    positions, qkv, **model_kwargs
-                )
-            else:
-                # Add qk-norm
-                q = self.q_norm(q)
-                k = self.k_norm(k)
+            q, k, v = torch.split(
+                qkv, [self.q_size, self.kv_size, self.kv_size], dim=-1
+            )
+            # Add qk-norm
+            q = self.q_norm(q)
+            k = self.k_norm(k)
 
-                attn_output = self.attn(
-                    query=q, key=k, value=v, positions=positions, **model_kwargs
-                )
+            attn_output = self.attn(
+                query=q, key=k, value=v, positions=positions, **model_kwargs
+            )
         output = self.o_proj(attn_output)
         return output
 
@@ -468,9 +470,6 @@ class Qwen3MoeModel(torch.nn.Module):
         inputs_embeds: torch.Tensor | None = None,
         **model_kwargs: dict[str, Any] | None,
     ) -> torch.Tensor | IntermediateTensors | tuple[torch.Tensor, list[torch.Tensor]]:
-        # import logging
-        # logger = logging.getLogger("atom.models.qwen3_moe")
-        # logger.info(f"atom call Qwen3MoeModel")
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
