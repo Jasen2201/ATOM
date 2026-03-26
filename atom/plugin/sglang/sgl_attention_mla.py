@@ -43,9 +43,8 @@ from sglang.srt.utils import bind_or_assign, get_bool_env_var
 if TYPE_CHECKING:
     from atom.models.deepseek_v2 import DeepseekV2MLAAttention
 
-# ---------------------------------------------------------------------------
+
 # bmm_fp8 custom-op wrapper (adapted from sglang forward_mla.py)
-# ---------------------------------------------------------------------------
 if _is_cuda:
     from sgl_kernel import bmm_fp8 as _raw_bmm_fp8
     from sglang.srt.utils.custom_op import register_custom_op
@@ -76,9 +75,7 @@ else:
         raise RuntimeError("bmm_fp8 requires CUDA (sgl_kernel)")
 
 
-# ---------------------------------------------------------------------------
 # NamedTuple for prepare → core data flow
-# ---------------------------------------------------------------------------
 class SglPrepareResult(NamedTuple):
     q_pe: torch.Tensor
     k_pe: torch.Tensor
@@ -91,9 +88,7 @@ class SglPrepareResult(NamedTuple):
     llama_4_scaling: Optional[Any]
 
 
-# ---------------------------------------------------------------------------
 # Init helpers
-# ---------------------------------------------------------------------------
 def init_sgl_attrs(attn: DeepseekV2MLAAttention, config) -> None:
     """Initialise sglang-only attributes on DeepseekV2MLAAttention."""
     from sglang.srt.configs.model_config import is_deepseek_nsa
@@ -108,9 +103,7 @@ def init_sgl_attrs(attn: DeepseekV2MLAAttention, config) -> None:
     attn.w_scale_v = None
 
 
-# ---------------------------------------------------------------------------
 # Absorbed batched-matmul (shared by prepare and core)
-# ---------------------------------------------------------------------------
 def mla_absorbed_bmm(
     attn: DeepseekV2MLAAttention,
     inp: torch.Tensor,
@@ -194,9 +187,7 @@ def mla_absorbed_bmm(
     return torch.bmm(inp.transpose(0, 1), weight).transpose(0, 1)
 
 
-# ---------------------------------------------------------------------------
 # Forward: prepare → core
-# ---------------------------------------------------------------------------
 def forward_sgl_prepare(
     attn: DeepseekV2MLAAttention,
     positions: torch.Tensor,
@@ -416,9 +407,7 @@ def prepare_qkv_latent(
     return qkv_lora
 
 
-# ---------------------------------------------------------------------------
 # Top-level forward entry point
-# ---------------------------------------------------------------------------
 def forward_sgl_plugin_mode(
     attn: DeepseekV2MLAAttention,
     positions: torch.Tensor,
@@ -444,9 +433,7 @@ def forward_sgl_plugin_mode(
         return forward_sgl_core(attn, prepared)
 
 
-# ---------------------------------------------------------------------------
 # Weight post-processing: decomposed into sub-functions
-# ---------------------------------------------------------------------------
 def _read_kv_b_proj_weight(attn: DeepseekV2MLAAttention) -> torch.Tensor:
     """Read kv_b_proj weight, handling AWQ and fnuz dtypes."""
     if hasattr(attn.kv_b_proj, "qweight"):

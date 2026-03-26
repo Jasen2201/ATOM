@@ -1456,7 +1456,7 @@ class DeepseekV2MLAAttention(nn.Module):
 
         # sglang plugin mode attributes (lazily initialised)
         if is_sglang():
-            from atom.plugin.sglang.mla import init_sgl_attrs
+            from atom.plugin.sglang.sgl_attention_mla import init_sgl_attrs
 
             init_sgl_attrs(self, config)
 
@@ -1571,9 +1571,9 @@ class DeepseekV2MLAAttention(nn.Module):
         **model_kwargs: dict[str, Any] | None
     ) -> torch.Tensor:
         # Sglang plugin mode uses its own forward path with absorbed MLA weights
-        # and sglang-specific attention backend.  See atom/plugin/sglang/mla.py.
+        # and sglang-specific attention backend.  See atom/plugin/sglang/sgl_attention_mla.py.
         if is_sglang():
-            from atom.plugin.sglang.mla import forward_sgl_plugin_mode
+            from atom.plugin.sglang.sgl_attention_mla import forward_sgl_plugin_mode
             return forward_sgl_plugin_mode(self, positions, hidden_states, **model_kwargs)
         return self.forward_common(positions, hidden_states, **model_kwargs)
 
@@ -1581,7 +1581,7 @@ class DeepseekV2MLAAttention(nn.Module):
         """Post-load hook: split kv_b_proj into absorbed w_kc / w_vc for sglang MLA."""
         if not is_sglang():
             return
-        from atom.plugin.sglang.mla import process_mla_kv_b_proj_after_loading
+        from atom.plugin.sglang.sgl_attention_mla import process_mla_kv_b_proj_after_loading
         process_mla_kv_b_proj_after_loading(self)
 
 
@@ -1786,7 +1786,6 @@ class DeepseekV2Model(nn.Module):
         prefix: str = "",
         layer_type: type[nn.Module] = DeepseekV2DecoderLayer,
     ):
-        # logger.info(f"atom call DeepseekV2Model")
         super().__init__()
 
         config = atom_config.hf_config
