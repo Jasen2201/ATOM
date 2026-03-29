@@ -1406,7 +1406,8 @@ class CompressedTensorsFp8MoEMethod(FusedMoEMethodBase):
                 apply_router_weight_on_input=apply_router_weight_on_input,
             )
         else:
-            return torch.ops.aiter.rocm_aiter_fused_moe(
+            # Direct kernel call for non-EP/DP cases
+            return rocm_asm_moe_impl(
                 x,
                 layer.w13_weight,
                 layer.w2_weight,
@@ -1697,26 +1698,13 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 a2_scale=layer.w2_input_scale,
                 per_act_token_quant=True,
             )
-        elif self.block_quant:
-            if self.quant_type == QuantType.per_1x128:
-                block_shape = [128, 128]
-            elif self.quant_type == QuantType.per_1x32:
-                block_shape = [1, 32]
-            else:
-                block_shape = None
-            return fp8_w8a8_moe_quant_config(
-                w1_scale=layer.w13_weight_scale,
-                w2_scale=layer.w2_weight_scale,
-                a1_scale=layer.w13_input_scale,
-                a2_scale=layer.w2_input_scale,
-                block_shape=block_shape,
-            )
         else:
             return fp8_w8a8_moe_quant_config(
                 w1_scale=layer.w13_weight_scale,
                 w2_scale=layer.w2_weight_scale,
                 a1_scale=layer.w13_input_scale,
                 a2_scale=layer.w2_input_scale,
+                block_shape=None,
             )
 
     @mark_trace(prefix="fp8_moe", torch_compile=False)

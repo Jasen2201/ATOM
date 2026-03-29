@@ -178,7 +178,7 @@ def _generate_atom_config_from_sglang_config(config: Any):
     # force max num batched tokens to 16K because sgl doesn't have
     # concept for max num batched tokens
     return Config(
-        model=None,
+        model=server_args.model_path,
         max_num_batched_tokens=16384,
         max_num_seqs=server_args.max_running_requests,
         max_model_len=server_args.context_length,

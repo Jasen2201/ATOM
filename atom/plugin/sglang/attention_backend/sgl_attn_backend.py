@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-"""
-end to end attention solution with aiter kernels
-"""
+# sglang-specific attention backend replacing sglang's built-in AiterAttnBackend.
+# Shared by ALL models (DeepSeek, Qwen3, etc.) — handles KV cache writes,
+# page-table fixup, pa_persistent_fwd decode path, and MLA prefill kernels.
+# Sits at the lowest layer of the attention stack: sglang's RadixAttention
+# delegates the actual kernel dispatch here.
+#
+# TODO: rewrite this file once sglang's attention flow is unified into ATOM's
+# attention layer — KV cache management and attention kernel dispatch will then
+# be handled by ATOM's native backend, making sglang-specific overrides
+# unnecessary.
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
@@ -187,7 +194,6 @@ class ForwardMetadata:
     pa_metadata_kv_indices: Optional[torch.Tensor] = None
     pa_metadata_context_lens: Optional[torch.Tensor] = None
     pa_metadata_max_qlen: Optional[int] = None
-    pa_metadata_tp_q_head_num: Optional[int] = None
 
 
 
@@ -215,10 +221,6 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
             first_full_attn_id = next(iter(mapping.keys()))
         else:
             first_full_attn_id = 0
-
-        self.q_dtype = model_runner.dtype  # Save q dtype for pa_metadata building
-
-        # assert not self.use_mla, "MLA mode is not implemented yet in ATOMAttnBackendForSgl."
 
         # Pre-initialized qo_indptr for pa_persistent_fwd decode mode: [0, 1, 2, ..., max_bs]
         # In decode mode, each sequence has 1 token, so this is always [0, 1, 2, ..., batch_size]
@@ -258,8 +260,6 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
             )
 
         # Pre-allocated descale tensors for FP8 attention (q, k, v all use scale=1.0)
-
-        self.logits_soft_cap = 0.0
 
         self.forward_metadata: ForwardMetadata = None
 
@@ -626,7 +626,6 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
         self.forward_metadata.pa_metadata_kv_indices = kv_indices
         self.forward_metadata.pa_metadata_context_lens = context_lens
         self.forward_metadata.pa_metadata_max_qlen = max_qlen
-        self.forward_metadata.pa_metadata_tp_q_head_num = tp_q_head_num
 
     def _build_pa_metadata_for_prefill(self, batch_size: int):
         """Build metadata for mha_batch_prefill_func in prefill mode.
@@ -875,8 +874,6 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
             if not layer.is_cross_attention
             else forward_batch.encoder_out_cache_loc
         )
-
-        self.logits_soft_cap = layer.logit_cap
 
         if k is not None:
             assert v is not None

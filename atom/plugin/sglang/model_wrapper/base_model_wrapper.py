@@ -26,8 +26,13 @@ _MODEL_NAMES = [
     "Qwen3ForCausalLM",
 ]
 
+_DEEPSEEK_ARCHS = {
+    "DeepseekV2ForCausalLM",
+    "DeepseekV3ForCausalLM",
+}
 
-class _AtomCausalLMBaseForSglangOOT(nn.Module):
+
+class _AtomCausalLMBaseForSglang(nn.Module):
     """Base ATOM model wrapper conforming to sglang's model interface.
 
     Delegates model creation and weight loading to ATOM's plugin system,
@@ -61,6 +66,15 @@ class _AtomCausalLMBaseForSglangOOT(nn.Module):
 
         self.logits_processor = LogitsProcessor(config)
 
+        # Apply ds model-specific sglang patches (attn dispatch, weight hooks, etc.)
+        # TODO: will remove this after sglang supports atom attention backend
+        arch = getattr(config, "architectures", [""])[0]
+        if arch in _DEEPSEEK_ARCHS:
+            from atom.plugin.sglang.attention_backend.sgl_attention_mla import (
+                setup_deepseek_for_sglang,
+            )
+            setup_deepseek_for_sglang(self.model)
+
     @torch.no_grad()
     def forward(
         self,
@@ -70,6 +84,7 @@ class _AtomCausalLMBaseForSglangOOT(nn.Module):
         input_embeds: torch.Tensor = None,
         get_embedding: bool = False,
         pp_proxy_tensors: Optional[PPProxyTensors] = None,
+        **model_kwargs,
     ) -> Union[LogitsProcessorOutput, PPProxyTensors]:
         hidden_states = self.model(
             input_ids=input_ids,
@@ -77,8 +92,7 @@ class _AtomCausalLMBaseForSglangOOT(nn.Module):
             intermediate_tensors=None,
             inputs_embeds=input_embeds,
             forward_batch=forward_batch,
-            get_embedding=get_embedding,
-            pp_proxy_tensors=pp_proxy_tensors,
+            **model_kwargs,
         )
 
         if self.pp_group.is_last_rank:
@@ -100,6 +114,6 @@ class _AtomCausalLMBaseForSglangOOT(nn.Module):
 
 EntryClass = []
 for _name in _MODEL_NAMES:
-    _cls = type(_name, (_AtomCausalLMBaseForSglangOOT,), {})
+    _cls = type(_name, (_AtomCausalLMBaseForSglang,), {})
     globals()[_name] = _cls
     EntryClass.append(_cls)

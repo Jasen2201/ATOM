@@ -23,9 +23,8 @@
 # limitations under the License.
 """Inference-only DeepseekV2/DeepseekV3 model."""
 
-import json
 import logging
-from typing import Optional, Tuple, Union, Iterable, Any
+from typing import Optional, Tuple, Union
 
 import torch
 from aiter import (
@@ -39,22 +38,18 @@ from aiter import (
     top_k_per_row_prefill,
 )
 from aiter.dist.communication_op import tensor_model_parallel_all_reduce
-from aiter.dist.parallel_state import get_pp_group, get_tensor_model_parallel_world_size, get_tp_group
+from aiter.dist.parallel_state import get_pp_group, get_tensor_model_parallel_world_size
 from aiter.jit.utils.torch_guard import torch_compile_guard
 from aiter.ops.triton.fp8_mqa_logits import fp8_mqa_logits
 from aiter.ops.triton.fused_fp8_quant import (
     fused_reduce_rms_fp8_group_quant,
     fused_rms_fp8_group_quant,
 )
-try:
-    from aiter import fused_qk_rmsnorm
-except ImportError:
-    fused_qk_rmsnorm = None
+from aiter import fused_qk_rmsnorm
 from aiter.ops.triton.fused_mxfp4_quant import (
     fused_reduce_rms_mxfp4_quant,
     fused_rms_mxfp4_quant,
 )
-from aiter.ops.triton.fused_kv_cache import fused_qk_rope_cat_and_cache_mla
 from aiter.ops.triton.pa_mqa_logits import deepgemm_fp8_paged_mqa_logits
 from aiter.rotary_embedding import get_rope
 from atom.config import Config, QuantizationConfig, get_current_atom_config
@@ -71,9 +66,9 @@ from atom.model_ops.linear import (
     RowParallelLinear,
     use_triton_gemm,
 )
-from atom.model_ops.utils import MXFP4_QUANT_BLOCK_SIZE, _has_module, quark_post_load_weights
 from atom.model_ops.moe import FusedMoE
 from atom.model_ops.topK import is_rocm_aiter_fusion_shared_expert_enabled
+from atom.model_ops.utils import MXFP4_QUANT_BLOCK_SIZE
 from atom.models.utils import (
     IntermediateTensors,
     PPMissingLayer,
@@ -87,7 +82,9 @@ from atom.utils.decorators import mark_trace, support_torch_compile
 from atom.utils.forward_context import get_forward_context
 from torch import nn
 from transformers import PretrainedConfig
-from atom.plugin.prepare import is_sglang
+
+# from vllm.model_executor.layers.quantization.utils.fp8_utils import per_token_group_quant_fp8
+
 
 logger = logging.getLogger("atom")
 if use_triton_gemm():
@@ -108,7 +105,6 @@ if use_triton_gemm():
         gemm_a16wfp4_preshuffle = None
         gemm_a8w8_blockscale_preshuffle = None
         gemm_a16w8_blockscale_preshuffle = None
-
 
 ENABLE_DS_QKNORM_QUANT_FUSION = envs.ATOM_ENABLE_DS_QKNORM_QUANT_FUSION
 ENABLE_DS_QKNORM_FUSION = envs.ATOM_ENABLE_DS_QKNORM_FUSION
@@ -1449,7 +1445,7 @@ class DeepseekV2MLAAttention(nn.Module):
         self.quant_dtype = None
         self.fuse_qknorm_quant = False
         # always fuse qknorm
-        self.fuse_qknorm = ENABLE_DS_QKNORM_FUSION and fused_qk_rmsnorm is not None
+        self.fuse_qknorm = ENABLE_DS_QKNORM_FUSION
         if quant_config is not None and ENABLE_DS_QKNORM_QUANT_FUSION:
             if layer_quant_dtype == dtypes.fp8 or (
                 layer_quant_dtype == dtypes.fp4x2 and use_triton_gemm()
@@ -1457,18 +1453,12 @@ class DeepseekV2MLAAttention(nn.Module):
                 self.quant_dtype = layer_quant_dtype
                 self.fuse_qknorm_quant = True
 
-        # sglang plugin mode attributes (lazily initialised)
-        if is_sglang():
-            from atom.plugin.sglang.sgl_attention_mla import init_sgl_attrs
-
-            init_sgl_attrs(self, config, cache_config)
-
-    def forward_common(
+    def forward(
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        **model_kwargs: dict[str, Any] | None
-    ):
+        **model_kwargs,
+    ) -> torch.Tensor:
         hidden_states_scale = None
         if isinstance(hidden_states, tuple):
             hidden_states, hidden_states_scale = hidden_states
@@ -1566,26 +1556,6 @@ class DeepseekV2MLAAttention(nn.Module):
             positions,
             hidden_states_or_q_c_scale,
         )
-
-    def forward(
-        self,
-        positions: torch.Tensor,
-        hidden_states: torch.Tensor,
-        **model_kwargs: dict[str, Any] | None
-    ) -> torch.Tensor:
-        # Sglang plugin mode dispatches prefill to non-absorb MHA-form MLA and
-        # decode/speculative paths to absorbed MLA in the plugin helper module.
-        if is_sglang():
-            from atom.plugin.sglang.sgl_attention_mla import forward_sgl_plugin_mode
-            return forward_sgl_plugin_mode(self, positions, hidden_states, **model_kwargs)
-        return self.forward_common(positions, hidden_states, **model_kwargs)
-
-    def process_weights_after_loading(self) -> None:
-        """Post-load hook: split kv_b_proj into absorbed w_kc / w_vc for sglang MLA."""
-        if not is_sglang():
-            return
-        from atom.plugin.sglang.sgl_attention_mla import process_mla_kv_b_proj_after_loading
-        process_mla_kv_b_proj_after_loading(self)
 
 
 class DeepseekV2DecoderLayer(nn.Module):
@@ -1692,13 +1662,15 @@ class DeepseekV2DecoderLayer(nn.Module):
         self.fuse_rmsnorm_quant = (
             ENABLE_DS_INPUT_RMSNORM_QUANT_FUSION and self.quant_dtype is not None
         )
+
     def forward(
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
-        **model_kwargs: dict[str, Any] | None
+        **model_kwargs,
     ) -> torch.Tensor:
+        # Self Attention
         if self.fuse_input_norm_quant:
             assert self.quant_dtype is not None
             weight = self.input_layernorm.weight
@@ -1859,7 +1831,7 @@ class DeepseekV2Model(nn.Module):
         positions: torch.Tensor,
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor] = None,
-        **model_kwargs: dict[str, Any] | None
+        **model_kwargs,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
@@ -1912,7 +1884,6 @@ class DeepseekV2ForCausalLM(nn.Module):
         quant_config = atom_config.quant_config
         self.config = config
         self.quant_config = quant_config
-        self.atom_config = atom_config
 
         if hasattr(config, "q_lora_rank") and config.q_lora_rank is not None:
             self.packed_modules_mapping = {
@@ -1946,12 +1917,6 @@ class DeepseekV2ForCausalLM(nn.Module):
             self.model.make_empty_intermediate_tensors
         )
 
-        # Initialise sglang's TP attention context for MLA gather/scatter.
-        if is_sglang():
-            from sglang.srt.configs.model_config import is_deepseek_nsa
-            from sglang.srt.layers.communicator import get_attn_tp_context
-            get_attn_tp_context().init_context(config.q_lora_rank, is_deepseek_nsa(config))
-
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.model.get_input_embeddings(input_ids)
 
@@ -1961,7 +1926,7 @@ class DeepseekV2ForCausalLM(nn.Module):
         positions: torch.Tensor,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
-        **model_kwargs: dict[str, Any] | None
+        **model_kwargs,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         hidden_states = self.model(
             input_ids, positions, intermediate_tensors, inputs_embeds,
@@ -1993,19 +1958,6 @@ class DeepseekV2ForCausalLM(nn.Module):
     def get_expert_mapping(self) -> list[tuple[str, str, int, str]]:
         return self.model.get_expert_mapping()
 
-    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        # load weights in plugin mode and discard passed weights generator
-        # here prefix is "model." because Qwen3MoeForCausalLM is constructed in model
-        # wrapper class, so the name of loaded weights are prefixed with "model.".
-        # The vLLM will check the name of the loaded weights to make sure all the
-        # weights are loaded correctly
-
-        # lazy import to avoid circular import issue since model_loader also imports model..
-        from atom.model_loader.loader import load_model_in_plugin_mode
-        loaded_weights_record = load_model_in_plugin_mode(
-            model=self, config=self.atom_config, prefix="model."
-        )
-        return loaded_weights_record
 
 class DeepseekV3ForCausalLM(DeepseekV2ForCausalLM):
     pass

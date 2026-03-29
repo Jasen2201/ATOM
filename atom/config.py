@@ -887,31 +887,24 @@ class Config:
         # assert os.path.isdir(self.model)
 
         assert 1 <= self.tensor_parallel_size <= 8
-        if is_plugin_mode():
-            # plugin mode
-            assert (
-                self.plugin_config is not None
-            ), "plugin_config is required in plugin mode"
-            self.hf_config = self.plugin_config.model_config.hf_config
-        else:
-            self.hf_config = get_hf_config(
-              self.model, trust_remote_code=self.trust_remote_code
-            )
-
-            self.generation_config = get_generation_config(self.model)
-            if self.generation_config is not None:
-                if (
-                    eos_ids := getattr(self.generation_config, "eos_token_id", None)
-                ) is not None:
-                    self.stop_token_ids = (
-                        [eos_ids] if isinstance(eos_ids, int) else eos_ids
-                    )
+        self.hf_config = get_hf_config(
+            self.model, trust_remote_code=self.trust_remote_code
+        )
         if not hasattr(self.hf_config, "rope_parameters"):
             # Compatible with both transformers < 5
-            rope_params = getattr(self.hf_config, "rope_scaling", {}) or {}
-            rope_params["rope_theta"] = self.hf_config.rope_theta
-            rope_params["rope_type"] = rope_params.get("rope_type", "default")
+            rope_params = getattr(self.hf_config, "rope_scaling", {})
+            if rope_params is None:
+                rope_params = {}
+            rope_params["rope_theta"] = getattr(self.hf_config, "rope_theta", None)
+            rope_params["rope_type"] = getattr(self.hf_config, "rope_type", "default")
             self.hf_config.rope_parameters = rope_params
+
+        self.generation_config = get_generation_config(self.model)
+        if self.generation_config is not None:
+            if (
+                eos_ids := getattr(self.generation_config, "eos_token_id", None)
+            ) is not None:
+                self.stop_token_ids = [eos_ids] if isinstance(eos_ids, int) else eos_ids
         self.quant_config = QuantizationConfig(
             self.hf_config,
             self.plugin_config.vllm_config if self.plugin_config is not None else None,

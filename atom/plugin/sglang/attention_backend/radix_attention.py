@@ -1,15 +1,22 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
+# Adapter for models in sglang plugin mode.
+# Wraps sglang's native RadixAttention behind ATOM's BaseAttention interface,
+# handling rope application and forward_batch dispatch.
+#
+# TODO: Remove this file once sglang's attention flow is unified into ATOM's
+# attention layer — non-DeepSeek models will then use ATOM's native attention
+# path directly, making this adapter unnecessary.
+
 import torch
 from torch import nn
 from typing import Optional
 
-from .attention_mla import MLAModules
-from .base_attention import BaseAttention
+from atom.model_ops.attention_mla import MLAModules
+from atom.model_ops.base_attention import BaseAttention
 from atom.plugin.prepare import is_plugin_mode, is_sglang
 from atom.models.utils import maybe_prefix
-from atom.utils import envs
 
 
 class RadixAttention(BaseAttention):
@@ -51,6 +58,8 @@ class RadixAttention(BaseAttention):
             **kwargs,
         )
 
+        self.rotary_emb = rotary_emb
+
         if is_sglang():
             from sglang.srt.layers.radix_attention import RadixAttention
 
@@ -87,8 +96,6 @@ class RadixAttention(BaseAttention):
             raise NotImplementedError(
                 "RadixAttention is only supported for plugin mode for sglang for now"
             )
-        # if True, save cache will be done in rope
-        self.use_aiter_rope_fused_qknorm = envs.ATOM_ROPE_FUSED_QKNORM
 
     def forward_impl_plugin_mode(
         self,
@@ -106,11 +113,15 @@ class RadixAttention(BaseAttention):
         if is_sglang():
             # for sglang, forward_batch is required
             forward_batch = kwargs.get("forward_batch", None)
-            # When fused rope+qknorm is active, KV cache is saved inside the
-            # fused kernel, so we skip the separate save step in sglang's attn.
-            save_kv_cache = kwargs.get("save_kv_cache", not self.use_aiter_rope_fused_qknorm)
+            save_kv_cache = kwargs.get("save_kv_cache", True)
             assert forward_batch is not None, "forward_batch is required for sglang"
-            # forward_batch contains the filed attn_backend, which will find the backend registered in ATOM
+
+            # sglang's RadixAttention does not apply rope internally.
+            # Apply it here when the model passes rotary_emb at construction
+            # and hasn't already applied rope (e.g. fused qknorm path).
+            if self.rotary_emb is not None and positions is not None:
+                query, key = self.rotary_emb(positions, query, key)
+
             return self.attn(
                 query,
                 key,

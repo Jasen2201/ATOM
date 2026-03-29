@@ -1,8 +1,17 @@
 """Sglang-specific MLA forward and weight processing for DeepseekV2/V3.
 
-This module is lazily imported from deepseek_v2.py only when running in sglang
-plugin mode (``is_sglang() == True``).  Keeping all sglang-dependent imports
-here avoids crashing when sglang is not installed.
+DeepSeek MLA (Multi-Latent Attention) forward logic for sglang plugin mode:
+absorbed BMM computation, MHA/MLA path dispatch (prefill -> MHA, decode -> MLA),
+kv_b_proj weight splitting (w_kc/w_vc), and monkey-patch setup via
+setup_deepseek_for_sglang().
+
+This module is lazily imported from base_model_wrapper.py only when running in
+sglang plugin mode (``is_sglang() == True``).  Keeping all sglang-dependent
+imports here avoids crashing when sglang is not installed.
+
+TODO: rewrite this file once sglang's attention flow is unified into ATOM's
+attention layer — the MLA absorbed path and MHA dispatch will then be handled
+natively by ATOM's attention ops, making this sglang-specific module unnecessary.
 """
 
 from __future__ import annotations
@@ -37,7 +46,6 @@ from aiter.ops.triton.batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched
     batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant,
 )
 from sglang.srt.layers.quantization.fp8_kernel import (
-    fp8_dtype,
     per_tensor_quant_mla_fp8,
     per_token_group_quant_mla_deep_gemm_masked_fp8,
 )
@@ -109,7 +117,7 @@ def _unwrap_linear_output(output: Any) -> torch.Tensor:
 def init_sgl_attrs(
     attn: DeepseekV2MLAAttention,
     config,
-    kv_cache_dtype: str,
+    kv_cache_dtype: str = "bf16",
 ) -> None:
     """Initialise sglang-only attributes on DeepseekV2MLAAttention."""
     from sglang.srt.configs.model_config import is_deepseek_nsa
@@ -437,9 +445,6 @@ def _set_mla_kv_buffer_for_mha(
 ) -> None:
     attn_mha = _get_sglang_radix_attn(attn.attn_mha)
     cache_k = torch.cat([kv_a.unsqueeze(1), k_pe], dim=-1)
-    # Keep ATOM's staged packed-latent contract for now: the backend will
-    # split this cache tensor back into kv_a and k_pe when reconstructing
-    # has-prefix non-absorb prefill.
     forward_batch.token_to_kv_pool.set_kv_buffer(
         attn_mha,
         forward_batch.out_cache_loc,
@@ -900,3 +905,50 @@ def process_mla_kv_b_proj_after_loading(attn: DeepseekV2MLAAttention) -> None:
 
     # split and assign kc/vc
     _split_and_assign_kc_vc(attn, w, use_deep_gemm_bmm, block_scale, weight_block_size)
+
+
+# One-time model setup (called from base_model_wrapper.py)
+def setup_deepseek_for_sglang(model) -> None:
+    """Patch a DeepseekV2/V3 model for sglang plugin mode.
+
+    - Initialises sglang TP context
+    - Patches each MLAAttention.forward to dispatch to the sglang MLA path
+    - Registers process_weights_after_loading hooks
+    - Stores atom_config on the model
+    """
+    config = model.config
+
+    # Store atom_config (needed by load_weights in the OOT wrapper)
+    if not hasattr(model, "atom_config"):
+        from atom.config import get_current_atom_config
+        model.atom_config = get_current_atom_config()
+
+    kv_cache_dtype = model.atom_config.kv_cache_dtype
+
+    # Initialise sglang TP context for MLA gather/scatter
+    from sglang.srt.configs.model_config import is_deepseek_nsa
+    from sglang.srt.layers.communicator import get_attn_tp_context
+    get_attn_tp_context().init_context(config.q_lora_rank, is_deepseek_nsa(config))
+
+    # Patch each MLAAttention instance
+    from atom.models.deepseek_v2 import DeepseekV2MLAAttention
+    for module in model.modules():
+        if isinstance(module, DeepseekV2MLAAttention):
+            _patch_mla_attention_for_sglang(module, config, kv_cache_dtype)
+
+
+def _patch_mla_attention_for_sglang(attn, config, kv_cache_dtype: str = "bf16") -> None:
+    """Patch a single DeepseekV2MLAAttention for sglang plugin mode."""
+    init_sgl_attrs(attn, config, kv_cache_dtype)
+
+    def patched_forward(
+        positions: torch.Tensor,
+        hidden_states: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        return forward_sgl_plugin_mode(attn, positions, hidden_states, **kwargs)
+
+    attn.forward = patched_forward
+    attn.process_weights_after_loading = (
+        lambda: process_mla_kv_b_proj_after_loading(attn)
+    )
