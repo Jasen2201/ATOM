@@ -49,7 +49,7 @@ echo "============================================================"
 # ---- Environment ----
 export HIP_VISIBLE_DEVICES="${GPU_IDS}"
 export AITER_QUICK_REDUCE_QUANTIZATION="${QUICK_REDUCE_QUANT}"
-export SGLANG_EXTERNAL_MODEL_PACKAGE=atom.plugin.sglang.oot
+export SGLANG_EXTERNAL_MODEL_PACKAGE=atom.plugin.sglang.model_wrapper
 export SGLANG_USE_AITER=1
 export SGLANG_AITER_FP8_PREFILL_ATTN=0
 export PYTHONFAULTHANDLER=1
