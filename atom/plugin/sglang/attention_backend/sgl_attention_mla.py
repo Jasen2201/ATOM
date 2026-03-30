@@ -200,15 +200,17 @@ def mla_absorbed_bmm(
         if (_use_aiter_gfx95 and weight.dtype == torch.float8_e4m3fn) or (
             get_is_capture_mode() and weight.dtype == torch.float8_e4m3fnuz
         ):
-            out = batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant(
-                X=inp,
-                WQ=weight.transpose(-1, -2),
-                w_scale=weight_scale,
-                group_size=128,
-                YQ=None,
-                transpose_bm=False,
-                transpose_bm_in=True,
-                dtype=torch.bfloat16,
+            out = (
+                batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant(
+                    X=inp,
+                    WQ=weight.transpose(-1, -2),
+                    w_scale=weight_scale,
+                    group_size=128,
+                    YQ=None,
+                    transpose_bm=False,
+                    transpose_bm_in=True,
+                    dtype=torch.bfloat16,
+                )
             )
             return out.transpose(0, 1)
 
@@ -259,7 +261,10 @@ def forward_sgl_prepare(
             )
         )
 
-        if q.shape[0] != positions.shape[0] and get_tensor_model_parallel_world_size() > 1:
+        if (
+            q.shape[0] != positions.shape[0]
+            and get_tensor_model_parallel_world_size() > 1
+        ):
             qkv_lora = torch.cat([q, latent_cache], dim=-1)
             qkv_lora = get_tp_group().all_gather(qkv_lora, dim=0)
             if qkv_lora.shape[0] < positions.shape[0]:
@@ -369,7 +374,9 @@ def forward_sgl_core(
     if attn.use_fused_qk_rope_concat_and_cache_mla:
         cos = attn.rotary_emb.cos_cache
         sin = attn.rotary_emb.sin_cache
-        kv_cache = prepared.forward_batch.token_to_kv_pool.get_key_buffer(attn.layer_num)
+        kv_cache = prepared.forward_batch.token_to_kv_pool.get_key_buffer(
+            attn.layer_num
+        )
         k_scale = attn.mla_attn.attn.k_scale
 
         q, _, k_pe_roped, _ = fused_qk_rope_cat_and_cache_mla(
@@ -508,10 +515,7 @@ def forward_sgl_mha_prepare(
                 dim=-1,
             )
 
-        if (
-            _use_aiter_gfx95
-            and attn.q_b_proj.weight.dtype == torch.float8_e4m3fn
-        ):
+        if _use_aiter_gfx95 and attn.q_b_proj.weight.dtype == torch.float8_e4m3fn:
             (q, q_scale), _, _, _ = fused_rms_fp8_group_quant(
                 q,
                 attn.q_a_layernorm.weight,
@@ -701,7 +705,9 @@ def _read_kv_b_proj_weight(attn: DeepseekV2MLAAttention) -> torch.Tensor:
     if hasattr(attn.kv_b_proj, "qweight"):
         awq_dequant = awq_dequantize_func()
         if awq_dequant is None:
-            raise ValueError("AWQ dequantize function is not supported for current device")
+            raise ValueError(
+                "AWQ dequantize function is not supported for current device"
+            )
         w = awq_dequant(
             attn.kv_b_proj.qweight,
             attn.kv_b_proj.scales,
@@ -746,7 +752,10 @@ def _process_fp8_weight(
         channel_quant_to_tensor_quant,
         inverse_transform_scale_ue8m0,
     )
-    from sglang.srt.layers.deep_gemm_wrapper import ENABLE_JIT_DEEPGEMM, DEEPGEMM_BLACKWELL
+    from sglang.srt.layers.deep_gemm_wrapper import (
+        ENABLE_JIT_DEEPGEMM,
+        DEEPGEMM_BLACKWELL,
+    )
     from sglang.srt.model_loader.utils import should_deepgemm_weight_requant_ue8m0
 
     use_deep_gemm_bmm = False
@@ -769,10 +778,9 @@ def _process_fp8_weight(
         else:
             weight = w
 
-        if (
-            should_deepgemm_weight_requant_ue8m0(weight_block_size=weight_block_size)
-            and getattr(weight_scale, "format_ue8m0", False)
-        ):
+        if should_deepgemm_weight_requant_ue8m0(
+            weight_block_size=weight_block_size
+        ) and getattr(weight_scale, "format_ue8m0", False):
             weight_scale = inverse_transform_scale_ue8m0(
                 weight_scale, mn=weight.shape[-2]
             )
@@ -790,7 +798,9 @@ def _process_fp8_weight(
                     weight, weight_scale, weight_block_size, torch.bfloat16
                 )
         else:
-            w, scale = block_quant_to_tensor_quant(weight, weight_scale, weight_block_size)
+            w, scale = block_quant_to_tensor_quant(
+                weight, weight_scale, weight_block_size
+            )
             attn.w_scale = scale
     else:
         if w.dtype == torch.float8_e4m3fn and _is_fp8_fnuz:
@@ -813,7 +823,9 @@ def _process_int8_weight(
     weight_block_size: Optional[list[int]],
 ) -> torch.Tensor:
     """Process INT8 weights for kv_b_proj."""
-    from sglang.srt.layers.quantization.int8_utils import block_dequant as int8_block_dequant
+    from sglang.srt.layers.quantization.int8_utils import (
+        block_dequant as int8_block_dequant,
+    )
 
     if weight_block_size is not None:
         assert hasattr(attn.kv_b_proj, "weight_scale_inv")
@@ -834,9 +846,9 @@ def _split_and_assign_kc_vc(
     """Split weight into kc/vc and assign to attn."""
     from atom.model_ops.utils import quark_post_load_weights
 
-    w_kc, w_vc = w.unflatten(
-        0, (-1, attn.qk_nope_head_dim + attn.v_head_dim)
-    ).split([attn.qk_nope_head_dim, attn.v_head_dim], dim=1)
+    w_kc, w_vc = w.unflatten(0, (-1, attn.qk_nope_head_dim + attn.v_head_dim)).split(
+        [attn.qk_nope_head_dim, attn.v_head_dim], dim=1
+    )
 
     # quark fp4 special path
     quant_method = getattr(attn.kv_b_proj, "quant_method", None)
@@ -874,7 +886,9 @@ def _split_and_assign_kc_vc(
             0, (-1, (num_tiles_k + num_tiles_n))
         ).split([num_tiles_k, num_tiles_n], dim=1)
 
-        attn.w_scale_k = bind_or_assign(attn.w_scale_k, ws_kc.transpose(1, 2).contiguous())
+        attn.w_scale_k = bind_or_assign(
+            attn.w_scale_k, ws_kc.transpose(1, 2).contiguous()
+        )
         attn.w_scale_v = bind_or_assign(attn.w_scale_v, ws_vc.contiguous())
         attn.w_kc = bind_or_assign(attn.w_kc, w_kc.transpose(1, 2).contiguous())
         attn.w_vc = bind_or_assign(attn.w_vc, w_vc.contiguous())
@@ -921,6 +935,7 @@ def setup_deepseek_for_sglang(model) -> None:
     # Store atom_config (needed by load_weights in the OOT wrapper)
     if not hasattr(model, "atom_config"):
         from atom.config import get_current_atom_config
+
         model.atom_config = get_current_atom_config()
 
     kv_cache_dtype = model.atom_config.kv_cache_dtype
@@ -928,10 +943,12 @@ def setup_deepseek_for_sglang(model) -> None:
     # Initialise sglang TP context for MLA gather/scatter
     from sglang.srt.configs.model_config import is_deepseek_nsa
     from sglang.srt.layers.communicator import get_attn_tp_context
+
     get_attn_tp_context().init_context(config.q_lora_rank, is_deepseek_nsa(config))
 
     # Patch each MLAAttention instance
     from atom.models.deepseek_v2 import DeepseekV2MLAAttention
+
     for module in model.modules():
         if isinstance(module, DeepseekV2MLAAttention):
             _patch_mla_attention_for_sglang(module, config, kv_cache_dtype)
@@ -949,6 +966,6 @@ def _patch_mla_attention_for_sglang(attn, config, kv_cache_dtype: str = "bf16") 
         return forward_sgl_plugin_mode(attn, positions, hidden_states, **kwargs)
 
     attn.forward = patched_forward
-    attn.process_weights_after_loading = (
-        lambda: process_mla_kv_b_proj_after_loading(attn)
+    attn.process_weights_after_loading = lambda: process_mla_kv_b_proj_after_loading(
+        attn
     )

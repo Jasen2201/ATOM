@@ -73,6 +73,7 @@ class _AtomCausalLMBaseForSglang(nn.Module):
             from atom.plugin.sglang.attention_backend.sgl_attention_mla import (
                 setup_deepseek_for_sglang,
             )
+
             setup_deepseek_for_sglang(self.model)
 
     @torch.no_grad()

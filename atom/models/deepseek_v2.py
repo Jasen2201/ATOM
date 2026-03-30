@@ -1845,7 +1845,9 @@ class DeepseekV2Model(nn.Module):
             residual = intermediate_tensors["residual"]
 
         for layer in self.layers[self.start_layer : self.end_layer]:
-            hidden_states, residual = layer(positions, hidden_states, residual, **model_kwargs)
+            hidden_states, residual = layer(
+                positions, hidden_states, residual, **model_kwargs
+            )
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors(
@@ -1929,7 +1931,10 @@ class DeepseekV2ForCausalLM(nn.Module):
         **model_kwargs,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         hidden_states = self.model(
-            input_ids, positions, intermediate_tensors, inputs_embeds,
+            input_ids,
+            positions,
+            intermediate_tensors,
+            inputs_embeds,
             **model_kwargs,
         )
         return hidden_states
