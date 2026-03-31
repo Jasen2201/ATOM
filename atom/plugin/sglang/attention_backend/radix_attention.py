@@ -5,9 +5,8 @@
 # Wraps sglang's native RadixAttention behind ATOM's BaseAttention interface,
 # handling rope application and forward_batch dispatch.
 #
-# TODO: Remove this file once sglang's attention flow is unified into ATOM's
-# attention layer — non-DeepSeek models will then use ATOM's native attention
-# path directly, making this adapter unnecessary.
+# TODO: Rewrite this file once sglang's attention flow is unified into ATOM's
+# attention layer
 
 import torch
 from torch import nn
@@ -82,6 +81,8 @@ class RadixAttention(BaseAttention):
             )
             # sglang's RadixAttention expects k_scale/v_scale on device;
             # ensure they exist with identity scaling for non-quantised KV cache.
+            # device="cuda" is safe here: this branch is guarded by is_sglang(),
+            # which only activates in GPU-based sglang plugin mode.
             if self.attn.k_scale is None:
                 self.attn.k_scale = torch.nn.Parameter(
                     torch.tensor([1.0], dtype=torch.float32, device="cuda"),
@@ -113,6 +114,10 @@ class RadixAttention(BaseAttention):
         if is_sglang():
             # for sglang, forward_batch is required
             forward_batch = kwargs.get("forward_batch", None)
+            # save_kv_cache is explicitly set by the caller:
+            # - True (default): the attention backend writes KV to cache
+            # - False: when fused rope+qknorm kernel already wrote KV to cache,
+            #   skipping the redundant write here
             save_kv_cache = kwargs.get("save_kv_cache", True)
             assert forward_batch is not None, "forward_batch is required for sglang"
 

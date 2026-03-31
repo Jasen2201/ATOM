@@ -37,17 +37,19 @@ try:
         get_pa_metadata_v1,
         pa_fwd_asm,
         pa_persistent_fwd,
-        mla_decode_fwd,
     )
-except ImportError:
-    print(
-        "aiter is AMD specific kernel library. Please make sure aiter is installed on your AMD device."
-    )
+except ImportError as e:
+    raise ImportError(
+        "Failed to import 'aiter', which provides AMD-specific attention kernels "
+        "required by sgl_attn_backend. Please ensure 'aiter' is installed and "
+        f"available on your AMD system. Original import error: {e}"
+    ) from e
 
 # MLA prefill kernels - imported separately to avoid breaking the main aiter imports
 mla_prefill_ps_asm_fwd = None
 mla_reduce_v1 = None
 mla_prefill_fwd = None
+mla_decode_fwd = None
 try:
     from aiter import mla_prefill_ps_asm_fwd
 except ImportError:
@@ -925,13 +927,16 @@ class ATOMAttnBackendForSgl(AiterAttnBackend):
         v_buffer = v_buffer[:num_slots_with_block].view(
             num_blocks, block_size, num_kv_heads, head_dim
         )
+        kv_cache_dtype = "auto"
+        if k_buffer.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz):
+            kv_cache_dtype = "fp8"
         reshape_and_cache_shuffle_triton(
             k,
             v,
             k_buffer,
             v_buffer,
             cache_loc,
-            "auto",
+            kv_cache_dtype,
             k_scale,
             v_scale,
         )

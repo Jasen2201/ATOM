@@ -17,17 +17,14 @@ from sglang.srt.layers.logits_processor import LogitsProcessor, LogitsProcessorO
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
 
-logger = logging.getLogger("atom.plugin.sglang.oot")
+logger = logging.getLogger("atom.plugin.sglang.model_wrapper")
 
 _MODEL_NAMES = [
-    "DeepseekV2ForCausalLM",
     "DeepseekV3ForCausalLM",
     "Qwen3MoeForCausalLM",
-    "Qwen3ForCausalLM",
 ]
 
 _DEEPSEEK_ARCHS = {
-    "DeepseekV2ForCausalLM",
     "DeepseekV3ForCausalLM",
 }
 
@@ -57,6 +54,11 @@ class _AtomCausalLMBaseForSglang(nn.Module):
 
         import atom
 
+        # TODO: prepare_model() currently handles model construction, config
+        # generation, attention backend registration, and distributed init.
+        # Refactor so this wrapper only dispatches the attention backend
+        # (register_ops_to_sglang + set_attn_cls), and let sglang handle
+        # model construction directly
         self.model = atom.prepare_model(config=config, engine="sglang")
         if self.model is None:
             model_arch = getattr(config, "architectures", ["unknown"])[0]
@@ -93,6 +95,8 @@ class _AtomCausalLMBaseForSglang(nn.Module):
             intermediate_tensors=None,
             inputs_embeds=input_embeds,
             forward_batch=forward_batch,
+            get_embedding=get_embedding,
+            pp_proxy_tensors=pp_proxy_tensors,
             **model_kwargs,
         )
 
@@ -106,6 +110,10 @@ class _AtomCausalLMBaseForSglang(nn.Module):
         return hidden_states
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
+        # The passed `weights` iterable from sglang is ignored because ATOM
+        # uses its own weight loading pipeline (handling AITER-specific quant
+        # formats, kv_b_proj splitting, etc.) that is incompatible with
+        # sglang's default weight iterator.
         from atom.model_loader.loader import load_model_in_plugin_mode
 
         return load_model_in_plugin_mode(

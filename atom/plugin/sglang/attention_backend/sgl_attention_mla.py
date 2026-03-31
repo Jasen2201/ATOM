@@ -214,9 +214,12 @@ def mla_absorbed_bmm(
             )
             return out.transpose(0, 1)
 
+        w_bf16 = weight.to(torch.bfloat16)
+        if weight_scale is not None:
+            w_bf16 = w_bf16 * weight_scale
         out = torch.bmm(
             inp.to(torch.bfloat16).transpose(0, 1),
-            weight.to(torch.bfloat16) * weight_scale,
+            w_bf16,
         )
         return out.transpose(0, 1)
 
@@ -425,6 +428,15 @@ def forward_sgl_core(
 
 
 def _dispatch_sgl_plugin_attn_path(forward_batch) -> str:
+    """Decide the attention algorithm for this batch based on forward_mode.
+
+    Returns "mha" for extend/prefill (uses standard Q×K×V with flash_attn)
+    or "mla" for decode (uses absorbed weights + mla_decode_fwd).
+
+    This is the per-batch *routing* decision, distinct from
+    ``_can_run_sgl_mha_now`` which is a *capability* gate checking whether
+    the model configuration supports the MHA path at all.
+    """
     if forward_batch.forward_mode.is_extend_without_speculative():
         return "mha"
     return "mla"
@@ -461,6 +473,12 @@ def _set_mla_kv_buffer_for_mha(
 
 
 def _can_run_sgl_mha_now(attn: DeepseekV2MLAAttention, forward_batch) -> bool:
+    """Check if the model configuration supports the MHA attention path.
+
+    This is a *capability* gate — NSA models and MXFP4-quantised weights
+    (uint8) cannot use the MHA path. Distinct from
+    ``_dispatch_sgl_plugin_attn_path`` which routes each batch.
+    """
     del forward_batch
     if attn.use_nsa:
         return False
@@ -955,7 +973,15 @@ def setup_deepseek_for_sglang(model) -> None:
 
 
 def _patch_mla_attention_for_sglang(attn, config, kv_cache_dtype: str = "bf16") -> None:
-    """Patch a single DeepseekV2MLAAttention for sglang plugin mode."""
+    """Patch a single DeepseekV2MLAAttention for sglang plugin mode.
+
+    We patch attn.forward (rather than relying solely on ops.Attention =
+    RadixAttention) because MLA's absorbed-weight forward path replaces the
+    *entire* forward method — including RoPE, and absorbed
+    BMM — not just the attention backend.  ops.Attention = RadixAttention
+    handles the backend layer (flash_attn / paged_attn dispatch) and is
+    already set via set_attn_cls(); this patch sits above that layer.
+    """
     init_sgl_attrs(attn, config, kv_cache_dtype)
 
     def patched_forward(

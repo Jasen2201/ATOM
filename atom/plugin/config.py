@@ -118,7 +118,21 @@ def _generate_atom_config_from_sglang_config(config: Any):
 
     # sglang's ModelRunner already parsed and stored ServerArgs globally
     # before OOT model loading, so we can retrieve it directly.
-    server_args = get_global_server_args()
+    try:
+        server_args = get_global_server_args()
+    except Exception as exc:
+        raise RuntimeError(
+            "Failed to retrieve SGLang global ServerArgs. Ensure this "
+            "function is called after SGLang has initialized its server "
+            "arguments."
+        ) from exc
+
+    if server_args is None:
+        raise RuntimeError(
+            "SGLang global ServerArgs are not initialized. Ensure this "
+            "function is called after SGLang has parsed and set its "
+            "server arguments."
+        )
 
     sgl_model_config = SglangModelConfig.from_server_args(server_args)
     sgl_model_opt_config = ModelOptConfig(
@@ -184,7 +198,11 @@ def _generate_atom_config_from_sglang_config(config: Any):
         max_model_len=server_args.context_length,
         gpu_memory_utilization=server_args.mem_fraction_static,
         tensor_parallel_size=server_args.tp_size,
-        enforce_eager=True,  # disable using atom cuda graph
+        # Disable ATOM's own torch.compile and CUDA graph capture —
+        # sglang manages its own compilation/graph strategy, and the
+        # @support_torch_compile decorator checks enforce_eager to skip,
+        # preventing double-compile.
+        enforce_eager=True,
         parallel_config=sgl_parallel_config,
         kv_cache_dtype=server_args.kv_cache_dtype,
         enable_prefix_caching=False,
