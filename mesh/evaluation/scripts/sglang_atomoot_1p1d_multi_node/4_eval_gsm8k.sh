@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Script 4: GSM8K Evaluation via PD Proxy - SGLang 1P1D Multi-Node
-# Run this after the proxy (script 3) is up.
+# Script 4: GSM8K Evaluation via PD Proxy - SGLang Multi-Node
+# Run this INSIDE the docker container after the proxy (script 3) is up.
 # Uses the shared eval_gsm8k.py from evaluation/common/.
 # =============================================================================
 set -euo pipefail
 
 # ---- Configuration ----
-PROXY_HOST="${PROXY_HOST:-10.2.224.4}"
+PROXY_HOST="${PROXY_HOST:-127.0.0.1}"
 PROXY_PORT="${PROXY_PORT:-8080}"
-MODEL="${MODEL:-/mnt/nfs/huggingface/DeepSeek-R1}"
+MODEL="${MODEL:-/it-share/models/deepseek-ai/DeepSeek-R1}"
 GSM8K_QUESTIONS="${GSM8K_QUESTIONS:-50}"
 MAX_TOKENS="${MAX_TOKENS:-2048}"
 WORKERS="${WORKERS:-4}"
@@ -19,14 +19,20 @@ GSM8K_DATASET="${GSM8K_DATASET:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/logs"
-COMMON_DIR="$(cd "${SCRIPT_DIR}/../../common" && pwd)"
 mkdir -p "${LOG_DIR}"
 
-EVAL_SCRIPT="${COMMON_DIR}/eval_gsm8k.py"
+# Find eval_gsm8k.py: check sibling common/ dir first, then relative repo path
+if [[ -f "${SCRIPT_DIR}/../common/eval_gsm8k.py" ]]; then
+    EVAL_SCRIPT="${SCRIPT_DIR}/../common/eval_gsm8k.py"
+elif [[ -f "${SCRIPT_DIR}/../../common/eval_gsm8k.py" ]]; then
+    EVAL_SCRIPT="$(cd "${SCRIPT_DIR}/../../common" && pwd)/eval_gsm8k.py"
+else
+    EVAL_SCRIPT="/workspace/common/eval_gsm8k.py"
+fi
 
 echo ""
 echo "============================================================"
-echo "  GSM8K Evaluation - SGLang 1P1D Multi-Node"
+echo "  GSM8K Evaluation - SGLang PD Multi-Node"
 echo "============================================================"
 echo " Proxy:     http://${PROXY_HOST}:${PROXY_PORT}"
 echo " Model:     ${MODEL}"
