@@ -64,20 +64,20 @@ export SGLANG_AITER_FP8_PREFILL_ATTN=0
 export AITER_QUICK_REDUCE_QUANTIZATION="${QUICK_REDUCE_QUANT}"
 export ATOM_ENABLE_DS_QKNORM_QUANT_FUSION=1
 export SGLANG_HOST_IP="${DECODE_HANDSHAKE_IP}"
+export PYTHONPATH=${PYTHONPATH}:/app/atmo
 
 # ---- LD_LIBRARY_PATH ----
 MOONCAKE_LIB="${MOONCAKE_LIB:-/opt/venv/lib/python3.12/site-packages/mooncake}"
 export LD_LIBRARY_PATH="${MOONCAKE_LIB}:/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
 
 echo "[launch] Starting Decode server (TP=${TP_SIZE}, attention=${ATTENTION_BACKEND})..."
-python3 -m sglang.launch_server \
+TORCHINDUCTOR_COMPILE_THREADS=128 python3 -m sglang.launch_server \
     --model-path "${MODEL}" \
     --host 0.0.0.0 \
     --port "${DECODE_PORT}" \
     --trust-remote-code \
     --tp-size "${TP_SIZE}" \
     --kv-cache-dtype "${KV_CACHE_DTYPE}" \
-    --attention-backend "${ATTENTION_BACKEND}" \
     --mem-fraction-static "${MEM_FRACTION}" \
     --page-size "${PAGE_SIZE}" \
     --max-running-requests "${MAX_RUNNING_REQUESTS}" \
