@@ -40,7 +40,6 @@ IB_DEVICE="${IB_DEVICE:-rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7}"
 # IP for Mooncake Transfer Engine P2P handshake (must be TCP-reachable cross-node)
 PREFILL_HANDSHAKE_IP="${PREFILL_HANDSHAKE_IP:?ERROR: Set PREFILL_HANDSHAKE_IP to this node management IP}"
 
-# Log and config file names (support multiple prefill instances)
 MOONCAKE_CONFIG_FILE="${MOONCAKE_CONFIG_FILE:-mooncake_prefill.json}"
 LOG_FILE="${LOG_FILE:-prefill.log}"
 
@@ -66,7 +65,7 @@ echo "============================================================"
 
 # ---- Environment (aligned with verified single-node config) ----
 export HIP_VISIBLE_DEVICES="${GPU_IDS}"
-export SGLANG_EXTERNAL_MODEL_PACKAGE=atom.plugin.sglang.model_wrapper
+export SGLANG_EXTERNAL_MODEL_PACKAGE=atom.plugin.sglang.models
 export SGLANG_USE_AITER=1
 export SGLANG_AITER_FP8_PREFILL_ATTN=0
 export AITER_QUICK_REDUCE_QUANTIZATION="${QUICK_REDUCE_QUANT}"

@@ -58,7 +58,7 @@ echo "============================================================"
 
 # ---- Environment (aligned with verified single-node config) ----
 export HIP_VISIBLE_DEVICES="${GPU_IDS}"
-export SGLANG_EXTERNAL_MODEL_PACKAGE=atom.plugin.sglang.model_wrapper
+export SGLANG_EXTERNAL_MODEL_PACKAGE=atom.plugin.sglang.models
 export SGLANG_USE_AITER=1
 export SGLANG_AITER_FP8_PREFILL_ATTN=0
 export AITER_QUICK_REDUCE_QUANTIZATION="${QUICK_REDUCE_QUANT}"
