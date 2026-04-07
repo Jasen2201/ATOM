@@ -1108,34 +1108,18 @@ impl Worker for DPAwareWorker {
 /// immediately but the stream continues in the background.
 pub struct WorkerLoadGuard {
     worker: Arc<dyn Worker>,
-    routing_key: Option<String>,
 }
 
 impl WorkerLoadGuard {
-    pub fn new(worker: Arc<dyn Worker>, headers: Option<&http::HeaderMap>) -> Self {
-        use crate::routers::header_utils::extract_routing_key;
-
+    pub fn new(worker: Arc<dyn Worker>, _headers: Option<&http::HeaderMap>) -> Self {
         worker.increment_load();
-
-        let routing_key = extract_routing_key(headers).map(String::from);
-
-        if let Some(ref key) = routing_key {
-            worker.worker_routing_key_load().increment(key);
-        }
-
-        Self {
-            worker,
-            routing_key,
-        }
+        Self { worker }
     }
 }
 
 impl Drop for WorkerLoadGuard {
     fn drop(&mut self) {
         self.worker.decrement_load();
-        if let Some(ref key) = self.routing_key {
-            self.worker.worker_routing_key_load().decrement(key);
-        }
     }
 }
 
@@ -2070,7 +2054,7 @@ mod tests {
     }
 
     #[test]
-    fn test_worker_load_guard_with_routing_key() {
+    fn test_worker_load_guard_basic() {
         use crate::core::BasicWorkerBuilder;
 
         let worker: Arc<dyn Worker> = Arc::new(
@@ -2080,71 +2064,12 @@ mod tests {
         );
 
         assert_eq!(worker.load(), 0);
-        assert_eq!(worker.worker_routing_key_load().value(), 0);
-
-        let mut headers = http::HeaderMap::new();
-        headers.insert("x-smg-routing-key", "key-123".parse().unwrap());
-
-        {
-            let _guard = WorkerLoadGuard::new(worker.clone(), Some(&headers));
-            assert_eq!(worker.load(), 1);
-            assert_eq!(worker.worker_routing_key_load().value(), 1);
-        }
-
-        assert_eq!(worker.load(), 0);
-        assert_eq!(worker.worker_routing_key_load().value(), 0);
-    }
-
-    #[test]
-    fn test_worker_load_guard_without_routing_key() {
-        use crate::core::BasicWorkerBuilder;
-
-        let worker: Arc<dyn Worker> = Arc::new(
-            BasicWorkerBuilder::new("http://test:8000")
-                .worker_type(WorkerType::Regular)
-                .build(),
-        );
-
-        assert_eq!(worker.load(), 0);
-        assert_eq!(worker.worker_routing_key_load().value(), 0);
 
         {
             let _guard = WorkerLoadGuard::new(worker.clone(), None);
             assert_eq!(worker.load(), 1);
-            assert_eq!(worker.worker_routing_key_load().value(), 0);
         }
 
         assert_eq!(worker.load(), 0);
-        assert_eq!(worker.worker_routing_key_load().value(), 0);
-    }
-
-    #[test]
-    fn test_worker_load_guard_multiple_same_routing_key() {
-        use crate::core::BasicWorkerBuilder;
-
-        let worker: Arc<dyn Worker> = Arc::new(
-            BasicWorkerBuilder::new("http://test:8000")
-                .worker_type(WorkerType::Regular)
-                .build(),
-        );
-
-        let mut headers = http::HeaderMap::new();
-        headers.insert("x-smg-routing-key", "key-123".parse().unwrap());
-
-        let guard1 = WorkerLoadGuard::new(worker.clone(), Some(&headers));
-        assert_eq!(worker.load(), 1);
-        assert_eq!(worker.worker_routing_key_load().value(), 1);
-
-        let guard2 = WorkerLoadGuard::new(worker.clone(), Some(&headers));
-        assert_eq!(worker.load(), 2);
-        assert_eq!(worker.worker_routing_key_load().value(), 1);
-
-        drop(guard1);
-        assert_eq!(worker.load(), 1);
-        assert_eq!(worker.worker_routing_key_load().value(), 1);
-
-        drop(guard2);
-        assert_eq!(worker.load(), 0);
-        assert_eq!(worker.worker_routing_key_load().value(), 0);
     }
 }

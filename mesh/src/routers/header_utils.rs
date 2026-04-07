@@ -3,26 +3,6 @@ use axum::{
     extract::Request,
     http::{HeaderMap, HeaderValue},
 };
-use http::header::HeaderName;
-
-static HEADER_TARGET_WORKER: HeaderName = HeaderName::from_static("x-smg-target-worker");
-static HEADER_ROUTING_KEY: HeaderName = HeaderName::from_static("x-smg-routing-key");
-
-fn extract_header_value<'a>(headers: Option<&'a HeaderMap>, name: &HeaderName) -> Option<&'a str> {
-    headers
-        .and_then(|h| h.get(name))
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-}
-
-pub fn extract_target_worker(headers: Option<&HeaderMap>) -> Option<&str> {
-    extract_header_value(headers, &HEADER_TARGET_WORKER)
-}
-
-pub fn extract_routing_key(headers: Option<&HeaderMap>) -> Option<&str> {
-    extract_header_value(headers, &HEADER_ROUTING_KEY)
-}
-
 /// Copy request headers to a Vec of name-value string pairs
 /// Used for forwarding headers to backend workers
 pub fn copy_request_headers(req: &Request<Body>) -> Vec<(String, String)> {
@@ -212,7 +192,6 @@ pub fn should_forward_request_header(name: &str) -> bool {
         || name.eq_ignore_ascii_case("x-correlation-id")
         || name.eq_ignore_ascii_case("traceparent")
         || name.eq_ignore_ascii_case("tracestate")
-        || name.eq_ignore_ascii_case("x-smg-routing-key")
         || name
             .get(..REQUEST_ID_PREFIX.len())
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case(REQUEST_ID_PREFIX))
@@ -221,44 +200,6 @@ pub fn should_forward_request_header(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_extract_header_value_returns_value() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-smg-routing-key", "test-key".parse().unwrap());
-        assert_eq!(extract_routing_key(Some(&headers)), Some("test-key"));
-    }
-
-    #[test]
-    fn test_extract_header_value_returns_none_for_missing() {
-        let headers = HeaderMap::new();
-        assert_eq!(extract_routing_key(Some(&headers)), None);
-    }
-
-    #[test]
-    fn test_extract_header_value_returns_none_for_empty() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-smg-routing-key", "".parse().unwrap());
-        assert_eq!(extract_routing_key(Some(&headers)), None);
-    }
-
-    #[test]
-    fn test_extract_header_value_returns_none_for_none_headers() {
-        assert_eq!(extract_routing_key(None), None);
-    }
-
-    #[test]
-    fn test_extract_target_worker() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-smg-target-worker", "2".parse().unwrap());
-        assert_eq!(extract_target_worker(Some(&headers)), Some("2"));
-    }
-
-    #[test]
-    fn test_extract_target_worker_missing() {
-        let headers = HeaderMap::new();
-        assert_eq!(extract_target_worker(Some(&headers)), None);
-    }
 
     #[test]
     fn test_should_forward_request_header_whitelist() {
@@ -276,8 +217,6 @@ mod tests {
         assert!(should_forward_request_header("x-request-id-user"));
         assert!(should_forward_request_header("X-Request-ID-Span"));
         assert!(should_forward_request_header("x-request-id-123"));
-        assert!(should_forward_request_header("x-smg-routing-key"));
-        assert!(should_forward_request_header("X-SMG-Routing-Key"));
     }
 
     #[test]
