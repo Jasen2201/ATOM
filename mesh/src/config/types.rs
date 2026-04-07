@@ -67,12 +67,6 @@ pub struct RouterConfig {
     pub tool_call_parser: Option<String>,
     #[serde(default)]
     pub tokenizer_cache: TokenizerCacheConfig,
-    /// Combined certificate + key in PEM format, loaded from client_cert_path and client_key_path during config creation
-    #[serde(skip)]
-    pub client_identity: Option<Vec<u8>>,
-    /// PEM format, loaded from ca_cert_paths during config creation
-    #[serde(default)]
-    pub ca_certificates: Vec<Vec<u8>>,
     /// Loaded from mcp_config_path during config creation
     #[serde(skip)]
     pub mcp_config: Option<smg_mcp::McpConfig>,
@@ -447,8 +441,6 @@ impl Default for RouterConfig {
             reasoning_parser: None,
             tool_call_parser: None,
             tokenizer_cache: TokenizerCacheConfig::default(),
-            client_identity: None,
-            ca_certificates: vec![],
             mcp_config: None,
             enable_wasm: false,
         }

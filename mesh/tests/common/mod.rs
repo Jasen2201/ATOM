@@ -7,9 +7,7 @@ pub mod mock_worker;
 pub mod redis_test_server;
 pub mod streaming_helpers;
 pub mod test_app;
-pub mod test_certs;
 pub mod test_config;
-pub mod tls_mock_worker;
 
 // Re-export commonly used test builders
 use std::{

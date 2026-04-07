@@ -483,32 +483,10 @@ impl ConfigValidator {
         Ok(())
     }
 
-    fn validate_mtls(config: &RouterConfig) -> ConfigResult<()> {
-        if let Some(identity) = &config.client_identity {
-            if identity.is_empty() {
-                return Err(ConfigError::ValidationFailed {
-                    reason: "Client identity cannot be empty".to_string(),
-                });
-            }
-        }
-
-        for (idx, ca_cert) in config.ca_certificates.iter().enumerate() {
-            if ca_cert.is_empty() {
-                return Err(ConfigError::ValidationFailed {
-                    reason: format!("CA certificate at index {} cannot be empty", idx),
-                });
-            }
-        }
-
-        Ok(())
-    }
-
     fn validate_compatibility(config: &RouterConfig) -> ConfigResult<()> {
         if config.enable_igw {
             return Ok(());
         }
-
-        Self::validate_mtls(config)?;
 
         let has_service_discovery = config.discovery.as_ref().is_some_and(|d| d.enabled);
 

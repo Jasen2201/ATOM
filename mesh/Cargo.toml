@@ -32,7 +32,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
 axum = { version = "0.8.6", features = ["macros", "ws", "tracing"] }
-axum-server = { version = "0.8.0", default-features = false, features = ["tls-rustls"] }
+axum-server = { version = "0.8.0", default-features = false }
 tower = { version = "0.5", features = ["full"] }
 tower-http = { version = "0.6", features = ["trace", "compression-gzip", "timeout", "limit", "request-id", "util"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -85,7 +85,6 @@ smg-mcp = "=1.0.0"
 smg-wasm = "=1.0.0"
 smg-mesh = "=1.0.0"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-rustls-pemfile = "2.2"
 openssl = "0.10.73"
 rmcp = { version = "0.8.3", features = ["client", "server",
     "transport-child-process",
