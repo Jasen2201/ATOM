@@ -8,7 +8,6 @@ use data_connector::{
     StorageFactoryConfig,
 };
 use reqwest::Client;
-use smg_mcp::McpManager;
 use tracing::debug;
 
 use crate::{
@@ -54,7 +53,6 @@ pub struct AppContext {
     pub configured_tool_parser: Option<String>,
     pub worker_job_queue: Arc<OnceLock<Arc<JobQueue>>>,
     pub workflow_engines: Arc<OnceLock<WorkflowEngines>>,
-    pub mcp_manager: Arc<OnceLock<Arc<McpManager>>>,
     pub worker_service: Arc<WorkerService>,
     pub inflight_tracker: Arc<InFlightRequestTracker>,
 }
@@ -83,7 +81,6 @@ pub struct AppContextBuilder {
     load_monitor: Option<Arc<LoadMonitor>>,
     worker_job_queue: Option<Arc<OnceLock<Arc<JobQueue>>>>,
     workflow_engines: Option<Arc<OnceLock<WorkflowEngines>>>,
-    mcp_manager: Option<Arc<OnceLock<Arc<McpManager>>>>,
 }
 
 impl AppContext {
@@ -122,7 +119,6 @@ impl AppContextBuilder {
             load_monitor: None,
             worker_job_queue: None,
             workflow_engines: None,
-            mcp_manager: None,
         }
     }
 
@@ -210,11 +206,6 @@ impl AppContextBuilder {
         self
     }
 
-    pub fn mcp_manager(mut self, mcp_manager: Arc<OnceLock<Arc<McpManager>>>) -> Self {
-        self.mcp_manager = Some(mcp_manager);
-        self
-    }
-
     pub fn build(self) -> Result<AppContext, AppContextBuildError> {
         let router_config = self
             .router_config
@@ -266,9 +257,6 @@ impl AppContextBuilder {
             workflow_engines: self
                 .workflow_engines
                 .ok_or(AppContextBuildError("workflow_engines"))?,
-            mcp_manager: self
-                .mcp_manager
-                .ok_or(AppContextBuildError("mcp_manager"))?,
             worker_service,
             inflight_tracker: InFlightRequestTracker::new(),
         })
@@ -292,8 +280,6 @@ impl AppContextBuilder {
             .with_load_monitor(&router_config)
             .with_worker_job_queue()
             .with_workflow_engines()
-            .with_mcp_manager(&router_config)
-            .await?
             .router_config(router_config))
     }
 
@@ -419,38 +405,6 @@ impl AppContextBuilder {
     fn with_workflow_engines(mut self) -> Self {
         self.workflow_engines = Some(Arc::new(OnceLock::new()));
         self
-    }
-
-    /// Create and initialize MCP manager with empty config
-    ///
-    /// This initializes the MCP manager with an empty config and default settings.
-    /// MCP servers will be registered later via the InitializeMcpServers job.
-    async fn with_mcp_manager(mut self, _router_config: &RouterConfig) -> Result<Self, String> {
-        // Create OnceLock container
-        let mcp_manager_lock = Arc::new(OnceLock::new());
-
-        // Always create with empty config and defaults
-        debug!("Initializing MCP manager with empty config and default settings (5 min TTL, 100 max connections)");
-
-        let empty_config = smg_mcp::McpConfig {
-            servers: Vec::new(),
-            pool: Default::default(),
-            proxy: None,
-            warmup: Vec::new(),
-            inventory: Default::default(),
-        };
-
-        let manager = McpManager::with_defaults(empty_config)
-            .await
-            .map_err(|e| format!("Failed to initialize MCP manager with defaults: {}", e))?;
-
-        // Store the initialized manager in the OnceLock
-        mcp_manager_lock
-            .set(Arc::new(manager))
-            .map_err(|_| "Failed to set MCP manager in OnceLock".to_string())?;
-
-        self.mcp_manager = Some(mcp_manager_lock);
-        Ok(self)
     }
 
 }

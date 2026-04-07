@@ -17,7 +17,7 @@ use smg::{
     server::{build_app, AppState},
     tokenizer::registry::TokenizerRegistry,
 };
-use smg_mcp::{McpConfig, McpManager};
+
 
 /// Create a test Axum application using the actual server's build_app function
 #[allow(dead_code)]
@@ -158,20 +158,6 @@ pub async fn create_test_app_context() -> Arc<AppContext> {
     let worker_job_queue = Arc::new(OnceLock::new());
     let workflow_engines = Arc::new(OnceLock::new());
 
-    // Initialize MCP manager with empty config
-    let mcp_manager_lock = Arc::new(OnceLock::new());
-    let empty_config = McpConfig {
-        servers: vec![],
-        pool: Default::default(),
-        proxy: None,
-        warmup: vec![],
-        inventory: Default::default(),
-    };
-    let mcp_manager = McpManager::with_defaults(empty_config)
-        .await
-        .expect("Failed to create MCP manager");
-    mcp_manager_lock.set(Arc::new(mcp_manager)).ok();
-
     // Initialize registries
     let worker_registry = Arc::new(WorkerRegistry::new());
     let policy_registry = Arc::new(PolicyRegistry::new(router_config.policy.clone()));
@@ -197,7 +183,6 @@ pub async fn create_test_app_context() -> Arc<AppContext> {
             .load_monitor(None)
             .worker_job_queue(worker_job_queue)
             .workflow_engines(workflow_engines)
-            .mcp_manager(mcp_manager_lock)
             .build()
             .unwrap(),
     )

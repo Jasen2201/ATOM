@@ -2,21 +2,14 @@
 //!
 //! This module contains concrete step implementations for various workflows:
 //! - Worker management (registration, removal, updates)
-//! - MCP server registration
 //! - Tokenizer registration
 
-pub mod mcp_registration;
 pub mod tokenizer_registration;
 pub mod worker;
 pub mod workflow_data;
 pub mod workflow_engines;
 
 // Worker management (registration, removal)
-pub use mcp_registration::{
-    create_mcp_registration_workflow, create_mcp_workflow_data, ConnectMcpServerStep,
-    DiscoverMcpInventoryStep, McpServerConfigRequest, RegisterMcpServerStep,
-    ValidateRegistrationStep,
-};
 pub use tokenizer_registration::{
     create_tokenizer_registration_workflow, create_tokenizer_workflow_data, LoadTokenizerStep,
     TokenizerConfigRequest, TokenizerRemovalRequest,
@@ -64,7 +57,7 @@ pub use worker::{
 };
 // Typed workflow data structures
 pub use workflow_data::{
-    ExternalWorkerWorkflowData, LocalWorkerWorkflowData, McpWorkflowData, ProtocolUpdateRequest,
+    ExternalWorkerWorkflowData, LocalWorkerWorkflowData, ProtocolUpdateRequest,
     TokenizerWorkflowData, WorkerConfigRequest, WorkerList as WorkflowWorkerList,
     WorkerRegistrationData, WorkerRemovalWorkflowData, WorkerUpdateWorkflowData,
 };

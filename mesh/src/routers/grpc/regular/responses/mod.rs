@@ -5,9 +5,9 @@
 //! ## Architecture
 //!
 //! - `handlers` - Entry points: route_responses (thin dispatcher)
-//! - `non_streaming` - Non-streaming execution with MCP tool loop
-//! - `streaming` - Streaming execution with MCP tool loop
-//! - `common` - Shared helpers: ToolLoopState, tool preparation, MCP metadata builders
+//! - `non_streaming` - Non-streaming execution
+//! - `streaming` - Streaming execution
+//! - `common` - Shared helpers: tool extraction, conversation history loading
 //! - `conversions` - Request/response conversion between Responses and Chat formats
 
 mod common;

@@ -20,18 +20,6 @@ use crate::protocols::responses::{
 
 /// Field mappings for item types that store data in content
 pub const ITEM_TYPE_FIELDS: &[(&str, &[&str])] = &[
-    (
-        "mcp_call",
-        &[
-            "name",
-            "arguments",
-            "output",
-            "server_label",
-            "approval_request_id",
-            "error",
-        ],
-    ),
-    ("mcp_list_tools", &["tools", "server_label"]),
     ("function_call", &["call_id", "name", "arguments", "output"]),
     ("function_call_output", &["call_id", "output"]),
 ];

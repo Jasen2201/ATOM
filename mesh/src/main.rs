@@ -405,10 +405,6 @@ struct CliArgs {
     #[arg(long, help_heading = "Parsers")]
     tool_call_parser: Option<String>,
 
-    /// Path to MCP server configuration file
-    #[arg(long, help_heading = "Parsers")]
-    mcp_config_path: Option<String>,
-
     // ==================== Backend ====================
     /// Backend runtime to use
     #[arg(long, value_enum, default_value_t = Backend::Sglang, alias = "runtime", help_heading = "Backend")]
@@ -824,7 +820,6 @@ impl CliArgs {
             .maybe_redis(redis)
             .maybe_reasoning_parser(self.reasoning_parser.as_ref())
             .maybe_tool_call_parser(self.tool_call_parser.as_ref())
-            .maybe_mcp_config_path(self.mcp_config_path.as_ref())
             .dp_aware(self.dp_aware)
             .retries(!self.disable_retries)
             .circuit_breaker(!self.disable_circuit_breaker)

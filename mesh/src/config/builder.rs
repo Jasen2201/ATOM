@@ -1,5 +1,3 @@
-use smg_mcp::McpConfig;
-
 use super::{
     CircuitBreakerConfig, ConfigError, ConfigResult, DiscoveryConfig, HealthCheckConfig,
     HistoryBackend, MetricsConfig, OracleConfig, PolicyConfig, PostgresConfig, RedisConfig,
@@ -12,7 +10,6 @@ use crate::core::ConnectionMode;
 #[derive(Debug, Clone, Default)]
 pub struct RouterConfigBuilder {
     config: RouterConfig,
-    mcp_config_path: Option<String>,
 }
 
 impl RouterConfigBuilder {
@@ -22,10 +19,7 @@ impl RouterConfigBuilder {
 
     /// Takes ownership
     pub fn from_config(config: RouterConfig) -> Self {
-        Self {
-            config,
-            mcp_config_path: None,
-        }
+        Self { config }
     }
 
     pub fn from_config_ref(config: &RouterConfig) -> Self {
@@ -532,20 +526,6 @@ impl RouterConfigBuilder {
         self
     }
 
-    // ==================== MCP ====================
-
-    /// Config file loaded during build()
-    pub fn mcp_config_path<S: Into<String>>(mut self, path: S) -> Self {
-        self.mcp_config_path = Some(path.into());
-        self
-    }
-
-    /// Config file loaded during build()
-    pub fn maybe_mcp_config_path(mut self, path: Option<impl Into<String>>) -> Self {
-        self.mcp_config_path = path.map(|p| p.into());
-        self
-    }
-
     // ==================== Build ====================
 
     pub fn build(self) -> ConfigResult<RouterConfig> {
@@ -556,33 +536,12 @@ impl RouterConfigBuilder {
         self.into()
     }
 
-    pub fn build_with_validation(mut self, validate: bool) -> ConfigResult<RouterConfig> {
-        // Read MCP config from path if provided
-        self = self.read_mcp_config()?;
-
+    pub fn build_with_validation(self, validate: bool) -> ConfigResult<RouterConfig> {
         let config: RouterConfig = self.into();
         if validate {
             config.validate()?;
         }
         Ok(config)
-    }
-
-    /// Internal method to read MCP config from path
-    fn read_mcp_config(mut self) -> ConfigResult<Self> {
-        if let Some(mcp_config_path) = &self.mcp_config_path {
-            let contents = std::fs::read_to_string(mcp_config_path).map_err(|e| {
-                ConfigError::ValidationFailed {
-                    reason: format!("Failed to read MCP config from {}: {}", mcp_config_path, e),
-                }
-            })?;
-            let mcp_config: McpConfig =
-                serde_yaml::from_str(&contents).map_err(|e| ConfigError::ValidationFailed {
-                    reason: format!("Failed to parse MCP config from {}: {}", mcp_config_path, e),
-                })?;
-            self.config.mcp_config = Some(mcp_config);
-        }
-
-        Ok(self)
     }
 }
 

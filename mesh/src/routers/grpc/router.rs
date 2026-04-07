@@ -82,13 +82,6 @@ impl GrpcRouter {
         let embedding_pipeline =
             RequestPipeline::new_embeddings(worker_registry.clone(), _policy_registry.clone());
 
-        // Extract shared dependencies for responses contexts
-        let mcp_manager = ctx
-            .mcp_manager
-            .get()
-            .ok_or_else(|| "gRPC router requires MCP manager".to_string())?
-            .clone();
-
         // Create responses context
         let responses_context = ResponsesContext::new(
             Arc::new(pipeline.clone()),
@@ -96,7 +89,6 @@ impl GrpcRouter {
             ctx.response_storage.clone(),
             ctx.conversation_storage.clone(),
             ctx.conversation_item_storage.clone(),
-            mcp_manager.clone(),
         );
 
         Ok(GrpcRouter {

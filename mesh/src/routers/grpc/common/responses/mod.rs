@@ -1,4 +1,4 @@
-//! Shared response functionality used by both regular and harmony implementations
+//! Shared response functionality used by regular implementations
 
 pub(crate) mod context;
 pub(crate) mod handlers;
@@ -8,4 +8,4 @@ pub(crate) mod utils;
 // Re-export commonly used items
 pub(crate) use context::ResponsesContext;
 pub(crate) use streaming::build_sse_response;
-pub(crate) use utils::{ensure_mcp_connection, persist_response_if_needed};
+pub(crate) use utils::persist_response_if_needed;

@@ -2,11 +2,9 @@
 
 use std::sync::Arc;
 
-use axum::response::Response;
 use data_connector::{ConversationItemStorage, ConversationStorage, ResponseStorage};
 use serde_json::to_value;
-use smg_mcp::McpManager;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 use crate::{
     core::WorkerRegistry,
@@ -14,55 +12,14 @@ use crate::{
         common::Tool,
         responses::{ResponseTool, ResponseToolType, ResponsesRequest, ResponsesResponse},
     },
-    routers::{
-        error, mcp_utils::ensure_request_mcp_client, persistence_utils::persist_conversation_items,
-    },
+    routers::{error, persistence_utils::persist_conversation_items},
 };
-
-/// Ensure MCP connection succeeds if MCP tools are declared
-///
-/// Checks if request declares MCP tools, and if so, validates that
-/// the MCP clients can be created and connected.
-/// Returns Ok((has_mcp_tools, server_keys)) on success.
-pub(crate) async fn ensure_mcp_connection(
-    mcp_manager: &Arc<McpManager>,
-    tools: Option<&[ResponseTool]>,
-) -> Result<(bool, Vec<String>), Response> {
-    let has_mcp_tools = tools
-        .map(|t| {
-            t.iter()
-                .any(|tool| matches!(tool.r#type, ResponseToolType::Mcp))
-        })
-        .unwrap_or(false);
-
-    if has_mcp_tools {
-        if let Some(tools) = tools {
-            match ensure_request_mcp_client(mcp_manager, tools).await {
-                Some((_manager, server_keys)) => {
-                    return Ok((true, server_keys));
-                }
-                None => {
-                    error!(
-                        function = "ensure_mcp_connection",
-                        "Failed to connect to MCP servers"
-                    );
-                    return Err(error::failed_dependency(
-                        "connect_mcp_server_failed",
-                        "Failed to connect to MCP servers. Check server_url and authorization.",
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok((false, Vec::new()))
-}
 
 /// Validate that workers are available for the requested model
 pub(crate) fn validate_worker_availability(
     worker_registry: &Arc<WorkerRegistry>,
     model: &str,
-) -> Option<Response> {
+) -> Option<axum::response::Response> {
     let available_models = worker_registry.get_models();
 
     if !available_models.contains(&model.to_string()) {
@@ -79,23 +36,10 @@ pub(crate) fn validate_worker_availability(
     None
 }
 
-/// Extract function tools (and optionally MCP tools) from ResponseTools
-///
-/// This utility consolidates the logic for extracting tools with schemas from ResponseTools.
-/// It's used by both Harmony and Regular routers for different purposes:
-///
-/// - **Harmony router**: Extracts both Function and MCP tools (with `include_mcp: true`)
-///   because MCP schemas are populated by convert_mcp_tools_to_response_tools() before the
-///   pipeline runs. These tools are used to generate structural constraints in the
-///   Harmony preparation stage.
-///
-/// - **Regular router**: Extracts only Function tools (with `include_mcp: false`) during
-///   the initial conversion from ResponsesRequest to ChatCompletionRequest. MCP tools
-///   are merged later by the tool loop before being sent to the chat pipeline, where
-///   tool_choice constraints are generated for ALL tools (function + MCP combined).
+/// Extract function tools from ResponseTools
 pub(crate) fn extract_tools_from_response_tools(
     response_tools: Option<&[ResponseTool]>,
-    include_mcp: bool,
+    _include_mcp: bool,
 ) -> Vec<Tool> {
     let Some(tools) = response_tools else {
         return Vec::new();
@@ -103,30 +47,17 @@ pub(crate) fn extract_tools_from_response_tools(
 
     tools
         .iter()
-        .filter_map(|rt| {
-            match rt.r#type {
-                // Function tools: Schema in request
-                ResponseToolType::Function => rt.function.as_ref().map(|f| Tool {
-                    tool_type: "function".to_string(),
-                    function: f.clone(),
-                }),
-                // MCP tools: Schema populated by convert_mcp_tools_to_response_tools()
-                // Only include if requested (Harmony case)
-                ResponseToolType::Mcp if include_mcp => rt.function.as_ref().map(|f| Tool {
-                    tool_type: "function".to_string(),
-                    function: f.clone(),
-                }),
-                // Hosted tools: No schema available, skip
-                _ => None,
-            }
+        .filter_map(|rt| match rt.r#type {
+            ResponseToolType::Function => rt.function.as_ref().map(|f| Tool {
+                tool_type: "function".to_string(),
+                function: f.clone(),
+            }),
+            _ => None,
         })
         .collect()
 }
 
 /// Persist response to storage if store=true
-///
-/// Common helper function to avoid duplication across sync and streaming paths
-/// in both harmony and regular responses implementations.
 pub(crate) async fn persist_response_if_needed(
     conversation_storage: Arc<dyn ConversationStorage>,
     conversation_item_storage: Arc<dyn ConversationItemStorage>,

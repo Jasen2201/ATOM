@@ -15,10 +15,7 @@ use std::{collections::HashMap, sync::Arc};
 use serde::{Deserialize, Serialize};
 use wfaas::{WorkflowData, WorkflowError};
 
-use super::{
-    mcp_registration::McpServerConfigRequest, tokenizer_registration::TokenizerConfigRequest,
-    worker::local::WorkerRemovalRequest,
-};
+use super::{tokenizer_registration::TokenizerConfigRequest, worker::local::WorkerRemovalRequest};
 /// Re-export the protocol types for convenience
 pub use crate::protocols::worker_spec::{
     WorkerConfigRequest, WorkerUpdateRequest as ProtocolUpdateRequest,
@@ -280,34 +277,4 @@ impl WorkerUpdateWorkflowData {
     }
 }
 
-/// Data for MCP server registration workflow
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpWorkflowData {
-    pub config: McpServerConfigRequest,
-    pub validated: bool,
-    /// Application context (transient, must be re-initialized after deserialization)
-    #[serde(skip, default)]
-    pub app_context: Option<Arc<AppContext>>,
-    /// Connected MCP client (transient, not serialized)
-    #[serde(skip, default)]
-    pub mcp_client: Option<Arc<rmcp::service::RunningService<rmcp::RoleClient, ()>>>,
-}
-
-impl WorkflowData for McpWorkflowData {
-    fn workflow_type() -> &'static str {
-        "mcp_registration"
-    }
-}
-
-impl McpWorkflowData {
-    /// Validate that all transient fields are properly initialized.
-    pub fn validate_initialized(&self) -> Result<(), WorkflowError> {
-        if self.app_context.is_none() {
-            return Err(WorkflowError::ContextValueNotFound(
-                "app_context not initialized after deserialization".into(),
-            ));
-        }
-        Ok(())
-    }
-}
 

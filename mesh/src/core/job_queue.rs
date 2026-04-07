@@ -10,7 +10,6 @@ use std::{
 };
 
 use dashmap::DashMap;
-use smg_mcp::McpConfig;
 use tokio::sync::{mpsc, Semaphore};
 use tracing::{debug, error, info, warn};
 use wfaas::WorkflowId;
@@ -20,9 +19,8 @@ use crate::{
     config::{RouterConfig, RoutingMode},
     core::steps::{
         create_external_worker_workflow_data, create_local_worker_workflow_data,
-        create_mcp_workflow_data, create_tokenizer_workflow_data,
-        create_worker_removal_workflow_data, create_worker_update_workflow_data,
-        McpServerConfigRequest, TokenizerConfigRequest, TokenizerRemovalRequest,
+        create_tokenizer_workflow_data, create_worker_removal_workflow_data,
+        create_worker_update_workflow_data, TokenizerConfigRequest, TokenizerRemovalRequest,
     },
     protocols::worker_spec::{JobStatus, WorkerConfigRequest, WorkerUpdateRequest},
 };
@@ -43,12 +41,6 @@ pub enum Job {
     InitializeWorkersFromConfig {
         router_config: Box<RouterConfig>,
     },
-    InitializeMcpServers {
-        mcp_config: Box<McpConfig>,
-    },
-    RegisterMcpServer {
-        config: Box<McpServerConfigRequest>,
-    },
     AddTokenizer {
         config: Box<TokenizerConfigRequest>,
     },
@@ -65,8 +57,6 @@ impl Job {
             Job::UpdateWorker { .. } => "UpdateWorker",
             Job::RemoveWorker { .. } => "RemoveWorker",
             Job::InitializeWorkersFromConfig { .. } => "InitializeWorkersFromConfig",
-            Job::InitializeMcpServers { .. } => "InitializeMcpServers",
-            Job::RegisterMcpServer { .. } => "RegisterMcpServer",
             Job::AddTokenizer { .. } => "AddTokenizer",
             Job::RemoveTokenizer { .. } => "RemoveTokenizer",
         }
@@ -79,8 +69,6 @@ impl Job {
             Job::UpdateWorker { url, .. } => url,
             Job::RemoveWorker { url } => url,
             Job::InitializeWorkersFromConfig { .. } => "startup",
-            Job::InitializeMcpServers { .. } => "startup",
-            Job::RegisterMcpServer { config } => &config.name,
             Job::AddTokenizer { config } => &config.id,
             Job::RemoveTokenizer { request } => &request.id,
         }
@@ -494,67 +482,6 @@ impl JobQueue {
                 }
 
                 Ok(format!("Submitted {} AddWorker jobs", worker_count))
-            }
-            Job::InitializeMcpServers { mcp_config } => {
-                let mut server_count = 0;
-
-                debug!(
-                    "Creating RegisterMcpServer jobs for {} MCP servers from config",
-                    mcp_config.servers.len()
-                );
-
-                // Submit RegisterMcpServer jobs for each server in the config
-                for server_config in &mcp_config.servers {
-                    let mcp_server_request = McpServerConfigRequest {
-                        name: server_config.name.clone(),
-                        config: server_config.clone(),
-                    };
-
-                    let job = Job::RegisterMcpServer {
-                        config: Box::new(mcp_server_request),
-                    };
-
-                    if let Some(queue) = context.worker_job_queue.get() {
-                        queue.submit(job).await.map_err(|e| {
-                            format!(
-                                "Failed to submit RegisterMcpServer job for '{}': {}",
-                                server_config.name, e
-                            )
-                        })?;
-                        server_count += 1;
-                    } else {
-                        return Err("JobQueue not available".to_string());
-                    }
-                }
-
-                Ok(format!("Submitted {} RegisterMcpServer jobs", server_count))
-            }
-            Job::RegisterMcpServer { config } => {
-                let engines = context
-                    .workflow_engines
-                    .get()
-                    .ok_or_else(|| "Workflow engines not initialized".to_string())?;
-
-                let workflow_data =
-                    create_mcp_workflow_data((**config).clone(), Arc::clone(context));
-
-                let instance_id = engines
-                    .mcp
-                    .start_workflow(WorkflowId::new("mcp_registration"), workflow_data)
-                    .await
-                    .map_err(|e| format!("Failed to start MCP registration workflow: {:?}", e))?;
-
-                debug!(
-                    "Started MCP registration workflow for {} (instance: {})",
-                    config.name, instance_id
-                );
-
-                let timeout_duration = Duration::from_secs(7200 + 30); // 2hr + margin
-
-                engines
-                    .mcp
-                    .wait_for_completion(instance_id, &config.name, timeout_duration)
-                    .await
             }
             Job::AddTokenizer { config } => {
                 let engines = context

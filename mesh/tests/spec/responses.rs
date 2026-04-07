@@ -652,30 +652,6 @@ fn test_validate_tools_function_missing() {
     );
 }
 
-/// Test tools validation (MCP tool must have server_url)
-#[test]
-fn test_validate_tools_mcp_missing_url() {
-    let request = ResponsesRequest {
-        input: ResponseInput::Text("test".to_string()),
-        tools: Some(vec![ResponseTool {
-            r#type: ResponseToolType::Mcp,
-            function: None,
-            server_url: None, // Missing server_url
-            authorization: None,
-            server_label: None,
-            server_description: None,
-            require_approval: None,
-            allowed_tools: None,
-        }]),
-        ..Default::default()
-    };
-    let result = request.validate();
-    assert!(
-        result.is_err(),
-        "MCP tool without server_url should be invalid"
-    );
-}
-
 /// Test text format validation (JSON schema name cannot be empty)
 #[test]
 fn test_validate_text_format_json_schema_empty_name() {

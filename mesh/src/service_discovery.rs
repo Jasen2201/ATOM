@@ -851,7 +851,6 @@ mod tests {
             configured_tool_parser: None,
             worker_job_queue: worker_job_queue.clone(),
             workflow_engines: Arc::new(std::sync::OnceLock::new()),
-            mcp_manager: Arc::new(std::sync::OnceLock::new()),
             tokenizer_registry: Arc::new(crate::tokenizer::registry::TokenizerRegistry::new()),
             worker_service: Arc::new(WorkerService::new(
                 worker_registry,

@@ -1,11 +1,8 @@
 //! Streaming infrastructure for /v1/responses endpoint
 
-use std::collections::HashMap;
-
 use axum::{body::Body, http::StatusCode, response::Response};
 use bytes::Bytes;
 use serde_json::json;
-use smg_mcp as mcp;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
@@ -15,7 +12,7 @@ use crate::{
         chat::ChatCompletionStreamResponse,
         common::{Usage, UsageInfo},
         event_types::{
-            ContentPartEvent, FunctionCallEvent, McpEvent, OutputItemEvent, OutputTextEvent,
+            ContentPartEvent, FunctionCallEvent, OutputItemEvent, OutputTextEvent,
             ResponseEvent,
         },
         responses::{
@@ -26,8 +23,6 @@ use crate::{
 
 pub(crate) enum OutputItemType {
     Message,
-    McpListTools,
-    McpCall,
     FunctionCall,
     Reasoning,
 }
@@ -59,13 +54,6 @@ struct OutputItemState {
 /// - response.content_part.done
 /// - response.output_item.done
 /// - response.completed
-/// - response.mcp_list_tools.in_progress
-/// - response.mcp_list_tools.completed
-/// - response.mcp_call.in_progress
-/// - response.mcp_call_arguments.delta
-/// - response.mcp_call_arguments.done
-/// - response.mcp_call.completed
-/// - response.mcp_call.failed
 pub(crate) struct ResponseStreamEventEmitter {
     sequence_number: u64,
     pub response_id: String,
@@ -77,9 +65,6 @@ pub(crate) struct ResponseStreamEventEmitter {
     has_emitted_in_progress: bool,
     has_emitted_output_item_added: bool,
     has_emitted_content_part_added: bool,
-    // MCP call tracking
-    mcp_call_accumulated_args: HashMap<String, String>,
-    pub(crate) mcp_server_label: Option<String>, // Server label for MCP tools
     // Output item tracking
     output_items: Vec<OutputItemState>,
     next_output_index: usize,
@@ -103,8 +88,6 @@ impl ResponseStreamEventEmitter {
             has_emitted_in_progress: false,
             has_emitted_output_item_added: false,
             has_emitted_content_part_added: false,
-            mcp_call_accumulated_args: HashMap::new(),
-            mcp_server_label: None,
             output_items: Vec::new(),
             next_output_index: 0,
             current_message_output_index: None,
@@ -116,11 +99,6 @@ impl ResponseStreamEventEmitter {
     /// Set the original request for including all fields in response.completed
     pub fn set_original_request(&mut self, request: ResponsesRequest) {
         self.original_request = Some(request);
-    }
-
-    /// Set the MCP server label for MCP tool calls
-    pub fn set_mcp_server_label(&mut self, server_label: String) {
-        self.mcp_server_label = Some(server_label);
     }
 
     fn next_sequence(&mut self) -> u64 {
@@ -327,119 +305,6 @@ impl ResponseStreamEventEmitter {
     }
 
     // ========================================================================
-    // MCP Event Emission Methods
-    // ========================================================================
-
-    pub fn emit_mcp_list_tools_in_progress(&mut self, output_index: usize) -> serde_json::Value {
-        json!({
-            "type": McpEvent::LIST_TOOLS_IN_PROGRESS,
-            "sequence_number": self.next_sequence(),
-            "output_index": output_index
-        })
-    }
-
-    pub fn emit_mcp_list_tools_completed(
-        &mut self,
-        output_index: usize,
-        tools: &[mcp::Tool],
-    ) -> serde_json::Value {
-        let tool_items: Vec<_> = tools
-            .iter()
-            .map(|t| {
-                json!({
-                    "name": &t.name,
-                    "description": &t.description,
-                    "input_schema": t.input_schema.clone()
-                })
-            })
-            .collect();
-
-        json!({
-            "type": McpEvent::LIST_TOOLS_COMPLETED,
-            "sequence_number": self.next_sequence(),
-            "output_index": output_index,
-            "tools": tool_items
-        })
-    }
-
-    pub fn emit_mcp_call_in_progress(
-        &mut self,
-        output_index: usize,
-        item_id: &str,
-    ) -> serde_json::Value {
-        json!({
-            "type": McpEvent::CALL_IN_PROGRESS,
-            "sequence_number": self.next_sequence(),
-            "output_index": output_index,
-            "item_id": item_id
-        })
-    }
-
-    pub fn emit_mcp_call_arguments_delta(
-        &mut self,
-        output_index: usize,
-        item_id: &str,
-        delta: &str,
-    ) -> serde_json::Value {
-        // Accumulate arguments for this call
-        self.mcp_call_accumulated_args
-            .entry(item_id.to_string())
-            .or_default()
-            .push_str(delta);
-
-        json!({
-            "type": McpEvent::CALL_ARGUMENTS_DELTA,
-            "sequence_number": self.next_sequence(),
-            "output_index": output_index,
-            "item_id": item_id,
-            "delta": delta
-        })
-    }
-
-    pub fn emit_mcp_call_arguments_done(
-        &mut self,
-        output_index: usize,
-        item_id: &str,
-        arguments: &str,
-    ) -> serde_json::Value {
-        json!({
-            "type": McpEvent::CALL_ARGUMENTS_DONE,
-            "sequence_number": self.next_sequence(),
-            "output_index": output_index,
-            "item_id": item_id,
-            "arguments": arguments
-        })
-    }
-
-    pub fn emit_mcp_call_completed(
-        &mut self,
-        output_index: usize,
-        item_id: &str,
-    ) -> serde_json::Value {
-        json!({
-            "type": McpEvent::CALL_COMPLETED,
-            "sequence_number": self.next_sequence(),
-            "output_index": output_index,
-            "item_id": item_id
-        })
-    }
-
-    pub fn emit_mcp_call_failed(
-        &mut self,
-        output_index: usize,
-        item_id: &str,
-        error: &str,
-    ) -> serde_json::Value {
-        json!({
-            "type": McpEvent::CALL_FAILED,
-            "sequence_number": self.next_sequence(),
-            "output_index": output_index,
-            "item_id": item_id,
-            "error": error
-        })
-    }
-
-    // ========================================================================
     // Function Call Event Emission Methods
     // ========================================================================
 
@@ -519,8 +384,6 @@ impl ResponseStreamEventEmitter {
         self.next_output_index += 1;
 
         let id_prefix = match &item_type {
-            OutputItemType::McpListTools => "mcpl",
-            OutputItemType::McpCall => "mcp",
             OutputItemType::FunctionCall => "fc",
             OutputItemType::Message => "msg",
             OutputItemType::Reasoning => "rs",

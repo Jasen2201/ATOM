@@ -67,9 +67,6 @@ pub struct RouterConfig {
     pub tool_call_parser: Option<String>,
     #[serde(default)]
     pub tokenizer_cache: TokenizerCacheConfig,
-    /// Loaded from mcp_config_path during config creation
-    #[serde(skip)]
-    pub mcp_config: Option<smg_mcp::McpConfig>,
 }
 
 /// Tokenizer cache configuration
@@ -435,7 +432,6 @@ impl Default for RouterConfig {
             reasoning_parser: None,
             tool_call_parser: None,
             tokenizer_cache: TokenizerCacheConfig::default(),
-            mcp_config: None,
         }
     }
 }

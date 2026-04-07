@@ -27,8 +27,6 @@ const MAX_ITEMS_PER_REQUEST: usize = 20;
 const SUPPORTED_ITEM_TYPES: &[&str] = &[
     "message",
     "reasoning",
-    "mcp_list_tools",
-    "mcp_call",
     "item_reference",
     "function_call",
     "function_call_output",
@@ -40,8 +38,6 @@ const SUPPORTED_ITEM_TYPES: &[&str] = &[
     "code_interpreter_call",
     "local_shell_call",
     "local_shell_call_output",
-    "mcp_approval_request",
-    "mcp_approval_response",
     "custom_tool_call",
     "custom_tool_call_output",
 ];
@@ -49,8 +45,6 @@ const SUPPORTED_ITEM_TYPES: &[&str] = &[
 const IMPLEMENTED_ITEM_TYPES: &[&str] = &[
     "message",
     "reasoning",
-    "mcp_list_tools",
-    "mcp_call",
     "item_reference",
 ];
 

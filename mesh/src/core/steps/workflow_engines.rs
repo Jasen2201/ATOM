@@ -9,10 +9,9 @@ use wfaas::{EventSubscriber, InMemoryStore, WorkflowEngine};
 
 use super::{
     create_external_worker_workflow, create_local_worker_workflow,
-    create_mcp_registration_workflow, create_tokenizer_registration_workflow,
-    create_worker_removal_workflow, create_worker_update_workflow, ExternalWorkerWorkflowData,
-    LocalWorkerWorkflowData, McpWorkflowData, TokenizerWorkflowData, WorkerRemovalWorkflowData,
-    WorkerUpdateWorkflowData,
+    create_tokenizer_registration_workflow, create_worker_removal_workflow,
+    create_worker_update_workflow, ExternalWorkerWorkflowData, LocalWorkerWorkflowData,
+    TokenizerWorkflowData, WorkerRemovalWorkflowData, WorkerUpdateWorkflowData,
 };
 use crate::config::RouterConfig;
 
@@ -32,9 +31,6 @@ pub type WorkerRemovalEngine =
 pub type WorkerUpdateEngine =
     WorkflowEngine<WorkerUpdateWorkflowData, InMemoryStore<WorkerUpdateWorkflowData>>;
 
-/// Type alias for MCP registration workflow engine
-pub type McpEngine = WorkflowEngine<McpWorkflowData, InMemoryStore<McpWorkflowData>>;
-
 /// Type alias for tokenizer registration workflow engine
 pub type TokenizerEngine =
     WorkflowEngine<TokenizerWorkflowData, InMemoryStore<TokenizerWorkflowData>>;
@@ -53,8 +49,6 @@ pub struct WorkflowEngines {
     pub worker_removal: Arc<WorkerRemovalEngine>,
     /// Engine for worker update workflows
     pub worker_update: Arc<WorkerUpdateEngine>,
-    /// Engine for MCP server registration workflows
-    pub mcp: Arc<McpEngine>,
     /// Engine for tokenizer registration workflows
     pub tokenizer: Arc<TokenizerEngine>,
 }
@@ -86,11 +80,6 @@ impl WorkflowEngines {
             .register_workflow(create_worker_update_workflow())
             .expect("worker_update workflow should be valid");
 
-        // Create MCP engine
-        let mcp = WorkflowEngine::new();
-        mcp.register_workflow(create_mcp_registration_workflow())
-            .expect("mcp_registration workflow should be valid");
-
         // Create tokenizer engine
         let tokenizer = WorkflowEngine::new();
         tokenizer
@@ -102,7 +91,6 @@ impl WorkflowEngines {
             external_worker: Arc::new(external_worker),
             worker_removal: Arc::new(worker_removal),
             worker_update: Arc::new(worker_update),
-            mcp: Arc::new(mcp),
             tokenizer: Arc::new(tokenizer),
         }
     }
@@ -125,7 +113,6 @@ impl WorkflowEngines {
             .event_bus()
             .subscribe(subscriber.clone())
             .await;
-        self.mcp.event_bus().subscribe(subscriber.clone()).await;
         self.tokenizer.event_bus().subscribe(subscriber).await;
     }
 }

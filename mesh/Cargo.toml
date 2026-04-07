@@ -81,19 +81,9 @@ tool-parser = "=1.0.0"
 llm-tokenizer = "=1.0.0"
 wfaas = "=1.0.0"
 data-connector = "=1.0.0"
-smg-mcp = "=1.0.0"
 smg-mesh = "=1.0.0"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 openssl = "0.10.73"
-rmcp = { version = "0.8.3", features = ["client", "server",
-    "transport-child-process",
-    "transport-sse-client-reqwest",
-    "transport-streamable-http-client-reqwest",
-    "transport-streamable-http-server",
-    "transport-streamable-http-server-session",
-    "reqwest",
-    "auth"] }
-serde_yaml = "0.9"
 num-traits = "0.2"
 num-bigint = "0.4"
 base64 = "0.22"

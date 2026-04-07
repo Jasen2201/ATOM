@@ -1,17 +1,13 @@
 //! Shared context for /v1/responses endpoint handlers
-//!
-//! This context is used by both regular and harmony response implementations.
 
-use std::sync::{Arc, RwLock as StdRwLock};
+use std::sync::Arc;
 
 use data_connector::{ConversationItemStorage, ConversationStorage, ResponseStorage};
-use smg_mcp::McpManager;
 
 use crate::routers::grpc::{context::SharedComponents, pipeline::RequestPipeline};
 
 /// Context for /v1/responses endpoint
 ///
-/// Used by both regular and harmony implementations.
 /// All fields are Arc/shared references, so cloning this context is cheap.
 #[derive(Clone)]
 pub(crate) struct ResponsesContext {
@@ -29,12 +25,6 @@ pub(crate) struct ResponsesContext {
 
     /// Conversation item storage backend
     pub conversation_item_storage: Arc<dyn ConversationItemStorage>,
-
-    /// MCP manager for tool support
-    pub mcp_manager: Arc<McpManager>,
-
-    /// Server keys for MCP tools requested in this context
-    pub requested_servers: Arc<StdRwLock<Vec<String>>>,
 }
 
 impl ResponsesContext {
@@ -45,7 +35,6 @@ impl ResponsesContext {
         response_storage: Arc<dyn ResponseStorage>,
         conversation_storage: Arc<dyn ConversationStorage>,
         conversation_item_storage: Arc<dyn ConversationItemStorage>,
-        mcp_manager: Arc<McpManager>,
     ) -> Self {
         Self {
             pipeline,
@@ -53,8 +42,6 @@ impl ResponsesContext {
             response_storage,
             conversation_storage,
             conversation_item_storage,
-            mcp_manager,
-            requested_servers: Arc::new(StdRwLock::new(Vec::new())),
         }
     }
 }
