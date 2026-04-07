@@ -49,7 +49,6 @@ impl MockOpenAIServer {
 
         let app = Router::new()
             .route("/v1/chat/completions", post(mock_chat_completions))
-            .route("/v1/completions", post(mock_completions))
             .route("/v1/models", post(mock_models).get(mock_models))
             .with_state(state);
 
@@ -147,42 +146,6 @@ async fn mock_chat_completions(req: Request<Body>) -> Response {
 
         Json(response).into_response()
     }
-}
-
-/// Mock completions endpoint (legacy)
-async fn mock_completions(req: Request<Body>) -> Response {
-    let (_, body) = req.into_parts();
-    let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
-        Ok(bytes) => bytes,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
-    };
-
-    let request: serde_json::Value = match serde_json::from_slice(&body_bytes) {
-        Ok(req) => req,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
-    };
-
-    let model = request["model"].as_str().unwrap_or("text-davinci-003");
-
-    let response = json!({
-        "id": "cmpl-123456789",
-        "object": "text_completion",
-        "created": 1677652288,
-        "model": model,
-        "choices": [{
-            "text": " This is a mock completion response.",
-            "index": 0,
-            "logprobs": null,
-            "finish_reason": "stop"
-        }],
-        "usage": {
-            "prompt_tokens": 5,
-            "completion_tokens": 7,
-            "total_tokens": 12
-        }
-    });
-
-    Json(response).into_response()
 }
 
 /// Mock models endpoint

@@ -22,8 +22,6 @@ use smg::{
     config::{ConfigError, HistoryBackend, OracleConfig, RouterConfig, RoutingMode},
     protocols::{
         chat::{ChatCompletionRequest, ChatMessage, MessageContent},
-        common::StringOrArray,
-        completion::CompletionRequest,
         generate::GenerateRequest,
         responses::{ResponseInput, ResponsesGetParams, ResponsesRequest},
     },
@@ -47,46 +45,6 @@ fn create_minimal_chat_request() -> ChatCompletionRequest {
         "max_tokens": 100
     });
     serde_json::from_value(val).unwrap()
-}
-
-/// Helper function to create a minimal completion request for testing
-fn create_minimal_completion_request() -> CompletionRequest {
-    CompletionRequest {
-        model: "gpt-3.5-turbo".to_string(),
-        prompt: StringOrArray::String("Hello".to_string()),
-        suffix: None,
-        max_tokens: Some(100),
-        temperature: None,
-        top_p: None,
-        n: None,
-        stream: false,
-        stream_options: None,
-        logprobs: None,
-        echo: false,
-        stop: None,
-        presence_penalty: None,
-        frequency_penalty: None,
-        best_of: None,
-        logit_bias: None,
-        user: None,
-        seed: None,
-        top_k: None,
-        min_p: None,
-        min_tokens: None,
-        repetition_penalty: None,
-        regex: None,
-        ebnf: None,
-        json_schema: None,
-        stop_token_ids: None,
-        no_stop_trim: false,
-        ignore_eos: false,
-        skip_special_tokens: true,
-        lora_path: None,
-        session_params: None,
-        return_hidden_states: false,
-        sampling_seed: None,
-        other: serde_json::Map::new(),
-    }
 }
 
 /// Test basic OpenAI router creation and configuration
@@ -636,12 +594,6 @@ async fn test_unsupported_endpoints() {
     };
 
     let response = router.route_generate(None, &generate_request, None).await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
-
-    let completion_request = create_minimal_completion_request();
-    let response = router
-        .route_completion(None, &completion_request, None)
-        .await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
 }
 

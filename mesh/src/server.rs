@@ -42,7 +42,6 @@ use crate::{
     protocols::{
         chat::ChatCompletionRequest,
         classify::ClassifyRequest,
-        completion::CompletionRequest,
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
         parser::{ParseFunctionCallRequest, SeparateReasoningRequest},
@@ -189,17 +188,6 @@ async fn v1_chat_completions(
     state
         .router
         .route_chat(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_completions(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    Json(body): Json<CompletionRequest>,
-) -> Response {
-    state
-        .router
-        .route_completion(Some(&headers), &body, Some(&body.model))
         .await
 }
 
@@ -555,7 +543,6 @@ pub fn build_app(
     let protected_routes = Router::new()
         .route("/generate", post(generate))
         .route("/v1/chat/completions", post(v1_chat_completions))
-        .route("/v1/completions", post(v1_completions))
         .route("/rerank", post(rerank))
         .route("/v1/rerank", post(v1_rerank))
         .route("/v1/responses", post(v1_responses))

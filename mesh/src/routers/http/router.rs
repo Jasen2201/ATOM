@@ -29,7 +29,6 @@ use crate::{
         chat::ChatCompletionRequest,
         classify::ClassifyRequest,
         common::GenerationRequest,
-        completion::CompletionRequest,
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
         rerank::{RerankRequest, RerankResponse, RerankResult},
@@ -752,16 +751,6 @@ impl RouterTrait for Router {
         model_id: Option<&str>,
     ) -> Response {
         self.route_typed_request(headers, body, "/v1/chat/completions", model_id)
-            .await
-    }
-
-    async fn route_completion(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &CompletionRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        self.route_typed_request(headers, body, "/v1/completions", model_id)
             .await
     }
 

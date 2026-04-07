@@ -105,58 +105,6 @@ mod request_format_tests {
     }
 
     #[tokio::test]
-    async fn test_v1_completions_formats() {
-        let ctx = WorkerTestContext::new(vec![MockWorkerConfig {
-            port: 19003,
-            worker_type: WorkerType::Regular,
-            health_status: HealthStatus::Healthy,
-            response_delay_ms: 0,
-            fail_rate: 0.0,
-        }])
-        .await;
-
-        let payload = json!({
-            "model": "test-model",
-            "prompt": "Once upon a time",
-            "max_tokens": 50,
-            "stream": false
-        });
-
-        let result = ctx.make_request("/v1/completions", payload).await;
-        assert!(result.is_ok());
-
-        let response = result.unwrap();
-        assert!(response.get("choices").is_some());
-        assert_eq!(
-            response.get("object").and_then(|v| v.as_str()),
-            Some("text_completion")
-        );
-
-        let payload = json!({
-            "model": "test-model",
-            "prompt": ["First prompt", "Second prompt"],
-            "temperature": 0.5,
-            "stream": false
-        });
-
-        let result = ctx.make_request("/v1/completions", payload).await;
-        assert!(result.is_ok());
-
-        let payload = json!({
-            "model": "test-model",
-            "prompt": "The capital of France is",
-            "max_tokens": 10,
-            "logprobs": 5,
-            "stream": false
-        });
-
-        let result = ctx.make_request("/v1/completions", payload).await;
-        assert!(result.is_ok());
-
-        ctx.shutdown().await;
-    }
-
-    #[tokio::test]
     async fn test_batch_requests() {
         let ctx = WorkerTestContext::new(vec![MockWorkerConfig {
             port: 19004,
