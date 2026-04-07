@@ -8,8 +8,6 @@ default = ["grpc-client"]
 grpc-client = []
 grpc-server = []
 
-vendored-openssl = ["openssl/vendored"]
-
 [lints.rust]
 unused_qualifications = "warn"
 
@@ -83,10 +81,6 @@ wfaas = "=1.0.0"
 data-connector = "=1.0.0"
 smg-mesh = "=1.0.0"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-openssl = "0.10.73"
-num-traits = "0.2"
-num-bigint = "0.4"
-base64 = "0.22"
 openmetrics-parser = "0.4.4"
 arc-swap = "1.7.1"
 
@@ -99,12 +93,6 @@ tonic-prost = "0.14.2"
 bitflags = "2.10.0"
 once_cell = "1.21.3"
 
-# CRDT for Mesh state synchronization
-crdts = "7.3"
-redis = { version = "0.27.6", features = ["tokio-comp", "json", "connection-manager"] }
-
-
-# wasm dependencies
 
 [build-dependencies]
 chrono = { version = "0.4", features = ["clock"] }
@@ -123,15 +111,6 @@ opentelemetry-proto = { version = "0.27", features = ["gen-tonic"] }
 tonic-v12 = { version = "0.12.3", package = "tonic" }
 serial_test = "3.0"
 rsa = { version = "0.9", features = ["sha2"] }
-
-[[bench]]
-name = "request_processing"
-harness = false
-path = "benches/request_processing.rs"
-
-[[bench]]
-name = "router_registry_bench"
-harness = false
 
 [profile.release]
 opt-level = "z"     # Optimize for size
