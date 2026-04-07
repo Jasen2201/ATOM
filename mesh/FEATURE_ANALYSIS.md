@@ -3,13 +3,18 @@
 > 本文档基于代码逐文件分析，列举 mesh router 项目的所有功能。
 > 每个功能提供三个选项供讨论：保留 / 删除 / 待讨论。
 > 目标：以最小化功能原则迁移到 PD 分离项目中。
+>
+> **背景**: AMD 硬件团队，目标是 PD 分离最大化 GPU 性能。对标 NVIDIA Dynamo。
+> 短期目标：InferMax 打榜（需要极致性能）。长期目标：完整分布式解决方案。
 
 ---
 
 ## 1. 路由模式 (Routing Modes)
 
 ### 1.1 Regular 模式 (常规路由)
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [x] 保留 - [ ] 删除 - [ ] 待讨论
+
+> **建议保留理由**: 打榜需要对比 PD 分离 vs 非分离的性能差异，Regular 模式是基线。Dynamo 也支持 non-disaggregated 模式。保留成本低（代码复用 PD 的大部分逻辑），对比测试时有用。长期分布式方案也需要。
 
 **代码位置**: `src/config/types.rs:153` (`RoutingMode::Regular`)，`src/routers/http/router.rs`，`src/routers/grpc/router.rs`
 
@@ -62,7 +67,9 @@
 ---
 
 ### 2.3 Harmony 协议支持
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: Harmony 是 GPT-OSS 特有协议，与 PD 分离的核心逻辑无关。这是一个非常特化的功能，引入了 `openai-harmony` 外部依赖。PD 分离只需要标准的 chat/generate gRPC 流程。
 
 **代码位置**: `src/routers/grpc/harmony/`（整个目录）
 
@@ -105,6 +112,8 @@
 ### 3.3 CacheAware 策略
 - [x] 保留 - [ ] 删除 - [ ] 待讨论
 
+> **建议保留理由**: **这是打榜的关键武器**。KV cache 命中率直接决定 TTFT（Time To First Token）和吞吐量。Dynamo 的核心卖点之一就是 KV cache-aware routing。InferMax 打榜场景下，相同前缀的请求路由到同一 prefill worker 可以跳过重复的 prefill 计算，性能提升显著。Radix Tree 虽然复杂但代码独立。
+
 **代码位置**: `src/policies/cache_aware.rs`，`src/policies/tree.rs`
 
 **详细说明**: 缓存感知路由策略。基于 Radix Tree（前缀树）实现 KV cache 感知的路由决策。核心思想是将相似前缀的请求路由到同一个 worker，以最大化 KV cache 命中率。主要参数：
@@ -121,6 +130,8 @@
 ### 3.4 PowerOfTwo 策略
 - [x] 保留 - [ ] 删除 - [ ] 待讨论
 
+> **建议保留理由**: 负载感知路由对最大化 GPU 利用率至关重要。decode worker 之间的负载不均衡会导致部分 GPU 空闲、部分 GPU 过载，直接拉低打榜分数。PowerOfTwo 是实现简单但效果显著的负载均衡策略。Dynamo 也有类似的 load-based routing。
+
 **代码位置**: `src/policies/power_of_two.rs`
 
 **详细说明**: "两选一最轻"策略。随机选择两个 worker，然后选择负载较低的那个。在保持简单性的同时能较好地平衡负载。通过 `LoadMonitor` 定期从 worker 拉取实际负载信息（通过 `/get_loads` 或 engine metrics）。需要定期更新 worker 负载数据（`update_loads()`）。
@@ -128,7 +139,9 @@
 ---
 
 ### 3.5 Bucket 策略
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: 非核心策略，最小化 PD 不需要。
 
 **代码位置**: `src/policies/bucket.rs`
 
@@ -140,7 +153,9 @@
 ---
 
 ### 3.6 Manual 策略 (粘性会话)
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: 粘性会话是高级功能，PD 分离的最小化实现不需要。
 
 **代码位置**: `src/policies/manual.rs`
 
@@ -154,7 +169,9 @@
 ---
 
 ### 3.7 ConsistentHashing 策略
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: 最小化 PD 不需要一致性哈希。
 
 **代码位置**: `src/policies/consistent_hashing.rs`
 
@@ -167,7 +184,9 @@ O(log n) 查找复杂度。拓扑变化时只有约 1/N 的键需要重新分配
 ---
 
 ### 3.8 PrefixHash 策略
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [x] 保留 - [ ] 删除 - [ ] 待讨论
+
+> **建议保留理由**: PrefixHash 是 CacheAware 的轻量替代，O(log n) vs O(prefix_len)。打榜时可以对比两种策略的性能差异，选择最优的。而且 PrefixHash 对 token 数量的敏感度不同，某些场景下可能优于 CacheAware。保留作为打榜调优选项。
 
 **代码位置**: `src/policies/prefix_hash.rs`
 
@@ -200,7 +219,9 @@ O(log n) 查找代替 CacheAware 的 O(prefix_len) 前缀树遍历。
 ---
 
 ### 4.2 Completion API (`/v1/completions`)
-- [x] 保留 - [ ] 删除 - [ ] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: Completion API 是旧格式 API，现代使用场景少。PD 分离只需要 `/v1/chat/completions` 和 `/generate`。减少代码量。
 
 **代码位置**: `src/server.rs:195-204`
 
@@ -218,7 +239,9 @@ O(log n) 查找代替 CacheAware 的 O(prefix_len) 前缀树遍历。
 ---
 
 ### 4.4 Responses API (`/v1/responses`)
-- [x] 保留 - [ ] 删除 - [ ] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: Responses API 是 OpenAI 最新的 API 格式，实现非常复杂（CRUD + MCP tool loop + ResponseAccumulator + 持久化），与 PD 分离核心功能无关。这是最大的代码量来源之一。PD 分离只需要 `/v1/chat/completions` 即可。
 
 **代码位置**: `src/server.rs:229-305`，`src/routers/openai/responses/`
 
@@ -234,7 +257,9 @@ O(log n) 查找代替 CacheAware 的 O(prefix_len) 前缀树遍历。
 ---
 
 ### 4.5 Embedding API (`/v1/embeddings`)
-- [x] 保留 - [ ] 删除 - [ ] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: Embedding 是独立的模型能力，与 PD 分离（生成类模型）无关。Embedding 模型通常不做 PD 分离。
 
 **代码位置**: `src/server.rs:240-249`
 
@@ -243,7 +268,9 @@ O(log n) 查找代替 CacheAware 的 O(prefix_len) 前缀树遍历。
 ---
 
 ### 4.6 Rerank API (`/rerank`, `/v1/rerank`)
-- [x] 保留 - [ ] 删除 - [ ] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: Rerank 是独立的模型能力，与 PD 分离无关。
 
 **代码位置**: `src/server.rs:206-227`
 
@@ -252,7 +279,9 @@ O(log n) 查找代替 CacheAware 的 O(prefix_len) 前缀树遍历。
 ---
 
 ### 4.7 Classify API (`/v1/classify`)
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: 分类模型不做 PD 分离。
 
 **代码位置**: `src/server.rs:251-260`
 
@@ -261,7 +290,9 @@ O(log n) 查找代替 CacheAware 的 O(prefix_len) 前缀树遍历。
 ---
 
 ### 4.8 Conversations API (`/v1/conversations`)
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: 对话管理是 OpenAI Responses API 的配套功能，与 PD 分离核心无关。引入了 `data-connector` 的存储依赖，大量 CRUD 代码。
 
 **代码位置**: `src/server.rs:307-410`，`src/routers/conversations/handlers.rs`
 
@@ -282,6 +313,8 @@ O(log n) 查找代替 CacheAware 的 O(prefix_len) 前缀树遍历。
 ### 4.9 Tokenize / Detokenize API
 - [x] 保留 - [ ] 删除 - [ ] 待讨论
 
+> **建议保留理由**: CacheAware 和 PrefixHash 策略都依赖 tokenizer 来计算前缀 token。既然保留了这两个策略，tokenizer 必须保留。管理 API 可以简化（删除动态添加/删除），但启动时自动加载和 tokenize/detokenize 能力必须保留。
+
 **代码位置**: `src/server.rs:483-527`，`src/routers/tokenize/handlers.rs`
 
 **详细说明**: Tokenizer 管理和使用 API：
@@ -298,7 +331,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 4.10 Parse API（函数调用 / 推理解析）
-- [x] 保留 - [ ] 删除 - [] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: 函数调用和推理解析是高层 API 能力，PD 分离只需透传请求/响应，解析由客户端或上层服务处理。引入了 `tool_parser` 和 `reasoning_parser` 外部 crate 依赖。
 
 **代码位置**: `src/server.rs:80-92`，`src/routers/parse/handlers.rs`
 
@@ -312,6 +347,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 ### 4.11 Worker 管理 API
 - [x] 保留 - [ ] 删除 - [ ] 待讨论
+
+> **建议保留理由**: 长期分布式方案需要动态扩缩容。打榜场景下也需要运行时调整 worker 配置（如增加 decode worker 数量观察性能变化）。代码量不大，且已有完整实现。
 
 **代码位置**: `src/server.rs:424-477`，`src/core/worker_service.rs`
 
@@ -372,6 +409,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ### 5.1 Mesh Server (Gossip 协议集群)
 - [ ] 保留 - [ ] 删除 - [x] 待讨论
 
+> **建议待讨论理由**: 短期打榜不需要，但长期分布式方案可能需要多 router 实例的状态同步。这是最大的复杂度来源之一（smg-mesh crate、Gossip、CRDT、redis）。**建议短期删除、代码先 fork 保存，长期路线图中再评估是否需要。**
+
 **代码位置**: `src/server.rs:742-796`（启动代码），外部 crate `smg-mesh`
 
 **详细说明**: 基于 Gossip 协议的分布式集群功能。多个 router 实例通过 mesh 网络组成高可用集群。使用 CRDT（Conflict-free Replicated Data Types）实现无冲突的状态同步。核心组件：
@@ -385,7 +424,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 5.2 Mesh 管理 API (`/ha/*`)
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: 随 Mesh Server 一起删除。
 
 **代码位置**: `src/server.rs:664-681`，`src/routers/mesh/handlers.rs`
 
@@ -406,7 +447,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 5.3 全局速率限制 (Global Rate Limiting)
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: 随 Mesh Server 一起删除。全局速率限制依赖 mesh 集群。
 
 **代码位置**: `src/server.rs:762-766`，`smg-mesh` crate 的 `RateLimitWindow`
 
@@ -466,6 +509,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ### 6.5 Circuit Breaker (熔断器)
 - [x] 保留 - [ ] 删除 - [ ] 待讨论
 
+> **建议保留理由**: 长期分布式方案必需。代码独立（单文件），已经和 Worker trait 紧密集成。删除反而需要改动 Worker 接口。保留成本极低。
+
 **代码位置**: `src/core/circuit_breaker.rs`，`src/config/types.rs` (`CircuitBreakerConfig`)
 
 **详细说明**: 基于滑动窗口的熔断器实现，保护后端 worker 免受级联故障影响。三种状态：
@@ -485,6 +530,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ### 6.6 Retry (重试机制)
 - [x] 保留 - [ ] 删除 - [ ] 待讨论
 
+> **建议保留理由**: 打榜时 worker 偶尔超时不应该导致整个请求失败。重试到另一个 worker 可以提高成功率和 P99 延迟。代码独立，已深度集成到路由流程中。
+
 **代码位置**: `src/core/retry.rs`，`src/config/types.rs` (`RetryConfig`)
 
 **详细说明**: 指数退避重试机制。当请求到某个 worker 失败时自动重试到其他 worker。`RetryExecutor` 实现了通用的重试逻辑。可配置参数：
@@ -498,7 +545,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 6.7 Job Queue (作业队列)
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [x] 保留 - [ ] 删除 - [ ] 待讨论
+
+> **建议保留理由**: Job Queue 是 worker 初始化的核心基础设施。`InitializeWorkersFromConfig` 是启动时注册 worker 的入口。如果删除需要用同步初始化替代，改动面较大。保留后可以简化——只保留 worker 初始化相关的 Job 类型，删除 MCP/WASM 相关的。
 
 **代码位置**: `src/core/job_queue.rs`
 
@@ -513,7 +562,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 6.8 DP Aware 调度
-- [x] 保留 - [ ] 删除 - [ ] 待讨论
+- [ ] 保留 - [ ] 删除 - [x] 待讨论
+
+> **建议待讨论理由**: AMD 多卡场景下，DP 并行分组对 GPU 利用率有影响。如果你们的 PD 部署中 prefill worker 或 decode worker 内部有 DP 并行（如 TP+DP），则需要保留。如果每个 worker 是独立的单 TP 实例则可以删除。**取决于你们的具体部署拓扑。**
 
 **代码位置**: `src/core/worker_builder.rs` (`DPAwareWorkerBuilder`)，CLI `--dp-aware`
 
@@ -525,6 +576,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 ### 7.1 Service Discovery
 - [x] 保留 - [ ] 删除 - [ ] 待讨论
+
+> **建议保留理由**: 长期分布式方案必需。Dynamo 也有类似的 worker discovery 机制。K8s 是 GPU 集群的标准编排工具。自动发现 prefill/decode Pod、实时监听 Pod 变化、支持动态扩缩容——这些是分布式解决方案的基础能力。打榜时也可以先用 CLI 手动指定，Service Discovery 作为可选开关。
 
 **代码位置**: `src/service_discovery.rs`
 
@@ -546,6 +599,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ### 8.1 Prometheus Metrics
 - [x] 保留 - [ ] 删除 - [ ] 待讨论
 
+> **建议保留理由**: **打榜必须有指标**。TTFT、TPOT、throughput、KV cache 命中率、prefill/decode 延迟分布——这些指标需要 Prometheus 采集。没有 metrics 无法量化优化效果，也无法对比不同策略的性能差异。Dynamo 也有完整的 metrics 暴露。
+
 **代码位置**: `src/observability/metrics.rs`
 
 **详细说明**: Prometheus 指标采集和暴露。启动独立的 Prometheus exporter 服务（`--prometheus-port`，默认 29000）。收集的指标包括：
@@ -560,7 +615,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 8.2 OpenTelemetry Tracing
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: 分布式追踪是高级可观测性功能，最小化 PD 不需要。引入了 opentelemetry 全家桶依赖。
 
 **代码位置**: `src/observability/otel_trace.rs`
 
@@ -587,7 +644,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 8.4 InFlight Request Tracker
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [x] 保留 - [ ] 删除 - [ ] 待讨论
+
+> **建议保留理由**: 既然 Prometheus 保留，InFlight Tracker 也应保留。实时并发请求数是衡量 GPU 利用率的关键指标，打榜时需要观察请求排队和 GPU 饱和度。代码量小。
 
 **代码位置**: `src/observability/inflight_tracker.rs`
 
@@ -597,6 +656,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 ### 8.5 Event System
 - [ ] 保留 - [ ] 删除 - [x] 待讨论
+
+> **建议待讨论理由**: 事件系统定义了 worker_selected、request_dispatched 等关键事件，即使不用 OTel，这些结构化事件在日志中也有价值（debug PD 路由决策时可以看到选择了哪个 prefill/decode worker）。代码量小。如果 OTel 删除可以简化，但事件定义本身建议保留。
 
 **代码位置**: `src/observability/events.rs`
 
@@ -631,6 +692,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ### 9.3 Concurrency Limiter (并发限制)
 - [ ] 保留 - [ ] 删除 - [x] 待讨论
 
+> **建议待讨论理由**: 打榜时可能需要控制并发度来避免 GPU OOM（特别是 prefill 阶段内存消耗大）。但默认禁用（-1）即可，代码可以保留但不启用。**如果要极简可以删除，但长期分布式方案需要。**
+
 **代码位置**: `src/middleware.rs`（`ConcurrencyLimiter`、`concurrency_limit_middleware`）
 
 **详细说明**: 请求并发数限制和排队机制。当并发请求数达到 `--max-concurrent-requests` 时，新请求进入等待队列。使用 Token Bucket 算法（`src/core/token_bucket.rs`）进行令牌控制。`TokenGuardBody` 确保流式响应在完整发送后才释放令牌。配置参数：
@@ -662,7 +725,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 9.5 Request ID 中间件
-- [ ] 保留 - [x] 删除 - [ ] 待讨论
+- [x] 保留 - [ ] 删除 - [ ] 待讨论
+
+> **建议保留理由**: 代码量极小（单个 Layer），但对调试 PD 分离场景下的请求追踪非常有用。prefill→decode 两阶段转发时，request ID 是排查问题的关键。保留成本低、收益高。
 
 **代码位置**: `src/middleware.rs`（`RequestIdLayer`）
 
@@ -673,6 +738,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ### 9.6 CORS (跨域资源共享)
 - [ ] 保留 - [x] 删除 - [ ] 待讨论
 
+> **建议删除同意**: PD 分离 router 不会被浏览器直接访问，CORS 不需要。
+
 **代码位置**: `src/server.rs:1133-1156`
 
 **详细说明**: CORS 配置。不指定 `--cors-allowed-origins` 时默认允许所有来源。指定后仅允许列出的来源，限制方法为 GET/POST/OPTIONS，限制 headers 为 Content-Type 和 Authorization。预检请求缓存 3600 秒。
@@ -680,7 +747,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 9.7 HTTP Logging / Tracing Layer
-- [ ] 保留 - [x] 删除 - [ ] 待讨论
+- [x] 保留 - [ ] 删除 - [ ] 待讨论
+
+> **建议保留理由（不同意你的删除）**: HTTP 日志层代码量极小，但对调试 PD 路由问题极其重要。不保留的话连请求到了哪个 worker、延迟多少都看不到。建议保留 logging layer，但可以删除 HttpMetricsLayer（Prometheus 相关）。
 
 **代码位置**: `src/middleware.rs`（`create_logging_layer`、`HttpMetricsLayer`）
 
@@ -745,7 +814,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ## 13. IGW (Inference Gateway) 多模型支持
 
 ### 13.1 IGW 模式
-- [x] 保留 - [ ] 删除 - [] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: IGW（多模型路由）与 PD 分离无关。PD 分离通常是单模型场景。IGW 引入了 RouterManager 的多路由器模式、ModelCard 发现等大量逻辑。删除后 RouterManager 可以极大简化为单路由器模式。
 
 **代码位置**: `src/routers/router_manager.rs`，CLI `--enable-igw`
 
@@ -760,7 +831,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 13.2 Model Card / Model Type
-- [x] 保留 - [ ] 删除 - [ ] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: ModelCard 是 IGW 多模型发现的基础设施。如果 IGW 删除，ModelCard 也不需要。PD 分离是单模型场景，不需要模型发现。
 
 **代码位置**: `src/core/model_card.rs`，`src/core/model_type.rs`
 
@@ -771,7 +844,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ## 14. 多后端支持
 
 ### 14.1 Backend Runtime 支持
-- [x] 保留 - [ ] 删除 - [ ] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除（简化）理由**: 你们的后端是 ATOM（基于 SGLang）。可以硬编码为 SGLang backend，删除 vLLM/TrtLLM/OpenAI/Anthropic 的支持代码。`Backend` enum 和 `RuntimeType` 简化为只保留 SGLang。减少不必要的条件分支。
 
 **代码位置**: `src/main.rs:54-79` (`Backend` enum)，`src/core/worker.rs` (`RuntimeType`)
 
@@ -800,7 +875,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ## 16. 语言绑定 (Language Bindings)
 
 ### 16.1 Python Binding
-- [x] 保留 - [ ] 删除 - [ ] 待讨论
+- [ ] 保留 - [ ] 删除 - [x] 待讨论
+
+> **建议待讨论理由**: 如果 ATOM 本身是 Python 启动的（类似 SGLang），那 Python binding 方便集成。但如果你们倾向独立二进制部署则不需要。**取决于 ATOM 的启动和集成方式。**
 
 **代码位置**: `bindings/python/`
 
@@ -839,6 +916,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ### 17.1 Docker 构建
 - [ ] 保留 - [x] 删除 - [ ] 待讨论
 
+> **建议删除同意**: 你们会有自己的 Docker 构建流程。
+
 **代码位置**: `docker/Dockerfile_mesh`，`docker/build_mesh.sh`
 
 **详细说明**: Docker 容器化构建脚本和 Dockerfile。提供了标准化的构建流程，构建日志保存在 `docker/logs/` 目录。
@@ -857,6 +936,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ### 17.3 E2E 测试框架
 - [x] 保留 - [ ] 删除 - [ ] 待讨论
 
+> **建议保留理由**: 打榜需要验证准确性（MMLU）和性能。保留 `test_pd_mmlu.py`、`test_pd_perf.py`、`test_regular_perf.py`、基础 `test_openai_server.py`。删除 Responses、Embedding、Function calling 等不相关的测试文件。框架本身（conftest、fixtures、infra）保留。
+
 **代码位置**: `e2e_test/`
 
 **详细说明**: 端到端测试框架（Python pytest）。包含：
@@ -871,7 +952,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 17.4 Benchmark 基准测试
-- [x] 保留 - [ ] 删除 - [ ] 待讨论
+- [ ] 保留 - [ ] 删除 - [x] 待讨论
+
+> **建议待讨论理由**: `request_processing.rs`（请求处理延迟）和 `tree_benchmark.rs`（CacheAware 前缀树性能）对优化路由层延迟有参考价值。`wasm_middleware_latency.rs` 和 `manual_policy_benchmark.rs` 可删。保留有价值的，删除与已删功能相关的。
 
 **代码位置**: `benches/`
 
@@ -889,6 +972,8 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 ### 18.1 Worker 初始化工作流
 - [x] 保留 - [ ] 删除 - [ ] 待讨论
+
+> **建议保留理由**: Worker 初始化工作流包含了连接检测、元数据发现、策略更新等关键步骤，这些在动态扩缩容和 Service Discovery 场景下都需要。`wfaas` 框架虽然较重但已经集成好了。删除 MCP/WASM 相关的 workflow 步骤即可，保留 worker 相关的。
 
 **代码位置**: `src/core/steps/`（整个目录），外部 crate `wfaas`
 
@@ -938,7 +1023,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ## 20. Header 路由辅助
 
 ### 20.1 Header-based Routing
-- [] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
+
+> **建议删除理由**: `X-SMG-Target-Worker`、`X-SMG-Routing-Key` 等特殊 header 主要服务于 Manual/ConsistentHashing 等高级策略。最小化 PD 使用 RoundRobin/Random 不需要 header 路由。保留基本的认证 header 转发即可（几行代码）。
 
 **代码位置**: `src/routers/header_utils.rs`
 
@@ -987,3 +1074,130 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 | Header 路由 | 1 |
 | 配置系统 | 1 |
 | **总计** | **~71** |
+
+---
+
+## 建议决策汇总（AMD PD 分离 + 对标 Dynamo + InferMax 打榜）
+
+### 明确保留 — 33 项
+> 这些是 PD 分离核心 + 性能优化 + 长期分布式方案所必需的。
+
+| # | 功能 | 理由 |
+|---|------|------|
+| **路由核心** | | |
+| 1.1 | Regular 模式 | 性能基线对比 + 长期需要 |
+| 1.2 | PrefillDecode 模式 | **PD 核心** |
+| 2.1 | HTTP 路由转发 | PD 请求转发必需 |
+| 2.2 | gRPC 路由转发 | ATOM 后端用 gRPC |
+| **性能关键策略** | | |
+| 3.1 | Random 策略 | 基础策略 |
+| 3.2 | RoundRobin 策略 | 基础策略 |
+| 3.3 | CacheAware 策略 | **打榜关键：KV cache 命中率** |
+| 3.4 | PowerOfTwo 策略 | **打榜关键：GPU 利用率均衡** |
+| 3.8 | PrefixHash 策略 | CacheAware 轻量替代，调优选项 |
+| 3.9 | Policy Registry | 策略管理框架 |
+| **核心 API** | | |
+| 4.1 | Chat Completion API | 核心推理 API |
+| 4.3 | Generate API | SGLang 原生 API |
+| 4.9 | Tokenize API | CacheAware/PrefixHash 依赖 |
+| 4.11 | Worker 管理 API | 动态扩缩容 |
+| 4.12 | 健康检查 API | 运维必需 |
+| 4.13 | 模型信息 API | 基本信息查询 |
+| 4.14 | 缓存管理 API | KV cache 管理 |
+| **Worker 管理** | | |
+| 6.1 | Worker Registry | Worker 管理核心 |
+| 6.2 | Worker Builder | Worker 创建核心 |
+| 6.3 | Worker Manager | Worker 操作 + LoadMonitor |
+| 6.4 | Health Check | 运维必需 |
+| 6.5 | Circuit Breaker | 代码小、稳定性必需 |
+| 6.6 | Retry 机制 | 代码小、P99 延迟优化 |
+| 6.7 | Job Queue | Worker 初始化入口 |
+| **可观测性** | | |
+| 8.1 | Prometheus Metrics | **打榜必须：量化性能指标** |
+| 8.3 | Structured Logging | 调试必需 |
+| 8.4 | InFlight Tracker | GPU 利用率指标 |
+| **基础设施** | | |
+| 7.1 | K8s Service Discovery | 分布式部署必需 |
+| 9.5 | Request ID 中间件 | PD 调试追踪 |
+| 9.7 | HTTP Logging Layer | 请求日志 |
+| 15.1 | 优雅关闭 | 基本运维 |
+| 17.2 | Makefile | 构建基础 |
+| 17.3 | E2E 测试（裁剪后） | 打榜验证准确性+性能 |
+| 18.1 | Workflow Engine | Worker 生命周期管理 |
+| 19.1 | Version 模块 | 基础设施 |
+| 21.1 | 配置系统 | 基础设施 |
+
+### 明确删除 — 24 项
+> 这些与 PD 分离/性能优化无关，删除可大幅减少代码量和依赖。
+
+| # | 功能 | 理由 |
+|---|------|------|
+| 1.3 | OpenAI 模式 | 代理外部 API，与 AMD 硬件无关 |
+| 2.3 | Harmony 协议 | GPT-OSS 特有，AMD 不用 |
+| 3.5 | Bucket 策略 | 非核心，CacheAware 更优 |
+| 3.6 | Manual 策略 | 粘性会话，非性能场景 |
+| 3.7 | ConsistentHashing | 会话亲和性，非性能场景 |
+| 4.2 | Completion API | 旧格式 API |
+| 4.4 | Responses API | 复杂度巨大，与 PD 无关 |
+| 4.5 | Embedding API | 非生成类模型 |
+| 4.6 | Rerank API | 非生成类模型 |
+| 4.7 | Classify API | 非生成类模型 |
+| 4.8 | Conversations API | OpenAI 特有功能 |
+| 4.10 | Parse API | 客户端处理即可 |
+| 8.2 | OpenTelemetry | 重依赖，Prometheus 已够 |
+| 9.1 | Auth 中间件 | 内部服务不需要 |
+| 9.2 | Control Plane Auth | JWT/OIDC 内部不需要 |
+| 9.4 | WASM 中间件 | 非核心，wasmtime 重依赖 |
+| 9.6 | CORS | 非浏览器场景 |
+| 10.1 | MCP 集成 | 工具调用，与 PD 无关 |
+| 11.1 | TLS Server | 内部通信 |
+| 11.2 | mTLS Client | 内部通信 |
+| 12.1 | History Backend | 持久化存储，与 PD 无关 |
+| 13.1 | IGW 模式 | 多模型路由，PD 是单模型 |
+| 13.2 | Model Card | 随 IGW 删除 |
+| 14.1 | Backend Runtime（简化） | 只保留 SGLang，删除 vLLM/TrtLLM/OpenAI/Anthropic |
+| 16.2 | Golang Binding | 非核心 |
+| 17.1 | Docker 构建 | 自己的构建流程 |
+| 20.1 | Header-based Routing | 服务于 Manual/ConsistentHashing |
+
+### 待讨论 — 7 项
+> 需要根据具体部署拓扑和短期/长期优先级决定。
+
+| # | 功能 | 关键考虑 |
+|---|------|---------|
+| 5.1 | Mesh Server | 长期分布式需要多 router HA。**短期删除，长期路线图** |
+| 5.2 | Mesh 管理 API | 随 Mesh 决策 |
+| 5.3 | 全局速率限制 | 随 Mesh 决策 |
+| 6.8 | DP Aware | 取决于 AMD 多卡部署是否有 TP+DP 场景 |
+| 8.5 | Event System | 代码小，对 debug PD 路由决策有用。倾向保留 |
+| 9.3 | Concurrency Limiter | 打榜时防 OOM 有用，但默认禁用可保留代码 |
+| 16.1 | Python Binding | 取决于 ATOM 的集成方式 |
+| 17.4 | Benchmark（裁剪后） | 保留 request_processing + tree_benchmark |
+
+### 依赖裁剪建议
+
+删除以上功能后，可以移除以下 **Cargo 依赖**：
+- `openai-harmony` — Harmony 协议
+- `smg-mcp`, `rmcp` — MCP 支持
+- `smg-wasm`, `wasmtime`, `sha2` — WASM 支持
+- `smg-auth`, `jsonwebtoken`, `subtle` — 认证
+- `data-connector` — 数据持久化（简化为纯内存 stub）
+- `opentelemetry*`, `tracing-opentelemetry` — OTel
+- `crdts`, `redis` — Mesh/CRDT（如果 Mesh 删除）
+- `serde_yaml` — YAML 配置（MCP config）
+- `wasm-encoder` — 测试用 WASM 编码
+- `npyz` — 测试用 numpy 读取
+- `rsa` — 测试用 RSA
+
+**保留的关键依赖**：
+- `axum`, `tower`, `tower-http` — HTTP 服务框架
+- `tonic`, `prost` — gRPC
+- `reqwest` — HTTP 客户端
+- `tokio` — 异步运行时
+- `tracing`, `tracing-subscriber` — 日志
+- `metrics`, `metrics-exporter-prometheus` — Prometheus 指标
+- `kube`, `k8s-openapi` — K8s Service Discovery
+- `dashmap`, `blake3`, `xxhash-rust` — 高性能数据结构
+- `llm-tokenizer` — Tokenizer（CacheAware 依赖）
+- `smg-grpc-client` — gRPC 客户端
+- `wfaas` — Workflow engine
