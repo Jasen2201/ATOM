@@ -3,18 +3,16 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axum::{
     http::HeaderMap,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use tracing::debug;
 
 use super::{
     common::responses::{
         handlers::{cancel_response_impl, get_response_impl},
-        utils::validate_worker_availability,
         ResponsesContext,
     },
     context::SharedComponents,
-    harmony::{serve_harmony_responses, serve_harmony_responses_stream, HarmonyDetector},
     pipeline::RequestPipeline,
     regular::responses,
 };
@@ -37,11 +35,9 @@ use crate::{
 pub struct GrpcRouter {
     worker_registry: Arc<WorkerRegistry>,
     pipeline: RequestPipeline,
-    harmony_pipeline: RequestPipeline,
     embedding_pipeline: RequestPipeline,
     shared_components: Arc<SharedComponents>,
     responses_context: ResponsesContext,
-    harmony_responses_context: ResponsesContext,
     retry_config: RetryConfig,
 }
 
@@ -82,16 +78,6 @@ impl GrpcRouter {
             ctx.configured_reasoning_parser.clone(),
         );
 
-        // Create Harmony pipelines
-        let harmony_pipeline = RequestPipeline::new_harmony(
-            worker_registry.clone(),
-            _policy_registry.clone(),
-            tool_parser_factory.clone(),
-            reasoning_parser_factory.clone(),
-            ctx.configured_tool_parser.clone(),
-            ctx.configured_reasoning_parser.clone(),
-        );
-
         // Create Embedding pipeline
         let embedding_pipeline =
             RequestPipeline::new_embeddings(worker_registry.clone(), _policy_registry.clone());
@@ -103,30 +89,22 @@ impl GrpcRouter {
             .ok_or_else(|| "gRPC router requires MCP manager".to_string())?
             .clone();
 
-        // Helper closure to create responses context with a given pipeline
-        let create_responses_context = |pipeline: &RequestPipeline| {
-            ResponsesContext::new(
-                Arc::new(pipeline.clone()),
-                shared_components.clone(),
-                ctx.response_storage.clone(),
-                ctx.conversation_storage.clone(),
-                ctx.conversation_item_storage.clone(),
-                mcp_manager.clone(),
-            )
-        };
-
-        // Create responses contexts for both pipelines
-        let responses_context = create_responses_context(&pipeline);
-        let harmony_responses_context = create_responses_context(&harmony_pipeline);
+        // Create responses context
+        let responses_context = ResponsesContext::new(
+            Arc::new(pipeline.clone()),
+            shared_components.clone(),
+            ctx.response_storage.clone(),
+            ctx.conversation_storage.clone(),
+            ctx.conversation_item_storage.clone(),
+            mcp_manager.clone(),
+        );
 
         Ok(GrpcRouter {
             worker_registry,
             pipeline,
-            harmony_pipeline,
             embedding_pipeline,
             shared_components,
             responses_context,
-            harmony_responses_context,
             retry_config: ctx.router_config.effective_retry_config(),
         })
     }
@@ -138,21 +116,12 @@ impl GrpcRouter {
         body: &ChatCompletionRequest,
         model_id: Option<&str>,
     ) -> Response {
-        // Choose Harmony pipeline if workers indicate Harmony (checks architectures, hf_model_type)
-        let is_harmony =
-            HarmonyDetector::is_harmony_model_in_registry(&self.worker_registry, &body.model);
-
         debug!(
-            "Processing chat completion request for model: {}, using_harmony={}",
+            "Processing chat completion request for model: {}",
             model_id.unwrap_or(UNKNOWN_MODEL_ID),
-            is_harmony
         );
 
-        let pipeline = if is_harmony {
-            &self.harmony_pipeline
-        } else {
-            &self.pipeline
-        };
+        let pipeline = &self.pipeline;
 
         // Clone values needed for retry closure
         let request = Arc::new(body.clone());
@@ -250,61 +219,19 @@ impl GrpcRouter {
     }
 
     /// Main route_responses implementation
-    ///
-    /// Routes to either Harmony or regular responses implementation based on model detection
     async fn route_responses_impl(
         &self,
         headers: Option<&HeaderMap>,
         body: &ResponsesRequest,
         model_id: Option<&str>,
     ) -> Response {
-        // 0. Fast worker validation (fail-fast before expensive operations)
-        let requested_model: Option<&str> = model_id.or(Some(body.model.as_str()));
-
-        if let Some(error_response) = requested_model
-            .and_then(|model| validate_worker_availability(&self.worker_registry, model))
-        {
-            return error_response;
-        }
-
-        // Choose implementation based on Harmony model detection (checks worker metadata)
-        let is_harmony =
-            HarmonyDetector::is_harmony_model_in_registry(&self.worker_registry, &body.model);
-
-        if is_harmony {
-            debug!(
-                "Processing Harmony responses request for model: {}, streaming: {}",
-                model_id.unwrap_or(UNKNOWN_MODEL_ID),
-                body.stream.unwrap_or(false)
-            );
-            let harmony_ctx = ResponsesContext::new(
-                Arc::new(self.harmony_pipeline.clone()),
-                self.shared_components.clone(),
-                self.harmony_responses_context.response_storage.clone(),
-                self.harmony_responses_context.conversation_storage.clone(),
-                self.harmony_responses_context
-                    .conversation_item_storage
-                    .clone(),
-                self.harmony_responses_context.mcp_manager.clone(),
-            );
-
-            if body.stream.unwrap_or(false) {
-                serve_harmony_responses_stream(&harmony_ctx, body.clone()).await
-            } else {
-                match serve_harmony_responses(&harmony_ctx, body.clone()).await {
-                    Ok(response) => axum::Json(response).into_response(),
-                    Err(error_response) => error_response,
-                }
-            }
-        } else {
-            responses::route_responses(
-                &self.responses_context,
-                Arc::new(body.clone()),
-                headers.cloned(),
-                model_id.map(|s| s.to_string()),
-            )
-            .await
-        }
+        responses::route_responses(
+            &self.responses_context,
+            Arc::new(body.clone()),
+            headers.cloned(),
+            model_id.map(|s| s.to_string()),
+        )
+        .await
     }
 
     /// Main route_embeddings implementation

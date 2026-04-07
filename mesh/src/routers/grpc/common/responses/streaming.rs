@@ -22,7 +22,6 @@ use crate::{
             ResponseOutputItem, ResponseStatus, ResponsesRequest, ResponsesResponse, ResponsesUsage,
         },
     },
-    routers::grpc::harmony::responses::ToolResult,
 };
 
 pub(crate) enum OutputItemType {
@@ -122,36 +121,6 @@ impl ResponseStreamEventEmitter {
     /// Set the MCP server label for MCP tool calls
     pub fn set_mcp_server_label(&mut self, server_label: String) {
         self.mcp_server_label = Some(server_label);
-    }
-
-    /// Update mcp_call output items with tool execution results
-    ///
-    /// After MCP tools are executed, this updates the stored output items
-    /// to include the output field from the tool results.
-    pub(crate) fn update_mcp_call_outputs(&mut self, tool_results: &[ToolResult]) {
-        for tool_result in tool_results {
-            // Find the output item with matching call_id
-            for item_state in self.output_items.iter_mut() {
-                if let Some(ref mut item_data) = item_state.item_data {
-                    // Check if this is an mcp_call item with matching call_id
-                    if item_data.get("type").and_then(|t| t.as_str()) == Some("mcp_call")
-                        && item_data.get("call_id").and_then(|c| c.as_str())
-                            == Some(&tool_result.call_id)
-                    {
-                        // Add output field
-                        let output_str = serde_json::to_string(&tool_result.output)
-                            .unwrap_or_else(|_| "{}".to_string());
-                        item_data["output"] = json!(output_str);
-
-                        // Update status based on success
-                        if tool_result.is_error {
-                            item_data["status"] = json!("failed");
-                        }
-                        break;
-                    }
-                }
-            }
-        }
     }
 
     fn next_sequence(&mut self) -> u64 {

@@ -109,19 +109,6 @@ pub(crate) struct PreparationOutput {
     /// Filtered request (if tools were filtered)
     pub filtered_request: Option<ChatCompletionRequest>,
 
-    // Harmony-specific fields
-    /// Whether this is a Harmony request (default: false)
-    pub harmony_mode: bool,
-
-    /// Selection text for worker routing (Harmony only)
-    pub selection_text: Option<String>,
-
-    /// Harmony messages for history tracking (Harmony only)
-    #[allow(dead_code)]
-    pub harmony_messages: Option<Vec<super::harmony::HarmonyMessage>>,
-
-    /// Stop token IDs for Harmony models
-    pub harmony_stop_ids: Option<Vec<u32>>,
 }
 
 /// Worker selection (Step 2)
@@ -193,8 +180,6 @@ pub(crate) struct ResponseState {
     /// Final processed response
     pub final_response: Option<FinalResponse>,
 
-    /// Responses API iteration result (Harmony only, for tool loop orchestration)
-    pub responses_iteration_result: Option<super::harmony::ResponsesIterationResult>,
 }
 
 impl RequestContext {

@@ -81,10 +81,6 @@ impl PipelineStage for EmbeddingPreparationStage {
             processed_messages: None,
             tool_constraints: None,
             filtered_request: None,
-            harmony_mode: false,
-            selection_text: None,
-            harmony_messages: None,
-            harmony_stop_ids: None,
         });
 
         Ok(None)

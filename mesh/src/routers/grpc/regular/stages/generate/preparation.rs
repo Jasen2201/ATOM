@@ -72,11 +72,6 @@ impl GeneratePreparationStage {
             processed_messages: None,
             tool_constraints: None,
             filtered_request: None,
-            // Harmony fields (not used for generate requests)
-            harmony_mode: false,
-            selection_text: None,
-            harmony_messages: None,
-            harmony_stop_ids: None,
         });
 
         // Store stop decoder

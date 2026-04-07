@@ -97,7 +97,6 @@ serde_yaml = "0.9"
 num-traits = "0.2"
 num-bigint = "0.4"
 base64 = "0.22"
-openai-harmony = { git = "https://github.com/openai/harmony", tag = "v0.0.4" }
 openmetrics-parser = "0.4.4"
 arc-swap = "1.7.1"
 
