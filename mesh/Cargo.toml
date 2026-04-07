@@ -79,7 +79,6 @@ reasoning-parser = "=1.0.0"
 openai-protocol = { version = "=1.0.0", features = ["axum"] }
 tool-parser = "=1.0.0"
 llm-tokenizer = "=1.0.0"
-smg-auth = "=1.0.0"
 wfaas = "=1.0.0"
 data-connector = "=1.0.0"
 smg-mcp = "=1.0.0"
@@ -97,8 +96,6 @@ rmcp = { version = "0.8.3", features = ["client", "server",
     "reqwest",
     "auth"] }
 serde_yaml = "0.9"
-subtle = "2.6"
-jsonwebtoken = { version = "9.3", default-features = false, features = ["use_pem"] }
 num-traits = "0.2"
 num-bigint = "0.4"
 base64 = "0.22"

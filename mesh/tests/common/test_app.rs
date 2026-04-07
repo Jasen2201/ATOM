@@ -106,7 +106,6 @@ pub fn create_test_app(
     // Use the actual server's build_app function
     build_app(
         app_state,
-        None, // No control plane auth for tests
         router_config.max_payload_size,
         request_id_headers,
     )
@@ -144,7 +143,6 @@ pub fn create_test_app_with_context(
     // Use the actual server's build_app function
     build_app(
         app_state,
-        None, // No control plane auth for tests
         router_config.max_payload_size,
         request_id_headers,
     )

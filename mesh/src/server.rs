@@ -492,13 +492,11 @@ pub struct ServerConfig {
     pub request_id_headers: Option<Vec<String>>,
     pub shutdown_grace_period_secs: u64,
     /// Control plane authentication configuration
-    pub control_plane_auth: Option<crate::auth::ControlPlaneAuthConfig>,
     pub mesh_server_config: Option<MeshServerConfig>,
 }
 
 pub fn build_app(
     app_state: Arc<AppState>,
-    control_plane_auth_state: Option<crate::auth::ControlPlaneAuthState>,
     max_payload_size: usize,
     request_id_headers: Vec<String>,
 ) -> Router {
@@ -584,20 +582,6 @@ pub fn build_app(
             "/workers/{worker_id}",
             get(get_worker).put(update_worker).delete(delete_worker),
         );
-
-    // Apply authentication middleware to control plane routes
-    let apply_control_plane_auth = |routes: Router<Arc<AppState>>| {
-        if let Some(ref cp_state) = control_plane_auth_state {
-            routes.route_layer(axum::middleware::from_fn_with_state(
-                cp_state.clone(),
-                crate::auth::control_plane_auth_middleware,
-            ))
-        } else {
-            routes
-        }
-    };
-    let admin_routes = apply_control_plane_auth(admin_routes);
-    let worker_routes = apply_control_plane_auth(worker_routes);
 
     // HA management routes
     let mesh_routes = Router::new()
@@ -970,13 +954,8 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         ]
     });
 
-    // Initialize control plane authentication if configured
-    let control_plane_auth_state =
-        crate::auth::ControlPlaneAuthState::try_init(config.control_plane_auth.as_ref()).await;
-
     let app = build_app(
         app_state,
-        control_plane_auth_state,
         config.max_payload_size,
         request_id_headers,
     );
