@@ -483,15 +483,6 @@ struct CliArgs {
     #[arg(long, help_heading = "Redis Database")]
     redis_retention_days: Option<i64>,
 
-    // ==================== TLS/mTLS Security ====================
-    /// Path to server TLS certificate (PEM format)
-    #[arg(long, help_heading = "TLS/mTLS Security")]
-    tls_cert_path: Option<String>,
-
-    /// Path to server TLS private key (PEM format)
-    #[arg(long, help_heading = "TLS/mTLS Security")]
-    tls_key_path: Option<String>,
-
     // ==================== Tracing (OpenTelemetry) ====================
     /// Enable OpenTelemetry tracing
     #[arg(
@@ -856,8 +847,7 @@ impl CliArgs {
             .retries(!self.disable_retries)
             .circuit_breaker(!self.disable_circuit_breaker)
             .enable_wasm(self.enable_wasm)
-            .igw(self.enable_igw)
-            .maybe_server_cert_and_key(self.tls_cert_path.as_ref(), self.tls_key_path.as_ref());
+            .igw(self.enable_igw);
 
         builder.build()
     }

@@ -13,7 +13,6 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use rustls::crypto::ring;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use smg_mesh::{
@@ -964,7 +963,6 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
     let bind_addr = format!("{}:{}", config.host, config.port);
     info!("Starting server on {}", bind_addr);
 
-    // Parse address and set up graceful shutdown (common to both TLS and non-TLS)
     let addr: std::net::SocketAddr = bind_addr
         .parse()
         .map_err(|e| format!("Invalid address: {}", e))?;
@@ -977,31 +975,11 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         handle_clone.graceful_shutdown(Some(grace_period));
     });
 
-    if let (Some(cert), Some(key)) = (
-        &config.router_config.server_cert,
-        &config.router_config.server_key,
-    ) {
-        info!("TLS enabled");
-        ring::default_provider()
-            .install_default()
-            .map_err(|e| format!("Failed to install rustls ring provider: {e:?}"))?;
-
-        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem(cert.clone(), key.clone())
-            .await
-            .map_err(|e| format!("Failed to create TLS config: {}", e))?;
-
-        axum_server::bind_rustls(addr, tls_config)
-            .handle(handle)
-            .serve(app.into_make_service())
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    } else {
-        axum_server::bind(addr)
-            .handle(handle)
-            .serve(app.into_make_service())
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    }
+    axum_server::bind(addr)
+        .handle(handle)
+        .serve(app.into_make_service())
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
     // HA handler shutdown is handled by the signal in mesh_run! macro
     // No need to manually shutdown here
