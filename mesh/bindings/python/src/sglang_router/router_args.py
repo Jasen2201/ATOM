@@ -41,7 +41,6 @@ class RouterArgs:
     max_payload_size: int = 512 * 1024 * 1024  # 512MB default for large batches
     bucket_adjust_interval_secs: int = 5
     dp_aware: bool = False
-    enable_igw: bool = False  # Enable IGW (Inter-Gateway) mode for multi-model support
     api_key: Optional[str] = None
     log_dir: Optional[str] = None
     log_level: Optional[str] = None
@@ -326,12 +325,6 @@ class RouterArgs:
             action="store_true",
             help="Enable data parallelism aware schedule",
         )
-        routing_group.add_argument(
-            f"--{prefix}enable-igw",
-            action="store_true",
-            help="Enable IGW (Inference-Gateway) mode for multi-model support",
-        )
-
         # PD-specific arguments
         pd_group.add_argument(
             f"--{prefix}mini-lb",

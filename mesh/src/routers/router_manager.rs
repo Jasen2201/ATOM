@@ -1,8 +1,6 @@
-//! Router Manager for coordinating multiple routers and workers
+//! Router Manager for coordinating routers and workers
 //!
-//! Provides centralized management based on enable_igw flag:
-//! - Single Router Mode (enable_igw=false): Router owns workers directly
-//! - Multi-Router Mode (enable_igw=true): RouterManager coordinates everything
+//! Provides centralized management in single-router mode.
 
 use std::sync::Arc;
 
@@ -60,7 +58,6 @@ pub struct RouterManager {
     routers: Arc<DashMap<RouterId, Arc<dyn RouterTrait>>>,
     routers_snapshot: ArcSwap<Vec<Arc<dyn RouterTrait>>>,
     default_router: Arc<std::sync::RwLock<Option<RouterId>>>,
-    enable_igw: bool,
 }
 
 impl RouterManager {
@@ -70,7 +67,6 @@ impl RouterManager {
             routers: Arc::new(DashMap::new()),
             routers_snapshot: ArcSwap::from_pointee(Vec::new()),
             default_router: Arc::new(std::sync::RwLock::new(None)),
-            enable_igw: false, // Will be set properly in from_config
         }
     }
 
@@ -80,89 +76,19 @@ impl RouterManager {
     ) -> Result<Arc<Self>, String> {
         use crate::routers::RouterFactory;
 
-        let mut manager = Self::new(app_context.worker_registry.clone());
-        manager.enable_igw = config.router_config.enable_igw;
-        let manager = Arc::new(manager);
+        let manager = Arc::new(Self::new(app_context.worker_registry.clone()));
 
-        if config.router_config.enable_igw {
-            info!("Initializing RouterManager in multi-router mode (IGW)");
+        info!("Initializing RouterManager in single-router mode");
 
-            match RouterFactory::create_regular_router(app_context).await {
-                Ok(http_regular) => {
-                    info!("Created HTTP Regular router");
-                    manager.register_router(router_ids::HTTP_REGULAR, Arc::from(http_regular));
-                }
-                Err(e) => {
-                    warn!("Failed to create HTTP Regular router: {e}");
-                }
-            }
+        let single_router = Arc::from(RouterFactory::create_router(app_context).await?);
+        let router_id = Self::determine_router_id(
+            &config.router_config.mode,
+            &config.router_config.connection_mode,
+        );
 
-            // Always create gRPC Regular router in IGW mode
-            match RouterFactory::create_grpc_router(app_context).await {
-                Ok(grpc_regular) => {
-                    info!("Created gRPC Regular router");
-                    manager.register_router(router_ids::GRPC_REGULAR, Arc::from(grpc_regular));
-                }
-                Err(e) => {
-                    warn!("Failed to create gRPC Regular router: {e}");
-                }
-            }
-
-            info!("PD disaggregation auto-enabled for IGW mode, creating PD routers");
-
-            // Create HTTP PD router
-            match RouterFactory::create_pd_router(
-                None,
-                None,
-                &config.router_config.policy,
-                app_context,
-            )
-            .await
-            {
-                Ok(http_pd) => {
-                    info!("Created HTTP PD router");
-                    manager.register_router(router_ids::HTTP_PD, Arc::from(http_pd));
-                }
-                Err(e) => {
-                    warn!("Failed to create HTTP PD router: {e}");
-                }
-            }
-
-            // Create gRPC PD router
-            match RouterFactory::create_grpc_pd_router(
-                None,
-                None,
-                &config.router_config.policy,
-                app_context,
-            )
-            .await
-            {
-                Ok(grpc_pd) => {
-                    info!("Created gRPC PD router");
-                    manager.register_router(router_ids::GRPC_PD, Arc::from(grpc_pd));
-                }
-                Err(e) => {
-                    warn!("Failed to create gRPC PD router: {e}");
-                }
-            }
-
-            info!(
-                "RouterManager initialized with {} routers for multi-router mode",
-                manager.router_count(),
-            );
-        } else {
-            info!("Initializing RouterManager in single-router mode");
-
-            let single_router = Arc::from(RouterFactory::create_router(app_context).await?);
-            let router_id = Self::determine_router_id(
-                &config.router_config.mode,
-                &config.router_config.connection_mode,
-            );
-
-            info!("Created single router with ID: {}", router_id.as_str());
-            manager.register_router(router_id.clone(), single_router);
-            manager.set_default_router(router_id);
-        }
+        info!("Created single router with ID: {}", router_id.as_str());
+        manager.register_router(router_id.clone(), single_router);
+        manager.set_default_router(router_id);
 
         if manager.router_count() == 0 {
             return Err("No routers could be initialized".to_string());
@@ -303,74 +229,23 @@ impl RouterManager {
 
     pub fn select_router_for_request(
         &self,
-        headers: Option<&HeaderMap>,
+        _headers: Option<&HeaderMap>,
         model_id: Option<&str>,
     ) -> Option<Arc<dyn RouterTrait>> {
-        // In single-router mode (enable_igw=false), always use the default router
-        if !self.enable_igw {
-            let default_router = self
-                .default_router
-                .read()
-                .unwrap_or_else(|e| e.into_inner());
-            if let Some(ref default_id) = *default_router {
-                debug!(
-                    "Single-router mode: using default router {} for model {:?}",
-                    default_id.as_str(),
-                    model_id
-                );
-                return self.routers.get(default_id).map(|r| r.clone());
-            }
+        // Single-router mode: always use the default router
+        let default_router = self
+            .default_router
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(ref default_id) = *default_router {
+            debug!(
+                "Single-router mode: using default router {} for model {:?}",
+                default_id.as_str(),
+                model_id
+            );
+            return self.routers.get(default_id).map(|r| r.clone());
         }
-
-        let prefer_pd = headers
-            .and_then(|h| {
-                h.get("x-prefer-pd")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s == "true" || s == "1")
-            })
-            .unwrap_or(false);
-
-        let (num_regular_workers, num_pd_workers) = self.worker_registry.get_worker_distribution();
-        let mut best_router = None;
-        let mut best_score = -1.0;
-
-        // Extract router validity check into a closure to reduce redundancy
-        let is_router_valid =
-            |is_pd: bool| (is_pd && num_pd_workers > 0) || (!is_pd && num_regular_workers > 0);
-
-        if let Some(model) = model_id {
-            // Efficient Single Lookup for Specific Model
-            if let Some(router) = self.get_router_for_model(model) {
-                if is_router_valid(router.is_pd_mode()) {
-                    return Some(router);
-                }
-            }
-        } else {
-            // ZERO-ALLOCATION Snapshot Iteration (Hot Path Optimization)
-            // Atomic load avoids heap allocations and DashMap shard locks per-request
-            let routers_snapshot = self.routers_snapshot.load();
-            for router in routers_snapshot.iter() {
-                let mut score = 1.0;
-
-                let is_pd = router.is_pd_mode();
-                if prefer_pd && is_pd {
-                    score += 2.0;
-                } else if !prefer_pd && !is_pd {
-                    score += 1.0;
-                }
-                // TODO: Once routers expose worker stats, we can evaluate:
-                // - Average worker priority vs priority_threshold
-                // - Average worker cost vs max_cost
-                // - Current load and health status
-
-                if score > best_score && is_router_valid(is_pd) {
-                    best_score = score;
-                    best_router = Some(Arc::clone(router));
-                }
-            }
-        }
-
-        best_router
+        None
     }
 }
 
@@ -473,24 +348,10 @@ impl RouterTrait for RouterManager {
         body: &GenerateRequest,
         model_id: Option<&str>,
     ) -> Response {
-        // In IGW mode, resolve model_id and fail fast if not resolvable
-        // In non-IGW mode, pass through to router (router handles validation)
-        let effective_model_id = if self.enable_igw {
-            match self.resolve_model_id(model_id) {
-                Ok(id) => Some(id),
-                Err(err_response) => return *err_response,
-            }
-        } else {
-            None
-        };
-
-        let router =
-            self.select_router_for_request(headers, effective_model_id.as_deref().or(model_id));
+        let router = self.select_router_for_request(headers, model_id);
 
         if let Some(router) = router {
-            router
-                .route_generate(headers, body, effective_model_id.as_deref().or(model_id))
-                .await
+            router.route_generate(headers, body, model_id).await
         } else {
             (
                 StatusCode::NOT_FOUND,
@@ -506,26 +367,10 @@ impl RouterTrait for RouterManager {
         body: &ChatCompletionRequest,
         model_id: Option<&str>,
     ) -> Response {
-        // In IGW mode, resolve model_id and fail fast if not resolvable
-        // In non-IGW mode, pass through to router (router handles validation)
-        let effective_model_id = if self.enable_igw {
-            // Use provided model_id or fall back to body.model
-            let model = model_id.or(Some(&body.model));
-            match self.resolve_model_id(model) {
-                Ok(id) => Some(id),
-                Err(err_response) => return *err_response,
-            }
-        } else {
-            None
-        };
-
-        let router =
-            self.select_router_for_request(headers, effective_model_id.as_deref().or(model_id));
+        let router = self.select_router_for_request(headers, model_id);
 
         if let Some(router) = router {
-            router
-                .route_chat(headers, body, effective_model_id.as_deref().or(model_id))
-                .await
+            router.route_chat(headers, body, model_id).await
         } else {
             (
                 StatusCode::NOT_FOUND,

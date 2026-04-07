@@ -41,8 +41,6 @@ pub struct RouterConfig {
     #[serde(default)]
     pub disable_circuit_breaker: bool,
     pub health_check: HealthCheckConfig,
-    #[serde(default)]
-    pub enable_igw: bool,
     /// Can be a HuggingFace model ID or local path
     pub model_path: Option<String>,
     /// Overrides model_path tokenizer if provided
@@ -403,7 +401,6 @@ impl Default for RouterConfig {
             disable_retries: false,
             disable_circuit_breaker: false,
             health_check: HealthCheckConfig::default(),
-            enable_igw: false,
             connection_mode: ConnectionMode::Http,
             model_path: None,
             tokenizer_path: None,
@@ -474,10 +471,6 @@ impl RouterConfig {
         cfg
     }
 
-    /// Check if running in IGW (Inference Gateway) mode
-    pub fn is_igw_mode(&self) -> bool {
-        self.enable_igw
-    }
 }
 
 #[cfg(test)]

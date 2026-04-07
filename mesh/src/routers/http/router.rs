@@ -44,7 +44,6 @@ pub struct Router {
     policy_registry: Arc<PolicyRegistry>,
     client: Client,
     dp_aware: bool,
-    enable_igw: bool,
     retry_config: RetryConfig,
 }
 
@@ -55,7 +54,6 @@ impl std::fmt::Debug for Router {
             .field("policy_registry", &self.policy_registry)
             .field("client", &self.client)
             .field("dp_aware", &self.dp_aware)
-            .field("enable_igw", &self.enable_igw)
             .field("retry_config", &self.retry_config)
             .finish()
     }
@@ -69,7 +67,6 @@ impl Router {
             policy_registry: ctx.policy_registry.clone(),
             client: ctx.client.clone(),
             dp_aware: ctx.router_config.dp_aware,
-            enable_igw: ctx.router_config.enable_igw,
             retry_config: ctx.router_config.effective_retry_config(),
         })
     }
@@ -132,7 +129,7 @@ impl Router {
         text: Option<&str>,
         headers: Option<&HeaderMap>,
     ) -> Option<Arc<dyn Worker>> {
-        let effective_model_id = if !self.enable_igw { None } else { model_id };
+        let effective_model_id: Option<&str> = None;
 
         // Get workers for the specified model O(1), filtered by connection mode
         let workers = self.worker_registry.get_workers_filtered(
@@ -801,7 +798,6 @@ mod tests {
             dp_aware: false,
             client: Client::new(),
             retry_config: RetryConfig::default(),
-            enable_igw: false,
         }
     }
 

@@ -98,21 +98,17 @@ async fn readiness(State(state): State<Arc<AppState>>) -> Response {
     let workers = state.context.worker_registry.get_all();
     let healthy_workers: Vec<_> = workers.iter().filter(|w| w.is_healthy()).collect();
 
-    let is_ready = if state.context.router_config.enable_igw {
-        !healthy_workers.is_empty()
-    } else {
-        match &state.context.router_config.mode {
-            RoutingMode::PrefillDecode { .. } => {
-                let has_prefill = healthy_workers
-                    .iter()
-                    .any(|w| matches!(w.worker_type(), WorkerType::Prefill { .. }));
-                let has_decode = healthy_workers
-                    .iter()
-                    .any(|w| matches!(w.worker_type(), WorkerType::Decode));
-                has_prefill && has_decode
-            }
-            RoutingMode::Regular { .. } => !healthy_workers.is_empty(),
+    let is_ready = match &state.context.router_config.mode {
+        RoutingMode::PrefillDecode { .. } => {
+            let has_prefill = healthy_workers
+                .iter()
+                .any(|w| matches!(w.worker_type(), WorkerType::Prefill { .. }));
+            let has_decode = healthy_workers
+                .iter()
+                .any(|w| matches!(w.worker_type(), WorkerType::Decode));
+            has_prefill && has_decode
         }
+        RoutingMode::Regular { .. } => !healthy_workers.is_empty(),
     };
 
     if is_ready {

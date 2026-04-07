@@ -304,20 +304,6 @@ impl RouterConfigBuilder {
         self
     }
 
-    // ==================== IGW Mode ====================
-
-    pub fn enable_igw(mut self) -> Self {
-        self.config.enable_igw = true;
-        self
-    }
-
-    /// Use proxy mode
-    pub fn disable_igw(mut self) -> Self {
-        self.config.enable_igw = false;
-        self
-    }
-
-
     pub fn model_path<S: Into<String>>(mut self, path: S) -> Self {
         self.config.model_path = Some(path.into());
         self
@@ -394,11 +380,6 @@ impl RouterConfigBuilder {
     /// Inverse of disable_circuit_breaker field
     pub fn circuit_breaker(mut self, enable: bool) -> Self {
         self.config.disable_circuit_breaker = !enable;
-        self
-    }
-
-    pub fn igw(mut self, enable: bool) -> Self {
-        self.config.enable_igw = enable;
         self
     }
 

@@ -174,10 +174,6 @@ struct CliArgs {
     #[arg(long, default_value_t = false, help_heading = "Routing Policy")]
     dp_aware: bool,
 
-    /// Enable IGW (Inference Gateway) mode for multi-model support
-    #[arg(long, default_value_t = false, help_heading = "Routing Policy")]
-    enable_igw: bool,
-
     // ==================== PD Disaggregation ====================
     /// Enable PD (Prefill-Decode) disaggregated mode
     #[arg(long, default_value_t = false, help_heading = "PD Disaggregation")]
@@ -616,8 +612,7 @@ impl CliArgs {
             .maybe_tool_call_parser(self.tool_call_parser.as_ref())
             .dp_aware(self.dp_aware)
             .retries(!self.disable_retries)
-            .circuit_breaker(!self.disable_circuit_breaker)
-            .igw(self.enable_igw);
+            .circuit_breaker(!self.disable_circuit_breaker);
 
         builder.build()
     }
@@ -755,22 +750,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse_from(filtered_args);
 
     // Handle subcommands or use direct args
-    let mut cli_args = match cli.command {
+    let cli_args = match cli.command {
         Some(Commands::Launch { args }) => args,
         None => cli.router_args,
     };
 
-    // Automatically enable IGW mode when service discovery is turned on
-    if cli_args.service_discovery && !cli_args.enable_igw {
-        println!("INFO: IGW mode automatically enabled because service discovery is turned on");
-        cli_args.enable_igw = true;
-    }
-
     println!("SGLang Router starting...");
     println!("Host: {}:{}", cli_args.host, cli_args.port);
-    let mode_str = if cli_args.enable_igw {
-        "IGW (Inference Gateway)".to_string()
-    } else if cli_args.pd_disaggregation {
+    let mode_str = if cli_args.pd_disaggregation {
         "PD Disaggregated".to_string()
     } else {
         format!("Regular ({})", cli_args.backend)
@@ -788,13 +775,11 @@ Provide --worker-urls or PD flags as usual.",
         Backend::Sglang => {}
     }
 
-    if !cli_args.enable_igw {
-        println!("Policy: {}", cli_args.policy);
+    println!("Policy: {}", cli_args.policy);
 
-        if cli_args.pd_disaggregation && !prefill_urls.is_empty() {
-            println!("Prefill nodes: {:?}", prefill_urls);
-            println!("Decode nodes: {:?}", cli_args.decode);
-        }
+    if cli_args.pd_disaggregation && !prefill_urls.is_empty() {
+        println!("Prefill nodes: {:?}", prefill_urls);
+        println!("Decode nodes: {:?}", cli_args.decode);
     }
 
     let router_config = cli_args.to_router_config(prefill_urls)?;

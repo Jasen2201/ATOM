@@ -415,10 +415,6 @@ impl ConfigValidator {
     }
 
     fn validate_compatibility(config: &RouterConfig) -> ConfigResult<()> {
-        if config.enable_igw {
-            return Ok(());
-        }
-
         let has_service_discovery = config.discovery.as_ref().is_some_and(|d| d.enabled);
 
         if !has_service_discovery {

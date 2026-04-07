@@ -48,7 +48,6 @@ pub struct PDRouter {
     pub client: Client,
     pub retry_config: RetryConfig,
     pub api_key: Option<String>,
-    pub enable_igw: bool,
 }
 
 #[derive(Clone)]
@@ -161,7 +160,6 @@ impl PDRouter {
             client: ctx.client.clone(),
             retry_config: ctx.router_config.effective_retry_config(),
             api_key: ctx.router_config.api_key.clone(),
-            enable_igw: ctx.router_config.enable_igw,
         })
     }
 
@@ -693,11 +691,11 @@ impl PDRouter {
         model_id: Option<&str>,
         headers: Option<&HeaderMap>,
     ) -> Result<(Arc<dyn Worker>, Arc<dyn Worker>), String> {
-        let effective_model_id = if !self.enable_igw { None } else { model_id };
+        let effective_model_id: Option<&str> = None;
 
         debug!(
-            "Selecting PD pair: enable_igw={}, model_id={:?}, effective_model_id={:?}",
-            self.enable_igw, model_id, effective_model_id
+            "Selecting PD pair: model_id={:?}, effective_model_id={:?}",
+            model_id, effective_model_id
         );
 
         let prefill_workers = if let Some(model) = effective_model_id {
@@ -1340,7 +1338,6 @@ mod tests {
             client: Client::new(),
             retry_config: RetryConfig::default(),
             api_key: Some("test_api_key".to_string()),
-            enable_igw: false,
         }
     }
 

@@ -235,7 +235,6 @@ struct Router {
     health_check_interval_secs: u64,
     health_check_endpoint: String,
     disable_health_check: bool,
-    enable_igw: bool,
     queue_size: usize,
     queue_timeout_secs: u64,
     rate_limit_tokens_per_second: Option<i32>,
@@ -312,11 +311,7 @@ impl Router {
             }
         };
 
-        let mode = if self.enable_igw {
-            RoutingMode::Regular {
-                worker_urls: vec![],
-            }
-        } else if self.pd_disaggregation {
+        let mode = if self.pd_disaggregation {
             RoutingMode::PrefillDecode {
                 prefill_urls: self.prefill_urls.clone().unwrap_or_default(),
                 decode_urls: self.decode_urls.clone().unwrap_or_default(),
@@ -418,7 +413,6 @@ impl Router {
             .dp_aware(self.dp_aware)
             .retries(!self.disable_retries)
             .circuit_breaker(!self.disable_circuit_breaker)
-            .igw(self.enable_igw)
             .maybe_client_cert_and_key(
                 self.client_cert_path.as_ref(),
                 self.client_key_path.as_ref(),
@@ -493,7 +487,6 @@ impl Router {
         health_check_interval_secs = 60,
         health_check_endpoint = String::from("/health"),
         disable_health_check = false,
-        enable_igw = false,
         queue_size = 100,
         queue_timeout_secs = 60,
         rate_limit_tokens_per_second = None,
@@ -575,8 +568,7 @@ impl Router {
         health_check_interval_secs: u64,
         health_check_endpoint: String,
         disable_health_check: bool,
-        enable_igw: bool,
-        queue_size: usize,
+            queue_size: usize,
         queue_timeout_secs: u64,
         rate_limit_tokens_per_second: Option<i32>,
         model_path: Option<String>,
@@ -670,7 +662,6 @@ impl Router {
             health_check_interval_secs,
             health_check_endpoint,
             disable_health_check,
-            enable_igw,
             queue_size,
             queue_timeout_secs,
             rate_limit_tokens_per_second,
