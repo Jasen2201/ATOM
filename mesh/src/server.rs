@@ -41,7 +41,6 @@ use crate::{
     },
     protocols::{
         chat::ChatCompletionRequest,
-        classify::ClassifyRequest,
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
         parser::{ParseFunctionCallRequest, SeparateReasoningRequest},
@@ -209,17 +208,6 @@ async fn v1_embeddings(
     state
         .router
         .route_embeddings(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_classify(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    Json(body): Json<ClassifyRequest>,
-) -> Response {
-    state
-        .router
-        .route_classify(Some(&headers), &body, Some(&body.model))
         .await
 }
 
@@ -521,7 +509,6 @@ pub fn build_app(
         .route("/v1/chat/completions", post(v1_chat_completions))
         .route("/v1/responses", post(v1_responses))
         .route("/v1/embeddings", post(v1_embeddings))
-        .route("/v1/classify", post(v1_classify))
         .route("/v1/responses/{response_id}", get(v1_responses_get))
         .route(
             "/v1/responses/{response_id}/cancel",

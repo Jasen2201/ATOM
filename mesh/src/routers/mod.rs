@@ -12,7 +12,6 @@ use axum::{
 
 use crate::protocols::{
     chat::ChatCompletionRequest,
-    classify::ClassifyRequest,
     embedding::EmbeddingRequest,
     generate::GenerateRequest,
     responses::{ResponsesGetParams, ResponsesRequest},
@@ -158,16 +157,6 @@ pub trait RouterTrait: Send + Sync + Debug {
         _model_id: Option<&str>,
     ) -> Response {
         (StatusCode::NOT_IMPLEMENTED, "Embeddings not implemented").into_response()
-    }
-
-    /// Route classification requests (OpenAI-compatible /v1/classify)
-    async fn route_classify(
-        &self,
-        _headers: Option<&HeaderMap>,
-        _body: &ClassifyRequest,
-        _model_id: Option<&str>,
-    ) -> Response {
-        (StatusCode::NOT_IMPLEMENTED, "Classify not implemented").into_response()
     }
 
     /// Get router type name

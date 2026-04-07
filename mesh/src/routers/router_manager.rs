@@ -24,7 +24,6 @@ use crate::{
     core::{ConnectionMode, RuntimeType, WorkerRegistry, WorkerType},
     protocols::{
         chat::ChatCompletionRequest,
-        classify::ClassifyRequest,
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
         responses::{ResponsesGetParams, ResponsesRequest},
@@ -645,25 +644,6 @@ impl RouterTrait for RouterManager {
 
         if let Some(router) = router {
             router.route_embeddings(headers, body, model_id).await
-        } else {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Model '{}' not found or no router available", body.model),
-            )
-                .into_response()
-        }
-    }
-
-    async fn route_classify(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &ClassifyRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        let router = self.select_router_for_request(headers, model_id);
-
-        if let Some(router) = router {
-            router.route_classify(headers, body, model_id).await
         } else {
             (
                 StatusCode::NOT_FOUND,

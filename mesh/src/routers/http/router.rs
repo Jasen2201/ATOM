@@ -26,7 +26,6 @@ use crate::{
     policies::{PolicyRegistry, SelectWorkerInfo},
     protocols::{
         chat::ChatCompletionRequest,
-        classify::ClassifyRequest,
         common::GenerationRequest,
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
@@ -766,16 +765,6 @@ impl RouterTrait for Router {
         model_id: Option<&str>,
     ) -> Response {
         self.route_typed_request(headers, body, "/v1/embeddings", model_id)
-            .await
-    }
-
-    async fn route_classify(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &ClassifyRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        self.route_typed_request(headers, body, "/v1/classify", model_id)
             .await
     }
 

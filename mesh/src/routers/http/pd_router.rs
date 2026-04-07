@@ -30,7 +30,6 @@ use crate::{
     policies::{LoadBalancingPolicy, PolicyRegistry, SelectWorkerInfo},
     protocols::{
         chat::{ChatCompletionRequest, ChatMessage, MessageContent},
-        classify::ClassifyRequest,
         common::InputIds,
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
@@ -1317,20 +1316,6 @@ impl RouterTrait for PDRouter {
         error::bad_request(
             "pd_unsupported_embeddings",
             "PD mode does not support /v1/embeddings",
-        )
-    }
-
-    async fn route_classify(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &ClassifyRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        let _ = (headers, body, model_id);
-        warn!("PD mode does not support /v1/classify; returning bad request");
-        error::bad_request(
-            "pd_unsupported_classify",
-            "PD mode does not support /v1/classify",
         )
     }
 

@@ -25,7 +25,6 @@ use crate::{
     observability::metrics::{metrics_labels, Metrics},
     protocols::{
         chat::ChatCompletionRequest,
-        classify::ClassifyRequest,
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
         responses::{ResponsesGetParams, ResponsesRequest},
@@ -40,7 +39,6 @@ pub struct GrpcRouter {
     pipeline: RequestPipeline,
     harmony_pipeline: RequestPipeline,
     embedding_pipeline: RequestPipeline,
-    classify_pipeline: RequestPipeline,
     shared_components: Arc<SharedComponents>,
     responses_context: ResponsesContext,
     harmony_responses_context: ResponsesContext,
@@ -98,10 +96,6 @@ impl GrpcRouter {
         let embedding_pipeline =
             RequestPipeline::new_embeddings(worker_registry.clone(), _policy_registry.clone());
 
-        // Create Classify pipeline
-        let classify_pipeline =
-            RequestPipeline::new_classify(worker_registry.clone(), _policy_registry.clone());
-
         // Extract shared dependencies for responses contexts
         let mcp_manager = ctx
             .mcp_manager
@@ -130,7 +124,6 @@ impl GrpcRouter {
             pipeline,
             harmony_pipeline,
             embedding_pipeline,
-            classify_pipeline,
             shared_components,
             responses_context,
             harmony_responses_context,
@@ -336,27 +329,6 @@ impl GrpcRouter {
             .await
     }
 
-    /// Main route_classify implementation
-    async fn route_classify_impl(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &ClassifyRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        debug!(
-            "Processing classify request for model: {}",
-            model_id.unwrap_or(UNKNOWN_MODEL_ID)
-        );
-
-        self.classify_pipeline
-            .execute_classify(
-                Arc::new(body.clone()),
-                headers.cloned(),
-                model_id.map(|s| s.to_string()),
-                self.shared_components.clone(),
-            )
-            .await
-    }
 }
 
 impl std::fmt::Debug for GrpcRouter {
@@ -421,15 +393,6 @@ impl RouterTrait for GrpcRouter {
         model_id: Option<&str>,
     ) -> Response {
         self.route_embeddings_impl(headers, body, model_id).await
-    }
-
-    async fn route_classify(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &ClassifyRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        self.route_classify_impl(headers, body, model_id).await
     }
 
     fn router_type(&self) -> &'static str {
