@@ -21,10 +21,8 @@ use crate::{
     core::steps::{
         create_external_worker_workflow_data, create_local_worker_workflow_data,
         create_mcp_workflow_data, create_tokenizer_workflow_data,
-        create_wasm_registration_workflow_data, create_wasm_removal_workflow_data,
         create_worker_removal_workflow_data, create_worker_update_workflow_data,
         McpServerConfigRequest, TokenizerConfigRequest, TokenizerRemovalRequest,
-        WasmModuleConfigRequest, WasmModuleRemovalRequest,
     },
     protocols::worker_spec::{JobStatus, WorkerConfigRequest, WorkerUpdateRequest},
 };
@@ -51,12 +49,6 @@ pub enum Job {
     RegisterMcpServer {
         config: Box<McpServerConfigRequest>,
     },
-    AddWasmModule {
-        config: Box<WasmModuleConfigRequest>,
-    },
-    RemoveWasmModule {
-        request: Box<WasmModuleRemovalRequest>,
-    },
     AddTokenizer {
         config: Box<TokenizerConfigRequest>,
     },
@@ -75,14 +67,12 @@ impl Job {
             Job::InitializeWorkersFromConfig { .. } => "InitializeWorkersFromConfig",
             Job::InitializeMcpServers { .. } => "InitializeMcpServers",
             Job::RegisterMcpServer { .. } => "RegisterMcpServer",
-            Job::AddWasmModule { .. } => "AddWasmModule",
-            Job::RemoveWasmModule { .. } => "RemoveWasmModule",
             Job::AddTokenizer { .. } => "AddTokenizer",
             Job::RemoveTokenizer { .. } => "RemoveTokenizer",
         }
     }
 
-    /// Get worker URL, MCP server name, WASM module, or tokenizer identifier for logging and status tracking
+    /// Get worker URL, MCP server name, or tokenizer identifier for logging and status tracking
     pub fn worker_url(&self) -> &str {
         match self {
             Job::AddWorker { config } => &config.url,
@@ -91,8 +81,6 @@ impl Job {
             Job::InitializeWorkersFromConfig { .. } => "startup",
             Job::InitializeMcpServers { .. } => "startup",
             Job::RegisterMcpServer { config } => &config.name,
-            Job::AddWasmModule { config } => &config.descriptor.name,
-            Job::RemoveWasmModule { request } => &request.uuid_string,
             Job::AddTokenizer { config } => &config.id,
             Job::RemoveTokenizer { request } => &request.id,
         }
@@ -430,68 +418,6 @@ impl JobQueue {
                 }
 
                 result
-            }
-            Job::AddWasmModule { config } => {
-                let engines = context
-                    .workflow_engines
-                    .get()
-                    .ok_or_else(|| "Workflow engines not initialized".to_string())?;
-
-                let workflow_data =
-                    create_wasm_registration_workflow_data(*config.clone(), Arc::clone(context));
-
-                let instance_id = engines
-                    .wasm_registration
-                    .start_workflow(WorkflowId::new("wasm_module_registration"), workflow_data)
-                    .await
-                    .map_err(|e| {
-                        format!("Failed to start WASM module registration workflow: {:?}", e)
-                    })?;
-
-                debug!(
-                    "Started WASM module registration workflow for {} (instance: {})",
-                    config.descriptor.name, instance_id
-                );
-
-                let timeout_duration = Duration::from_secs(300); // 5 minutes
-
-                engines
-                    .wasm_registration
-                    .wait_for_completion(instance_id, &config.descriptor.name, timeout_duration)
-                    .await
-            }
-            Job::RemoveWasmModule { request } => {
-                let engines = context
-                    .workflow_engines
-                    .get()
-                    .ok_or_else(|| "Workflow engines not initialized".to_string())?;
-
-                let workflow_data =
-                    create_wasm_removal_workflow_data(*request.clone(), Arc::clone(context));
-
-                let instance_id = engines
-                    .wasm_removal
-                    .start_workflow(WorkflowId::new("wasm_module_removal"), workflow_data)
-                    .await
-                    .map_err(|e| {
-                        format!("Failed to start WASM module removal workflow: {:?}", e)
-                    })?;
-
-                debug!(
-                    "Started WASM module removal workflow for {} (instance: {})",
-                    request.module_uuid, instance_id
-                );
-
-                let timeout_duration = Duration::from_secs(60); // 1 minute
-
-                engines
-                    .wasm_removal
-                    .wait_for_completion(
-                        instance_id,
-                        &request.module_uuid.to_string(),
-                        timeout_duration,
-                    )
-                    .await
             }
             Job::InitializeWorkersFromConfig { router_config } => {
                 let api_key = router_config.api_key.clone();

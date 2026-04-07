@@ -3,13 +3,10 @@
 //! This module contains concrete step implementations for various workflows:
 //! - Worker management (registration, removal, updates)
 //! - MCP server registration
-//! - WASM module registration and removal
 //! - Tokenizer registration
 
 pub mod mcp_registration;
 pub mod tokenizer_registration;
-pub mod wasm_module_registration;
-pub mod wasm_module_removal;
 pub mod worker;
 pub mod workflow_data;
 pub mod workflow_engines;
@@ -23,15 +20,6 @@ pub use mcp_registration::{
 pub use tokenizer_registration::{
     create_tokenizer_registration_workflow, create_tokenizer_workflow_data, LoadTokenizerStep,
     TokenizerConfigRequest, TokenizerRemovalRequest,
-};
-pub use wasm_module_registration::{
-    create_wasm_module_registration_workflow, create_wasm_registration_workflow_data,
-    CalculateHashStep, CheckDuplicateStep, LoadWasmBytesStep, RegisterModuleStep,
-    ValidateDescriptorStep, ValidateWasmComponentStep, WasmModuleConfigRequest,
-};
-pub use wasm_module_removal::{
-    create_wasm_module_removal_workflow, create_wasm_removal_workflow_data, FindModuleToRemoveStep,
-    RemoveModuleStep, WasmModuleRemovalRequest,
 };
 pub use worker::{
     // Workflow builders
@@ -77,9 +65,8 @@ pub use worker::{
 // Typed workflow data structures
 pub use workflow_data::{
     ExternalWorkerWorkflowData, LocalWorkerWorkflowData, McpWorkflowData, ProtocolUpdateRequest,
-    TokenizerWorkflowData, WasmRegistrationWorkflowData, WasmRemovalWorkflowData,
-    WorkerConfigRequest, WorkerList as WorkflowWorkerList, WorkerRegistrationData,
-    WorkerRemovalWorkflowData, WorkerUpdateWorkflowData,
+    TokenizerWorkflowData, WorkerConfigRequest, WorkerList as WorkflowWorkerList,
+    WorkerRegistrationData, WorkerRemovalWorkflowData, WorkerUpdateWorkflowData,
 };
 // Typed workflow engines
 pub use workflow_engines::WorkflowEngines;

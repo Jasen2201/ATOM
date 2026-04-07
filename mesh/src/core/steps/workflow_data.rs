@@ -17,8 +17,7 @@ use wfaas::{WorkflowData, WorkflowError};
 
 use super::{
     mcp_registration::McpServerConfigRequest, tokenizer_registration::TokenizerConfigRequest,
-    wasm_module_registration::WasmModuleConfigRequest,
-    wasm_module_removal::WasmModuleRemovalRequest, worker::local::WorkerRemovalRequest,
+    worker::local::WorkerRemovalRequest,
 };
 /// Re-export the protocol types for convenience
 pub use crate::protocols::worker_spec::{
@@ -312,64 +311,3 @@ impl McpWorkflowData {
     }
 }
 
-/// Data for WASM module registration workflow
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WasmRegistrationWorkflowData {
-    pub config: WasmModuleConfigRequest,
-    pub wasm_bytes: Option<Vec<u8>>,
-    /// SHA256 hash of the module file (32 bytes)
-    pub sha256_hash: Option<[u8; 32]>,
-    /// File size in bytes
-    pub file_size_bytes: Option<u64>,
-    /// UUID assigned to the registered module
-    pub module_uuid: Option<uuid::Uuid>,
-    /// Application context (transient, must be re-initialized after deserialization)
-    #[serde(skip, default)]
-    pub app_context: Option<Arc<AppContext>>,
-}
-
-impl WorkflowData for WasmRegistrationWorkflowData {
-    fn workflow_type() -> &'static str {
-        "wasm_module_registration"
-    }
-}
-
-impl WasmRegistrationWorkflowData {
-    /// Validate that all transient fields are properly initialized.
-    pub fn validate_initialized(&self) -> Result<(), WorkflowError> {
-        if self.app_context.is_none() {
-            return Err(WorkflowError::ContextValueNotFound(
-                "app_context not initialized after deserialization".into(),
-            ));
-        }
-        Ok(())
-    }
-}
-
-/// Data for WASM module removal workflow
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WasmRemovalWorkflowData {
-    pub config: WasmModuleRemovalRequest,
-    pub module_id: Option<String>,
-    /// Application context (transient, must be re-initialized after deserialization)
-    #[serde(skip, default)]
-    pub app_context: Option<Arc<AppContext>>,
-}
-
-impl WorkflowData for WasmRemovalWorkflowData {
-    fn workflow_type() -> &'static str {
-        "wasm_module_removal"
-    }
-}
-
-impl WasmRemovalWorkflowData {
-    /// Validate that all transient fields are properly initialized.
-    pub fn validate_initialized(&self) -> Result<(), WorkflowError> {
-        if self.app_context.is_none() {
-            return Err(WorkflowError::ContextValueNotFound(
-                "app_context not initialized after deserialization".into(),
-            ));
-        }
-        Ok(())
-    }
-}

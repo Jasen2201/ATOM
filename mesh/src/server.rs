@@ -61,7 +61,6 @@ use crate::{
     },
     service_discovery::{start_service_discovery, ServiceDiscoveryConfig},
     tokenizer::TokenizerRegistry,
-    wasm::route::{add_wasm_module, list_wasm_modules, remove_wasm_module},
 };
 #[derive(Clone)]
 pub struct AppState {
@@ -535,10 +534,6 @@ pub fn build_app(
         .route_layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             middleware::concurrency_limit_middleware,
-        ))
-        .route_layer(axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            middleware::wasm_middleware,
         ));
 
     let public_routes = Router::new()
@@ -557,9 +552,6 @@ pub fn build_app(
         .route("/get_loads", get(get_loads))
         .route("/parse/function_call", post(parse_function_call))
         .route("/parse/reasoning", post(parse_reasoning))
-        .route("/wasm", post(add_wasm_module))
-        .route("/wasm/{module_uuid}", delete(remove_wasm_module))
-        .route("/wasm", get(list_wasm_modules))
         // Tokenizer management endpoints
         .route(
             "/v1/tokenizers",

@@ -328,12 +328,6 @@ impl RouterConfigBuilder {
         self
     }
 
-    // ==================== WASM ====================
-
-    pub fn enable_wasm(mut self, enable: bool) -> Self {
-        self.config.enable_wasm = enable;
-        self
-    }
 
     pub fn model_path<S: Into<String>>(mut self, path: S) -> Self {
         self.config.model_path = Some(path.into());

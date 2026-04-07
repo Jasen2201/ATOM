@@ -82,7 +82,6 @@ llm-tokenizer = "=1.0.0"
 wfaas = "=1.0.0"
 data-connector = "=1.0.0"
 smg-mcp = "=1.0.0"
-smg-wasm = "=1.0.0"
 smg-mesh = "=1.0.0"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 openssl = "0.10.73"
@@ -117,8 +116,6 @@ redis = { version = "0.27.6", features = ["tokio-comp", "json", "connection-mana
 
 
 # wasm dependencies
-sha2 = "0.10"
-wasmtime = { version = "38.0", features = ["component-model", "async"] }
 
 [build-dependencies]
 chrono = { version = "0.4", features = ["clock"] }
@@ -138,10 +135,6 @@ tonic-v12 = { version = "0.12.3", package = "tonic" }
 serial_test = "3.0"
 rsa = { version = "0.9", features = ["sha2"] }
 
-[[bench]]
-name = "wasm_middleware_latency"
-harness = false
-path = "benches/wasm_middleware_latency.rs"
 [[bench]]
 name = "request_processing"
 harness = false

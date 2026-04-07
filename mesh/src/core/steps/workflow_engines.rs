@@ -10,10 +10,9 @@ use wfaas::{EventSubscriber, InMemoryStore, WorkflowEngine};
 use super::{
     create_external_worker_workflow, create_local_worker_workflow,
     create_mcp_registration_workflow, create_tokenizer_registration_workflow,
-    create_wasm_module_registration_workflow, create_wasm_module_removal_workflow,
     create_worker_removal_workflow, create_worker_update_workflow, ExternalWorkerWorkflowData,
-    LocalWorkerWorkflowData, McpWorkflowData, TokenizerWorkflowData, WasmRegistrationWorkflowData,
-    WasmRemovalWorkflowData, WorkerRemovalWorkflowData, WorkerUpdateWorkflowData,
+    LocalWorkerWorkflowData, McpWorkflowData, TokenizerWorkflowData, WorkerRemovalWorkflowData,
+    WorkerUpdateWorkflowData,
 };
 use crate::config::RouterConfig;
 
@@ -40,14 +39,6 @@ pub type McpEngine = WorkflowEngine<McpWorkflowData, InMemoryStore<McpWorkflowDa
 pub type TokenizerEngine =
     WorkflowEngine<TokenizerWorkflowData, InMemoryStore<TokenizerWorkflowData>>;
 
-/// Type alias for WASM registration workflow engine
-pub type WasmRegistrationEngine =
-    WorkflowEngine<WasmRegistrationWorkflowData, InMemoryStore<WasmRegistrationWorkflowData>>;
-
-/// Type alias for WASM removal workflow engine
-pub type WasmRemovalEngine =
-    WorkflowEngine<WasmRemovalWorkflowData, InMemoryStore<WasmRemovalWorkflowData>>;
-
 /// Collection of typed workflow engines
 ///
 /// Each workflow type has its own engine with compile-time type safety.
@@ -66,10 +57,6 @@ pub struct WorkflowEngines {
     pub mcp: Arc<McpEngine>,
     /// Engine for tokenizer registration workflows
     pub tokenizer: Arc<TokenizerEngine>,
-    /// Engine for WASM module registration workflows
-    pub wasm_registration: Arc<WasmRegistrationEngine>,
-    /// Engine for WASM module removal workflows
-    pub wasm_removal: Arc<WasmRemovalEngine>,
 }
 
 impl WorkflowEngines {
@@ -110,18 +97,6 @@ impl WorkflowEngines {
             .register_workflow(create_tokenizer_registration_workflow())
             .expect("tokenizer_registration workflow should be valid");
 
-        // Create WASM registration engine
-        let wasm_registration = WorkflowEngine::new();
-        wasm_registration
-            .register_workflow(create_wasm_module_registration_workflow())
-            .expect("wasm_module_registration workflow should be valid");
-
-        // Create WASM removal engine
-        let wasm_removal = WorkflowEngine::new();
-        wasm_removal
-            .register_workflow(create_wasm_module_removal_workflow())
-            .expect("wasm_module_removal workflow should be valid");
-
         Self {
             local_worker: Arc::new(local_worker),
             external_worker: Arc::new(external_worker),
@@ -129,8 +104,6 @@ impl WorkflowEngines {
             worker_update: Arc::new(worker_update),
             mcp: Arc::new(mcp),
             tokenizer: Arc::new(tokenizer),
-            wasm_registration: Arc::new(wasm_registration),
-            wasm_removal: Arc::new(wasm_removal),
         }
     }
 
@@ -153,14 +126,6 @@ impl WorkflowEngines {
             .subscribe(subscriber.clone())
             .await;
         self.mcp.event_bus().subscribe(subscriber.clone()).await;
-        self.tokenizer
-            .event_bus()
-            .subscribe(subscriber.clone())
-            .await;
-        self.wasm_registration
-            .event_bus()
-            .subscribe(subscriber.clone())
-            .await;
-        self.wasm_removal.event_bus().subscribe(subscriber).await;
+        self.tokenizer.event_bus().subscribe(subscriber).await;
     }
 }

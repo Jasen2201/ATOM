@@ -70,9 +70,6 @@ pub struct RouterConfig {
     /// Loaded from mcp_config_path during config creation
     #[serde(skip)]
     pub mcp_config: Option<smg_mcp::McpConfig>,
-    /// Enable WASM support
-    #[serde(default)]
-    pub enable_wasm: bool,
 }
 
 /// Tokenizer cache configuration
@@ -442,7 +439,6 @@ impl Default for RouterConfig {
             tool_call_parser: None,
             tokenizer_cache: TokenizerCacheConfig::default(),
             mcp_config: None,
-            enable_wasm: false,
         }
     }
 }

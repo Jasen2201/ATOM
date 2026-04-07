@@ -21,7 +21,6 @@ use crate::{
     routers::router_manager::RouterManager,
     tokenizer::registry::TokenizerRegistry,
     tool_parser::ParserFactory as ToolParserFactory,
-    wasm::{config::WasmRuntimeConfig, module_manager::WasmModuleManager},
 };
 
 /// Error type for AppContext builder
@@ -56,7 +55,6 @@ pub struct AppContext {
     pub worker_job_queue: Arc<OnceLock<Arc<JobQueue>>>,
     pub workflow_engines: Arc<OnceLock<WorkflowEngines>>,
     pub mcp_manager: Arc<OnceLock<Arc<McpManager>>>,
-    pub wasm_manager: Option<Arc<WasmModuleManager>>,
     pub worker_service: Arc<WorkerService>,
     pub inflight_tracker: Arc<InFlightRequestTracker>,
 }
@@ -86,7 +84,6 @@ pub struct AppContextBuilder {
     worker_job_queue: Option<Arc<OnceLock<Arc<JobQueue>>>>,
     workflow_engines: Option<Arc<OnceLock<WorkflowEngines>>>,
     mcp_manager: Option<Arc<OnceLock<Arc<McpManager>>>>,
-    wasm_manager: Option<Arc<WasmModuleManager>>,
 }
 
 impl AppContext {
@@ -126,7 +123,6 @@ impl AppContextBuilder {
             worker_job_queue: None,
             workflow_engines: None,
             mcp_manager: None,
-            wasm_manager: None,
         }
     }
 
@@ -219,11 +215,6 @@ impl AppContextBuilder {
         self
     }
 
-    pub fn wasm_manager(mut self, wasm_manager: Option<Arc<WasmModuleManager>>) -> Self {
-        self.wasm_manager = wasm_manager;
-        self
-    }
-
     pub fn build(self) -> Result<AppContext, AppContextBuildError> {
         let router_config = self
             .router_config
@@ -278,7 +269,6 @@ impl AppContextBuilder {
             mcp_manager: self
                 .mcp_manager
                 .ok_or(AppContextBuildError("mcp_manager"))?,
-            wasm_manager: self.wasm_manager,
             worker_service,
             inflight_tracker: InFlightRequestTracker::new(),
         })
@@ -304,7 +294,6 @@ impl AppContextBuilder {
             .with_workflow_engines()
             .with_mcp_manager(&router_config)
             .await?
-            .with_wasm_manager(&router_config)?
             .router_config(router_config))
     }
 
@@ -464,18 +453,6 @@ impl AppContextBuilder {
         Ok(self)
     }
 
-    /// Create wasm manager if enabled in config
-    fn with_wasm_manager(mut self, config: &RouterConfig) -> Result<Self, String> {
-        self.wasm_manager = if config.enable_wasm {
-            Some(Arc::new(
-                WasmModuleManager::new(WasmRuntimeConfig::default())
-                    .map_err(|e| format!("Failed to initialize WASM module manager: {}", e))?,
-            ))
-        } else {
-            None
-        };
-        Ok(self)
-    }
 }
 
 impl Default for AppContextBuilder {
