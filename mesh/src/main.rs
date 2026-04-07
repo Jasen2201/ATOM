@@ -4,9 +4,9 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use rand::{distr::Alphanumeric, Rng};
 use smg::{
     config::{
-        CircuitBreakerConfig, ConfigError, ConfigResult, DiscoveryConfig, HealthCheckConfig,
-        HistoryBackend, MetricsConfig, OracleConfig, PolicyConfig,
-        PostgresConfig, RedisConfig, RetryConfig, RouterConfig, RoutingMode, TokenizerCacheConfig,
+        CircuitBreakerConfig, ConfigResult, DiscoveryConfig, HealthCheckConfig,
+        MetricsConfig, PolicyConfig,
+        RetryConfig, RouterConfig, RoutingMode, TokenizerCacheConfig,
         TraceConfig,
     },
     core::ConnectionMode,
@@ -410,65 +410,6 @@ struct CliArgs {
     #[arg(long, value_enum, default_value_t = Backend::Sglang, alias = "runtime", help_heading = "Backend")]
     backend: Backend,
 
-    /// History storage backend
-    #[arg(long, default_value = "memory", value_parser = ["memory", "none", "oracle", "postgres", "redis"], help_heading = "Backend")]
-    history_backend: String,
-
-    // ==================== Oracle Database ====================
-    /// Path to Oracle ATP wallet directory
-    #[arg(long, env = "ATP_WALLET_PATH", help_heading = "Oracle Database")]
-    oracle_wallet_path: Option<String>,
-
-    /// Oracle TNS alias from tnsnames.ora
-    #[arg(long, env = "ATP_TNS_ALIAS", help_heading = "Oracle Database")]
-    oracle_tns_alias: Option<String>,
-
-    /// Oracle connection descriptor/DSN
-    #[arg(long, env = "ATP_DSN", help_heading = "Oracle Database")]
-    oracle_dsn: Option<String>,
-
-    /// Oracle database username
-    #[arg(long, env = "ATP_USER", help_heading = "Oracle Database")]
-    oracle_user: Option<String>,
-
-    /// Oracle database password
-    #[arg(long, env = "ATP_PASSWORD", help_heading = "Oracle Database")]
-    oracle_password: Option<String>,
-
-    /// Minimum Oracle connection pool size
-    #[arg(long, env = "ATP_POOL_MIN", help_heading = "Oracle Database")]
-    oracle_pool_min: Option<usize>,
-
-    /// Maximum Oracle connection pool size
-    #[arg(long, env = "ATP_POOL_MAX", help_heading = "Oracle Database")]
-    oracle_pool_max: Option<usize>,
-
-    /// Oracle connection pool timeout in seconds
-    #[arg(long, env = "ATP_POOL_TIMEOUT_SECS", help_heading = "Oracle Database")]
-    oracle_pool_timeout_secs: Option<u64>,
-
-    // ==================== PostgreSQL Database ====================
-    /// PostgreSQL database connection URL
-    #[arg(long, help_heading = "PostgreSQL Database")]
-    postgres_db_url: Option<String>,
-
-    /// Maximum PostgreSQL connection pool size
-    #[arg(long, help_heading = "PostgreSQL Database")]
-    postgres_pool_max_size: Option<usize>,
-
-    // ==================== Redis Database ====================
-    /// Redis connection URL
-    #[arg(long, help_heading = "Redis Database")]
-    redis_url: Option<String>,
-
-    /// Maximum Redis connection pool size
-    #[arg(long, help_heading = "Redis Database")]
-    redis_pool_max_size: Option<usize>,
-
-    /// Redis data retention in days (-1 for persistent, default 30)
-    #[arg(long, help_heading = "Redis Database")]
-    redis_retention_days: Option<i64>,
-
     // ==================== Tracing (OpenTelemetry) ====================
     /// Enable OpenTelemetry tracing
     #[arg(
@@ -506,11 +447,6 @@ struct CliArgs {
 
     #[arg(long, num_args = 0..)]
     mesh_peer_urls: Vec<String>,
-}
-
-enum OracleConnectSource {
-    Dsn { descriptor: String },
-    Wallet { path: String, alias: String },
 }
 
 impl CliArgs {
@@ -555,120 +491,6 @@ impl CliArgs {
             },
             _ => PolicyConfig::RoundRobin,
         }
-    }
-
-    fn resolve_oracle_connect_details(&self) -> ConfigResult<OracleConnectSource> {
-        if let Some(dsn) = self.oracle_dsn.clone() {
-            return Ok(OracleConnectSource::Dsn { descriptor: dsn });
-        }
-
-        let wallet_path = self
-            .oracle_wallet_path
-            .clone()
-            .ok_or(ConfigError::MissingRequired {
-                field: "oracle_wallet_path or ATP_WALLET_PATH".to_string(),
-            })?;
-
-        let tns_alias = self
-            .oracle_tns_alias
-            .clone()
-            .ok_or(ConfigError::MissingRequired {
-                field: "oracle_tns_alias or ATP_TNS_ALIAS".to_string(),
-            })?;
-
-        Ok(OracleConnectSource::Wallet {
-            path: wallet_path,
-            alias: tns_alias,
-        })
-    }
-
-    fn build_oracle_config(&self) -> ConfigResult<OracleConfig> {
-        let (wallet_path, connect_descriptor) = match self.resolve_oracle_connect_details()? {
-            OracleConnectSource::Dsn { descriptor } => (None, descriptor),
-            OracleConnectSource::Wallet { path, alias } => (Some(path), alias),
-        };
-        let username = self
-            .oracle_user
-            .clone()
-            .ok_or(ConfigError::MissingRequired {
-                field: "oracle_user or ATP_USER".to_string(),
-            })?;
-        let password = self
-            .oracle_password
-            .clone()
-            .ok_or(ConfigError::MissingRequired {
-                field: "oracle_password or ATP_PASSWORD".to_string(),
-            })?;
-
-        let pool_min = self
-            .oracle_pool_min
-            .unwrap_or_else(OracleConfig::default_pool_min);
-        let pool_max = self
-            .oracle_pool_max
-            .unwrap_or_else(OracleConfig::default_pool_max);
-
-        if pool_min == 0 {
-            return Err(ConfigError::InvalidValue {
-                field: "oracle_pool_min".to_string(),
-                value: pool_min.to_string(),
-                reason: "pool minimum must be at least 1".to_string(),
-            });
-        }
-
-        if pool_max < pool_min {
-            return Err(ConfigError::InvalidValue {
-                field: "oracle_pool_max".to_string(),
-                value: pool_max.to_string(),
-                reason: "pool maximum must be greater than or equal to minimum".to_string(),
-            });
-        }
-
-        let pool_timeout_secs = self
-            .oracle_pool_timeout_secs
-            .unwrap_or_else(OracleConfig::default_pool_timeout_secs);
-
-        Ok(OracleConfig {
-            wallet_path,
-            connect_descriptor,
-            username,
-            password,
-            pool_min,
-            pool_max,
-            pool_timeout_secs,
-        })
-    }
-
-    fn build_postgres_config(&self) -> ConfigResult<PostgresConfig> {
-        let db_url = self.postgres_db_url.clone().unwrap_or_default();
-        let pool_max = self
-            .postgres_pool_max_size
-            .unwrap_or_else(PostgresConfig::default_pool_max);
-        let pcf = PostgresConfig { db_url, pool_max };
-        pcf.validate().map_err(|e| ConfigError::ValidationFailed {
-            reason: e.to_string(),
-        })?;
-        Ok(pcf)
-    }
-
-    fn build_redis_config(&self) -> ConfigResult<RedisConfig> {
-        let url = self.redis_url.clone().unwrap_or_default();
-        let pool_max = self.redis_pool_max_size.unwrap_or(16);
-
-        let retention_days = match self.redis_retention_days {
-            Some(d) if d < 0 => None, // Persistent
-            Some(d) => Some(d as u64),
-            None => Some(30), // Default 30 days
-        };
-
-        let rcf = RedisConfig {
-            url,
-            pool_max,
-            retention_days,
-        };
-        rcf.validate().map_err(|e| ConfigError::ValidationFailed {
-            reason: e.to_string(),
-        })?;
-        Ok(rcf)
     }
 
     fn to_router_config(
@@ -737,30 +559,6 @@ impl CliArgs {
         }
         let connection_mode = Self::determine_connection_mode(&all_urls);
 
-        let history_backend = match self.history_backend.as_str() {
-            "none" => HistoryBackend::None,
-            "oracle" => HistoryBackend::Oracle,
-            "postgres" => HistoryBackend::Postgres,
-            "redis" => HistoryBackend::Redis,
-            _ => HistoryBackend::Memory,
-        };
-
-        let oracle = if history_backend == HistoryBackend::Oracle {
-            Some(self.build_oracle_config()?)
-        } else {
-            None
-        };
-        let postgres = if history_backend == HistoryBackend::Postgres {
-            Some(self.build_postgres_config()?)
-        } else {
-            None
-        };
-        let redis = if history_backend == HistoryBackend::Redis {
-            Some(self.build_redis_config()?)
-        } else {
-            None
-        };
-
         let builder = RouterConfig::builder()
             .mode(mode)
             .policy(policy)
@@ -801,7 +599,6 @@ impl CliArgs {
                 enable_l1: self.tokenizer_cache_enable_l1,
                 l1_max_memory: self.tokenizer_cache_l1_max_memory,
             })
-            .history_backend(history_backend)
             .log_level(&self.log_level)
             .maybe_api_key(self.api_key.as_ref())
             .maybe_discovery(discovery)
@@ -815,9 +612,6 @@ impl CliArgs {
             .maybe_model_path(self.model_path.as_ref())
             .maybe_tokenizer_path(self.tokenizer_path.as_ref())
             .maybe_chat_template(self.chat_template.as_ref())
-            .maybe_oracle(oracle)
-            .maybe_postgres(postgres)
-            .maybe_redis(redis)
             .maybe_reasoning_parser(self.reasoning_parser.as_ref())
             .maybe_tool_call_parser(self.tool_call_parser.as_ref())
             .dp_aware(self.dp_aware)

@@ -24,16 +24,6 @@ pub enum BackendType {
 }
 
 #[pyclass(eq)]
-#[derive(Clone, PartialEq, Debug)]
-pub enum HistoryBackendType {
-    Memory,
-    None,
-    Oracle,
-    Postgres,
-    Redis,
-}
-
-#[pyclass(eq)]
 #[derive(Clone, PartialEq, Debug, Default)]
 pub enum PyRole {
     Admin,
@@ -184,158 +174,6 @@ impl PyControlPlaneAuthConfig {
     }
 }
 
-#[pyclass]
-#[derive(Clone, PartialEq)]
-pub struct PyOracleConfig {
-    #[pyo3(get, set)]
-    pub wallet_path: Option<String>,
-    #[pyo3(get, set)]
-    pub connect_descriptor: Option<String>,
-    #[pyo3(get, set)]
-    pub username: Option<String>,
-    #[pyo3(get, set)]
-    pub password: Option<String>,
-    #[pyo3(get, set)]
-    pub pool_min: usize,
-    #[pyo3(get, set)]
-    pub pool_max: usize,
-    #[pyo3(get, set)]
-    pub pool_timeout_secs: u64,
-}
-
-impl std::fmt::Debug for PyOracleConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PyOracleConfig")
-            .field("wallet_path", &self.wallet_path)
-            .field("connect_descriptor", &"<redacted>")
-            .field("username", &self.username)
-            .field("password", &"<redacted>")
-            .field("pool_min", &self.pool_min)
-            .field("pool_max", &self.pool_max)
-            .field("pool_timeout_secs", &self.pool_timeout_secs)
-            .finish()
-    }
-}
-
-#[pymethods]
-impl PyOracleConfig {
-    #[new]
-    #[pyo3(signature = (
-        password = None,
-        username = None,
-        connect_descriptor = None,
-        wallet_path = None,
-        pool_min = 1,
-        pool_max = 16,
-        pool_timeout_secs = 30,
-    ))]
-    fn new(
-        password: Option<String>,
-        username: Option<String>,
-        connect_descriptor: Option<String>,
-        wallet_path: Option<String>,
-        pool_min: usize,
-        pool_max: usize,
-        pool_timeout_secs: u64,
-    ) -> PyResult<Self> {
-        if pool_min == 0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "pool_min must be at least 1",
-            ));
-        }
-        if pool_max < pool_min {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "pool_max must be >= pool_min",
-            ));
-        }
-
-        Ok(PyOracleConfig {
-            wallet_path,
-            connect_descriptor,
-            username,
-            password,
-            pool_min,
-            pool_max,
-            pool_timeout_secs,
-        })
-    }
-}
-
-impl PyOracleConfig {
-    pub fn to_config_oracle(&self) -> config::OracleConfig {
-        config::OracleConfig {
-            wallet_path: self.wallet_path.clone(),
-            connect_descriptor: self.connect_descriptor.clone().unwrap_or_default(),
-            username: self.username.clone().unwrap_or_default(),
-            password: self.password.clone().unwrap_or_default(),
-            pool_min: self.pool_min,
-            pool_max: self.pool_max,
-            pool_timeout_secs: self.pool_timeout_secs,
-        }
-    }
-}
-
-#[pyclass]
-#[derive(Debug, Clone, PartialEq)]
-pub struct PyRedisConfig {
-    #[pyo3(get, set)]
-    pub url: String,
-    #[pyo3(get, set)]
-    pub pool_max: usize,
-    #[pyo3(get, set)]
-    pub retention_days: Option<u64>,
-}
-
-#[pymethods]
-impl PyRedisConfig {
-    #[new]
-    #[pyo3(signature = (url, pool_max = 16, retention_days = Some(30)))]
-    fn new(url: String, pool_max: usize, retention_days: Option<u64>) -> PyResult<Self> {
-        Ok(PyRedisConfig {
-            url,
-            pool_max,
-            retention_days,
-        })
-    }
-}
-
-impl PyRedisConfig {
-    pub fn to_config_redis(&self) -> config::RedisConfig {
-        config::RedisConfig {
-            url: self.url.clone(),
-            pool_max: self.pool_max,
-            retention_days: self.retention_days,
-        }
-    }
-}
-
-#[pyclass]
-#[derive(Debug, Clone, PartialEq)]
-pub struct PyPostgresConfig {
-    #[pyo3(get, set)]
-    pub db_url: Option<String>,
-
-    #[pyo3(get, set)]
-    pub pool_max: usize,
-}
-
-#[pymethods]
-impl PyPostgresConfig {
-    #[new]
-    #[pyo3(signature = (db_url = None,pool_max = 16,))]
-    fn new(db_url: Option<String>, pool_max: usize) -> PyResult<Self> {
-        Ok(PyPostgresConfig { db_url, pool_max })
-    }
-}
-
-impl PyPostgresConfig {
-    pub fn to_config_postgres(&self) -> config::PostgresConfig {
-        config::PostgresConfig {
-            db_url: self.db_url.clone().unwrap_or_default(),
-            pool_max: self.pool_max,
-        }
-    }
-}
 
 #[pyclass]
 #[derive(Debug, Clone, PartialEq)]
@@ -412,10 +250,6 @@ struct Router {
     reasoning_parser: Option<String>,
     tool_call_parser: Option<String>,
     backend: BackendType,
-    history_backend: HistoryBackendType,
-    oracle_config: Option<PyOracleConfig>,
-    postgres_config: Option<PyPostgresConfig>,
-    redis_config: Option<PyRedisConfig>,
     client_cert_path: Option<String>,
     client_key_path: Option<String>,
     ca_cert_paths: Vec<String>,
@@ -527,36 +361,6 @@ impl Router {
             otlp_traces_endpoint: self.otlp_traces_endpoint.clone(),
         });
 
-        let history_backend = match self.history_backend {
-            HistoryBackendType::Memory => config::HistoryBackend::Memory,
-            HistoryBackendType::None => config::HistoryBackend::None,
-            HistoryBackendType::Oracle => config::HistoryBackend::Oracle,
-            HistoryBackendType::Postgres => config::HistoryBackend::Postgres,
-            HistoryBackendType::Redis => config::HistoryBackend::Redis,
-        };
-
-        let oracle = if matches!(self.history_backend, HistoryBackendType::Oracle) {
-            self.oracle_config
-                .as_ref()
-                .map(|cfg| cfg.to_config_oracle())
-        } else {
-            None
-        };
-
-        let postgres_config = if matches!(self.history_backend, HistoryBackendType::Postgres) {
-            self.postgres_config
-                .as_ref()
-                .map(|cfg| cfg.to_config_postgres())
-        } else {
-            None
-        };
-
-        let redis_config = if matches!(self.history_backend, HistoryBackendType::Redis) {
-            self.redis_config.as_ref().map(|cfg| cfg.to_config_redis())
-        } else {
-            None
-        };
-
         config::RouterConfig::builder()
             .mode(mode)
             .policy(policy)
@@ -598,7 +402,6 @@ impl Router {
                 enable_l1: self.tokenizer_cache_enable_l1,
                 l1_max_memory: self.tokenizer_cache_l1_max_memory,
             })
-            .history_backend(history_backend)
             .maybe_api_key(self.api_key.as_ref())
             .maybe_discovery(discovery)
             .maybe_metrics(metrics)
@@ -610,9 +413,6 @@ impl Router {
             .maybe_model_path(self.model_path.as_ref())
             .maybe_tokenizer_path(self.tokenizer_path.as_ref())
             .maybe_chat_template(self.chat_template.as_ref())
-            .maybe_oracle(oracle)
-            .maybe_postgres(postgres_config)
-            .maybe_redis(redis_config)
             .maybe_reasoning_parser(self.reasoning_parser.as_ref())
             .maybe_tool_call_parser(self.tool_call_parser.as_ref())
             .dp_aware(self.dp_aware)
@@ -707,10 +507,6 @@ impl Router {
         reasoning_parser = None,
         tool_call_parser = None,
         backend = BackendType::Sglang,
-        history_backend = HistoryBackendType::Memory,
-        oracle_config = None,
-        postgres_config = None,
-        redis_config = None,
         client_cert_path = None,
         client_key_path = None,
         ca_cert_paths = vec![],
@@ -793,10 +589,6 @@ impl Router {
         reasoning_parser: Option<String>,
         tool_call_parser: Option<String>,
         backend: BackendType,
-        history_backend: HistoryBackendType,
-        oracle_config: Option<PyOracleConfig>,
-        postgres_config: Option<PyPostgresConfig>,
-        redis_config: Option<PyRedisConfig>,
         client_cert_path: Option<String>,
         client_key_path: Option<String>,
         ca_cert_paths: Vec<String>,
@@ -893,10 +685,6 @@ impl Router {
             reasoning_parser,
             tool_call_parser,
             backend,
-            history_backend,
-            oracle_config,
-            postgres_config,
-            redis_config,
             client_cert_path,
             client_key_path,
             ca_cert_paths,
@@ -1006,14 +794,10 @@ fn get_available_tool_call_parsers() -> Vec<String> {
 fn sglang_router_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PolicyType>()?;
     m.add_class::<BackendType>()?;
-    m.add_class::<HistoryBackendType>()?;
     m.add_class::<PyRole>()?;
     m.add_class::<PyApiKeyEntry>()?;
     m.add_class::<PyJwtConfig>()?;
     m.add_class::<PyControlPlaneAuthConfig>()?;
-    m.add_class::<PyOracleConfig>()?;
-    m.add_class::<PyPostgresConfig>()?;
-    m.add_class::<PyRedisConfig>()?;
     m.add_class::<Router>()?;
     m.add_function(wrap_pyfunction!(get_version_string, m)?)?;
     m.add_function(wrap_pyfunction!(get_verbose_version_string, m)?)?;

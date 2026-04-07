@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-// Re-export storage config types from data_connector
-pub use data_connector::{HistoryBackend, OracleConfig, PostgresConfig, RedisConfig};
 use serde::{Deserialize, Serialize};
 
 use super::ConfigResult;
@@ -50,17 +48,6 @@ pub struct RouterConfig {
     /// Overrides model_path tokenizer if provided
     pub tokenizer_path: Option<String>,
     pub chat_template: Option<String>,
-    #[serde(default = "default_history_backend")]
-    pub history_backend: HistoryBackend,
-    /// Required when history_backend = "oracle"
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub oracle: Option<OracleConfig>,
-    /// Required when history_backend = "postgres"
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub postgres: Option<PostgresConfig>,
-    /// Required when history_backend = "redis"
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub redis: Option<RedisConfig>,
     /// For reasoning models (e.g., deepseek-r1, qwen3)
     pub reasoning_parser: Option<String>,
     /// For tool-call interactions
@@ -121,10 +108,6 @@ impl Default for TokenizerCacheConfig {
             l1_max_memory: default_l1_max_memory(),
         }
     }
-}
-
-fn default_history_backend() -> HistoryBackend {
-    HistoryBackend::Memory
 }
 
 /// Routing mode configuration
@@ -425,10 +408,6 @@ impl Default for RouterConfig {
             model_path: None,
             tokenizer_path: None,
             chat_template: None,
-            history_backend: default_history_backend(),
-            oracle: None,
-            postgres: None,
-            redis: None,
             reasoning_parser: None,
             tool_call_parser: None,
             tokenizer_cache: TokenizerCacheConfig::default(),

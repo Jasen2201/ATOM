@@ -109,21 +109,6 @@ class RouterArgs:
     mcp_config_path: Optional[str] = None
     # Backend selection
     backend: str = "sglang"
-    # History backend configuration
-    history_backend: str = "memory"
-    oracle_wallet_path: Optional[str] = None
-    oracle_tns_alias: Optional[str] = None
-    oracle_connect_descriptor: Optional[str] = None
-    oracle_username: Optional[str] = None
-    oracle_password: Optional[str] = None
-    oracle_pool_min: int = 1
-    oracle_pool_max: int = 16
-    oracle_pool_timeout_secs: int = 30
-    postgres_db_url: Optional[str] = None
-    postgres_pool_max: int = 16
-    redis_url: Optional[str] = None
-    redis_pool_max: int = 16
-    redis_retention_days: int = 30
     # mTLS configuration for worker communication
     client_cert_path: Optional[str] = None
     client_key_path: Optional[str] = None
@@ -200,15 +185,6 @@ class RouterArgs:
         )
         backend_group = parser.add_argument_group(
             "Backend", "Backend runtime and history storage selection"
-        )
-        oracle_group = parser.add_argument_group(
-            "Oracle Database", "Oracle database backend configuration"
-        )
-        postgres_group = parser.add_argument_group(
-            "PostgreSQL Database", "PostgreSQL database backend configuration"
-        )
-        redis_group = parser.add_argument_group(
-            "Redis Database", "Redis database backend configuration"
         )
         tls_group = parser.add_argument_group(
             "TLS/mTLS Security", "TLS certificates for server and worker communication"
@@ -710,102 +686,6 @@ class RouterArgs:
             choices=["sglang", "openai"],
             help="Backend runtime to use (default: sglang)",
         )
-        backend_group.add_argument(
-            f"--{prefix}history-backend",
-            type=str,
-            default=RouterArgs.history_backend,
-            choices=["memory", "none", "oracle", "postgres", "redis"],
-            help="History storage backend for conversations and responses (default: memory)",
-        )
-
-        # Oracle configuration
-        oracle_group.add_argument(
-            f"--{prefix}oracle-wallet-path",
-            type=str,
-            default=os.getenv("ATP_WALLET_PATH"),
-            help="Path to Oracle ATP wallet directory (env: ATP_WALLET_PATH)",
-        )
-        oracle_group.add_argument(
-            f"--{prefix}oracle-tns-alias",
-            type=str,
-            default=os.getenv("ATP_TNS_ALIAS"),
-            help="Oracle TNS alias from tnsnames.ora (env: ATP_TNS_ALIAS).",
-        )
-        oracle_group.add_argument(
-            f"--{prefix}oracle-connect-descriptor",
-            type=str,
-            default=os.getenv("ATP_DSN"),
-            help="Oracle connection descriptor/DSN (full connection string) (env: ATP_DSN)",
-        )
-        oracle_group.add_argument(
-            f"--{prefix}oracle-username",
-            type=str,
-            default=os.getenv("ATP_USER"),
-            help="Oracle database username (env: ATP_USER)",
-        )
-        oracle_group.add_argument(
-            f"--{prefix}oracle-password",
-            type=str,
-            default=os.getenv("ATP_PASSWORD"),
-            help="Oracle database password (env: ATP_PASSWORD)",
-        )
-        oracle_group.add_argument(
-            f"--{prefix}oracle-pool-min",
-            type=int,
-            default=int(os.getenv("ATP_POOL_MIN", RouterArgs.oracle_pool_min)),
-            help="Minimum Oracle connection pool size (default: 1, env: ATP_POOL_MIN)",
-        )
-        oracle_group.add_argument(
-            f"--{prefix}oracle-pool-max",
-            type=int,
-            default=int(os.getenv("ATP_POOL_MAX", RouterArgs.oracle_pool_max)),
-            help="Maximum Oracle connection pool size (default: 16, env: ATP_POOL_MAX)",
-        )
-        oracle_group.add_argument(
-            f"--{prefix}oracle-pool-timeout-secs",
-            type=int,
-            default=int(
-                os.getenv("ATP_POOL_TIMEOUT_SECS", RouterArgs.oracle_pool_timeout_secs)
-            ),
-            help="Oracle connection pool timeout in seconds (default: 30, env: ATP_POOL_TIMEOUT_SECS)",
-        )
-
-        # Postgres configuration
-        postgres_group.add_argument(
-            f"--{prefix}postgres-db-url",
-            type=str,
-            default=os.getenv("POSTGRES_DB_URL"),
-            help="PostgreSQL database connection URL (env: POSTGRES_DB_URL)",
-        )
-        postgres_group.add_argument(
-            f"--{prefix}postgres-pool-max",
-            type=int,
-            default=int(os.getenv("POSTGRES_POOL_MAX", RouterArgs.postgres_pool_max)),
-            help="Maximum PostgreSQL connection pool size (default: 16, env: POSTGRES_POOL_MAX)",
-        )
-
-        # Redis configuration
-        redis_group.add_argument(
-            f"--{prefix}redis-url",
-            type=str,
-            default=os.getenv("REDIS_URL"),
-            help="Redis connection URL (env: REDIS_URL)",
-        )
-        redis_group.add_argument(
-            f"--{prefix}redis-pool-max",
-            type=int,
-            default=int(os.getenv("REDIS_POOL_MAX", RouterArgs.redis_pool_max)),
-            help="Maximum Redis connection pool size (default: 16, env: REDIS_POOL_MAX)",
-        )
-        redis_group.add_argument(
-            f"--{prefix}redis-retention-days",
-            type=int,
-            default=int(
-                os.getenv("REDIS_RETENTION_DAYS", RouterArgs.redis_retention_days)
-            ),
-            help="Redis data retention in days (-1 for persistent, default: 30, env: REDIS_RETENTION_DAYS)",
-        )
-
         # TLS/mTLS configuration
         tls_group.add_argument(
             f"--{prefix}client-cert-path",

@@ -3,14 +3,10 @@ from typing import Optional
 from sglang_router.router_args import RouterArgs
 from sglang_router.sglang_router_rs import (
     BackendType,
-    HistoryBackendType,
     PolicyType,
     PyApiKeyEntry,
     PyControlPlaneAuthConfig,
     PyJwtConfig,
-    PyOracleConfig,
-    PyPostgresConfig,
-    PyRedisConfig,
     PyRole,
 )
 from sglang_router.sglang_router_rs import Router as _Router
@@ -46,28 +42,6 @@ def backend_from_str(backend_str: Optional[str]) -> BackendType:
             f"Unknown backend: {backend_str}. Valid options: {', '.join(backend_map.keys())}"
         )
     return backend_map[backend_lower]
-
-
-def history_backend_from_str(backend_str: Optional[str]) -> HistoryBackendType:
-    """Convert history backend string to HistoryBackendType enum."""
-    if isinstance(backend_str, HistoryBackendType):
-        return backend_str
-    if backend_str is None:
-        return HistoryBackendType.Memory
-    backend_lower = backend_str.lower()
-    if backend_lower == "memory":
-        return HistoryBackendType.Memory
-    elif backend_lower == "none":
-        # Use getattr to access 'None' which is a Python keyword
-        return getattr(HistoryBackendType, "None")
-    elif backend_lower == "oracle":
-        return HistoryBackendType.Oracle
-    elif backend_lower == "postgres":
-        return HistoryBackendType.Postgres
-    elif backend_lower == "redis":
-        return HistoryBackendType.Redis
-    else:
-        raise ValueError(f"Unknown history backend: {backend_str}")
 
 
 def role_from_str(role_str: str) -> PyRole:
@@ -229,55 +203,6 @@ class Router:
 
         # Convert backend
         args_dict["backend"] = backend_from_str(args_dict.get("backend"))
-
-        # Convert history_backend to enum first
-        history_backend_raw = args_dict.get("history_backend", "memory")
-        history_backend = history_backend_from_str(history_backend_raw)
-
-        # Convert Oracle config if needed
-        oracle_config = None
-        if history_backend == HistoryBackendType.Oracle:
-            # Prioritize TNS alias over connect descriptor
-            tns_alias = args_dict.get("oracle_tns_alias")
-            connect_descriptor = args_dict.get("oracle_connect_descriptor")
-
-            # Use TNS alias if provided, otherwise use connect descriptor
-            final_descriptor = tns_alias if tns_alias else connect_descriptor
-
-            oracle_config = PyOracleConfig(
-                password=args_dict.get("oracle_password"),
-                username=args_dict.get("oracle_username"),
-                connect_descriptor=final_descriptor,
-                wallet_path=args_dict.get("oracle_wallet_path"),
-                pool_min=args_dict.get("oracle_pool_min", 1),
-                pool_max=args_dict.get("oracle_pool_max", 16),
-                pool_timeout_secs=args_dict.get("oracle_pool_timeout_secs", 30),
-            )
-        args_dict["oracle_config"] = oracle_config
-        args_dict["history_backend"] = history_backend
-
-        # Convert Postgres config if needed
-        postgres_config = None
-        if history_backend == HistoryBackendType.Postgres:
-            postgres_config = PyPostgresConfig(
-                db_url=args_dict.get("postgres_db_url"),
-                pool_max=args_dict.get("postgres_pool_max", 16),
-            )
-        args_dict["postgres_config"] = postgres_config
-
-        # Convert Redis config if needed
-        redis_config = None
-        if history_backend == HistoryBackendType.Redis:
-            retention_days = args_dict.get("redis_retention_days", 30)
-            # If retention_days is negative, it means persistent storage (None in Rust)
-            retention_arg = None if retention_days < 0 else retention_days
-
-            redis_config = PyRedisConfig(
-                url=args_dict.get("redis_url"),
-                pool_max=args_dict.get("redis_pool_max", 16),
-                retention_days=retention_arg,
-            )
-        args_dict["redis_config"] = redis_config
 
         # Build control plane auth config
         args_dict["control_plane_auth"] = build_control_plane_auth_config(args_dict)

@@ -28,64 +28,7 @@ impl ConfigValidator {
         Self::validate_retry(&retry_cfg)?;
         Self::validate_circuit_breaker(&cb_cfg)?;
 
-        if config.history_backend == HistoryBackend::Oracle {
-            if config.oracle.is_none() {
-                return Err(ConfigError::MissingRequired {
-                    field: "oracle".to_string(),
-                });
-            }
-            if let Some(oracle) = &config.oracle {
-                Self::validate_oracle(oracle)?;
-            }
-        }
-
         Self::validate_tokenizer_cache(&config.tokenizer_cache)?;
-
-        Ok(())
-    }
-
-    fn validate_oracle(oracle: &OracleConfig) -> ConfigResult<()> {
-        if oracle.username.is_empty() {
-            return Err(ConfigError::MissingRequired {
-                field: "oracle.username".to_string(),
-            });
-        }
-
-        if oracle.password.is_empty() {
-            return Err(ConfigError::MissingRequired {
-                field: "oracle.password".to_string(),
-            });
-        }
-
-        if oracle.connect_descriptor.is_empty() {
-            return Err(ConfigError::MissingRequired {
-                field: "oracle_dsn or oracle_tns_alias".to_string(),
-            });
-        }
-
-        if oracle.pool_min < 1 {
-            return Err(ConfigError::InvalidValue {
-                field: "oracle.pool_min".to_string(),
-                value: oracle.pool_min.to_string(),
-                reason: "Must be at least 1".to_string(),
-            });
-        }
-
-        if oracle.pool_max < oracle.pool_min {
-            return Err(ConfigError::InvalidValue {
-                field: "oracle.pool_max".to_string(),
-                value: oracle.pool_max.to_string(),
-                reason: "Must be >= oracle.pool_min".to_string(),
-            });
-        }
-
-        if oracle.pool_timeout_secs == 0 {
-            return Err(ConfigError::InvalidValue {
-                field: "oracle.pool_timeout_secs".to_string(),
-                value: oracle.pool_timeout_secs.to_string(),
-                reason: "Must be > 0".to_string(),
-            });
-        }
 
         Ok(())
     }

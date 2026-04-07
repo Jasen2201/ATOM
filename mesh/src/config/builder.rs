@@ -1,6 +1,6 @@
 use super::{
-    CircuitBreakerConfig, ConfigError, ConfigResult, DiscoveryConfig, HealthCheckConfig,
-    HistoryBackend, MetricsConfig, OracleConfig, PolicyConfig, PostgresConfig, RedisConfig,
+    CircuitBreakerConfig, ConfigResult, DiscoveryConfig, HealthCheckConfig,
+    MetricsConfig, PolicyConfig,
     RetryConfig, RouterConfig, RoutingMode, TokenizerCacheConfig, TraceConfig,
 };
 use crate::core::ConnectionMode;
@@ -334,35 +334,6 @@ impl RouterConfigBuilder {
         self
     }
 
-    // ==================== History Backend ====================
-
-    pub fn history_backend(mut self, backend: HistoryBackend) -> Self {
-        self.config.history_backend = backend;
-        self
-    }
-
-    pub fn memory_history(mut self) -> Self {
-        self.config.history_backend = HistoryBackend::Memory;
-        self
-    }
-
-    pub fn no_history(mut self) -> Self {
-        self.config.history_backend = HistoryBackend::None;
-        self
-    }
-
-    pub fn oracle_history(mut self, oracle_config: OracleConfig) -> Self {
-        self.config.history_backend = HistoryBackend::Oracle;
-        self.config.oracle = Some(oracle_config);
-        self
-    }
-
-    pub fn redis_history(mut self, redis_config: RedisConfig) -> Self {
-        self.config.history_backend = HistoryBackend::Redis;
-        self.config.redis = Some(redis_config);
-        self
-    }
-
     // ==================== Parsers ====================
 
     pub fn reasoning_parser<S: Into<String>>(mut self, parser: S) -> Self {
@@ -489,30 +460,6 @@ impl RouterConfigBuilder {
 
     pub fn maybe_chat_template(mut self, template: Option<impl Into<String>>) -> Self {
         self.config.chat_template = template.map(|t| t.into());
-        self
-    }
-
-    pub fn maybe_oracle(mut self, oracle: Option<OracleConfig>) -> Self {
-        if let Some(cfg) = oracle {
-            self.config.history_backend = HistoryBackend::Oracle;
-            self.config.oracle = Some(cfg);
-        }
-        self
-    }
-
-    pub fn maybe_postgres(mut self, postgres: Option<PostgresConfig>) -> Self {
-        if let Some(cfg) = postgres {
-            self.config.history_backend = HistoryBackend::Postgres;
-            self.config.postgres = Some(cfg);
-        }
-        self
-    }
-
-    pub fn maybe_redis(mut self, redis: Option<RedisConfig>) -> Self {
-        if let Some(cfg) = redis {
-            self.config.history_backend = HistoryBackend::Redis;
-            self.config.redis = Some(cfg);
-        }
         self
     }
 
