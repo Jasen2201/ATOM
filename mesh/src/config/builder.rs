@@ -214,20 +214,10 @@ impl RouterConfigBuilder {
         self
     }
 
-    // ==================== Security & CORS ====================
+    // ==================== Security ====================
 
     pub fn api_key<S: Into<String>>(mut self, key: S) -> Self {
         self.config.api_key = Some(key.into());
-        self
-    }
-
-    pub fn cors_allowed_origins(mut self, origins: Vec<String>) -> Self {
-        self.config.cors_allowed_origins = origins;
-        self
-    }
-
-    pub fn add_cors_origin<S: Into<String>>(mut self, origin: S) -> Self {
-        self.config.cors_allowed_origins.push(origin.into());
         self
     }
 

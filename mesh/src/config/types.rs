@@ -34,7 +34,6 @@ pub struct RouterConfig {
     pub queue_timeout_secs: u64,
     /// If not set, defaults to max_concurrent_requests
     pub rate_limit_tokens_per_second: Option<i32>,
-    pub cors_allowed_origins: Vec<String>,
     pub retry: RetryConfig,
     pub circuit_breaker: CircuitBreakerConfig,
     /// When true, overrides retry.max_retries to 1
@@ -437,7 +436,6 @@ impl Default for RouterConfig {
             queue_size: 100,
             queue_timeout_secs: 60,
             rate_limit_tokens_per_second: None,
-            cors_allowed_origins: vec![],
             retry: RetryConfig::default(),
             circuit_breaker: CircuitBreakerConfig::default(),
             disable_retries: false,

@@ -286,10 +286,6 @@ struct CliArgs {
     #[arg(long, default_value_t = 536870912, help_heading = "Request Handling")]
     max_payload_size: usize,
 
-    /// CORS allowed origins
-    #[arg(long, num_args = 0.., help_heading = "Request Handling")]
-    cors_allowed_origins: Vec<String>,
-
     // ==================== Rate Limiting ====================
     /// Maximum concurrent requests (-1 to disable)
     #[arg(long, default_value_t = -1, help_heading = "Rate Limiting")]
@@ -957,7 +953,6 @@ impl CliArgs {
             .max_concurrent_requests(self.max_concurrent_requests)
             .queue_size(self.queue_size)
             .queue_timeout_secs(self.queue_timeout_secs)
-            .cors_allowed_origins(self.cors_allowed_origins.clone())
             .retry_config(RetryConfig {
                 max_retries: self.retry_max_retries,
                 initial_backoff_ms: self.retry_initial_backoff_ms,

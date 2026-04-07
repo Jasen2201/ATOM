@@ -502,7 +502,6 @@ pub fn build_app(
     control_plane_auth_state: Option<crate::auth::ControlPlaneAuthState>,
     max_payload_size: usize,
     request_id_headers: Vec<String>,
-    cors_allowed_origins: Vec<String>,
 ) -> Router {
     let protected_routes = Router::new()
         .route("/generate", post(generate))
@@ -642,7 +641,6 @@ pub fn build_app(
             app_state.context.inflight_tracker.clone(),
         ))
         .layer(middleware::RequestIdLayer::new(request_id_headers))
-        .layer(create_cors_layer(cors_allowed_origins))
         .fallback(sink_handler)
         .with_state(app_state)
 }
@@ -998,7 +996,6 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         control_plane_auth_state,
         config.max_payload_size,
         request_id_headers,
-        config.router_config.cors_allowed_origins.clone(),
     );
 
     // TcpListener::bind accepts &str and handles IPv4/IPv6 via ToSocketAddrs
@@ -1078,27 +1075,3 @@ async fn shutdown_signal() {
     }
 }
 
-fn create_cors_layer(allowed_origins: Vec<String>) -> tower_http::cors::CorsLayer {
-    use tower_http::cors::Any;
-
-    let cors = if allowed_origins.is_empty() {
-        tower_http::cors::CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any)
-            .expose_headers(Any)
-    } else {
-        let origins: Vec<http::HeaderValue> = allowed_origins
-            .into_iter()
-            .filter_map(|origin| origin.parse().ok())
-            .collect();
-
-        tower_http::cors::CorsLayer::new()
-            .allow_origin(origins)
-            .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
-            .allow_headers([http::header::CONTENT_TYPE, http::header::AUTHORIZATION])
-            .expose_headers([http::header::HeaderName::from_static("x-request-id")])
-    };
-
-    cors.max_age(Duration::from_secs(3600))
-}
