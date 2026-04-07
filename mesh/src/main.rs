@@ -58,10 +58,6 @@ pub enum Backend {
     Vllm,
     #[value(name = "trtllm")]
     Trtllm,
-    #[value(name = "openai")]
-    Openai,
-    #[value(name = "anthropic")]
-    Anthropic,
 }
 
 impl std::fmt::Display for Backend {
@@ -70,8 +66,6 @@ impl std::fmt::Display for Backend {
             Backend::Sglang => "sglang",
             Backend::Vllm => "vllm",
             Backend::Trtllm => "trtllm",
-            Backend::Openai => "openai",
-            Backend::Anthropic => "anthropic",
         };
         write!(f, "{}", s)
     }
@@ -685,13 +679,9 @@ impl CliArgs {
         &self,
         prefill_urls: Vec<(String, Option<u16>)>,
     ) -> ConfigResult<RouterConfig> {
-        // Determine routing mode based on backend type and PD disaggregation flag
+        // Determine routing mode based on PD disaggregation flag
         // IGW mode doesn't change routing mode, only affects router initialization
-        let mode = if matches!(self.backend, Backend::Openai) {
-            RoutingMode::OpenAI {
-                worker_urls: self.worker_urls.clone(),
-            }
-        } else if self.pd_disaggregation {
+        let mode = if self.pd_disaggregation {
             RoutingMode::PrefillDecode {
                 prefill_urls,
                 decode_urls: self.decode.clone(),
@@ -748,12 +738,8 @@ impl CliArgs {
                 }
                 all_urls.extend(decode_urls.clone());
             }
-            RoutingMode::OpenAI { .. } => {}
         }
-        let connection_mode = match &mode {
-            RoutingMode::OpenAI { .. } => ConnectionMode::Http,
-            _ => Self::determine_connection_mode(&all_urls),
-        };
+        let connection_mode = Self::determine_connection_mode(&all_urls);
 
         let history_backend = match self.history_backend.as_str() {
             "none" => HistoryBackend::None,
@@ -995,8 +981,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Host: {}:{}", cli_args.host, cli_args.port);
     let mode_str = if cli_args.enable_igw {
         "IGW (Inference Gateway)".to_string()
-    } else if matches!(cli_args.backend, Backend::Openai) {
-        "OpenAI Backend".to_string()
     } else if cli_args.pd_disaggregation {
         "PD Disaggregated".to_string()
     } else {
@@ -1005,14 +989,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Mode: {}", mode_str);
 
     match cli_args.backend {
-        Backend::Vllm | Backend::Trtllm | Backend::Anthropic => {
+        Backend::Vllm | Backend::Trtllm => {
             println!(
                 "WARNING: runtime '{}' not implemented yet; falling back to regular routing. \
 Provide --worker-urls or PD flags as usual.",
                 cli_args.backend
             );
         }
-        Backend::Sglang | Backend::Openai => {}
+        Backend::Sglang => {}
     }
 
     if !cli_args.enable_igw {

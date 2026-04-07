@@ -21,7 +21,6 @@ pub enum PolicyType {
 #[derive(Clone, PartialEq, Debug)]
 pub enum BackendType {
     Sglang,
-    Openai,
 }
 
 #[pyclass(eq)]
@@ -483,10 +482,6 @@ impl Router {
         let mode = if self.enable_igw {
             RoutingMode::Regular {
                 worker_urls: vec![],
-            }
-        } else if matches!(self.backend, BackendType::Openai) {
-            RoutingMode::OpenAI {
-                worker_urls: self.worker_urls.clone(),
             }
         } else if self.pd_disaggregation {
             RoutingMode::PrefillDecode {

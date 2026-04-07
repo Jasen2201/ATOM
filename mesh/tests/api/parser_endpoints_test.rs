@@ -72,13 +72,6 @@ impl ParserTestContext {
                     *urls = worker_urls.clone();
                 }
             }
-            RoutingMode::OpenAI {
-                worker_urls: ref mut urls,
-            } => {
-                if urls.is_empty() {
-                    *urls = worker_urls.clone();
-                }
-            }
             _ => {} // PrefillDecode mode has its own setup
         }
 

@@ -134,13 +134,6 @@ impl ConfigValidator {
                     Self::validate_policy(d_policy)?;
                 }
             }
-            RoutingMode::OpenAI { worker_urls } => {
-                // Allow empty URLs to support dynamic worker addition
-                // URLs will be validated if provided
-                if !worker_urls.is_empty() {
-                    Self::validate_urls(worker_urls)?;
-                }
-            }
         }
         Ok(())
     }
@@ -321,11 +314,6 @@ impl ConfigValidator {
                         reason: "PD mode with service discovery requires at least one non-empty selector (prefill or decode)".to_string(),
                     });
                 }
-            }
-            RoutingMode::OpenAI { .. } => {
-                return Err(ConfigError::ValidationFailed {
-                    reason: "OpenAI mode does not support service discovery".to_string(),
-                });
             }
         }
 
@@ -834,16 +822,6 @@ mod tests {
         // Should pass validation even with empty URLs
         assert!(ConfigValidator::validate(&config).is_ok());
 
-        // Test that empty URLs are allowed in OpenAI mode
-        let config = RouterConfig::new(
-            RoutingMode::OpenAI {
-                worker_urls: vec![],
-            },
-            PolicyConfig::Random,
-        );
-
-        // Should pass validation even with empty URLs
-        assert!(ConfigValidator::validate(&config).is_ok());
     }
 
     #[test]

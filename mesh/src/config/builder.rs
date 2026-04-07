@@ -70,11 +70,6 @@ impl RouterConfigBuilder {
         self
     }
 
-    pub fn openai_mode(mut self, worker_urls: Vec<String>) -> Self {
-        self.config.mode = RoutingMode::OpenAI { worker_urls };
-        self
-    }
-
     pub fn mode(mut self, mode: RoutingMode) -> Self {
         self.config.mode = mode;
         self

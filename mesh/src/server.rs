@@ -112,7 +112,6 @@ async fn readiness(State(state): State<Arc<AppState>>) -> Response {
                 has_prefill && has_decode
             }
             RoutingMode::Regular { .. } => !healthy_workers.is_empty(),
-            RoutingMode::OpenAI { .. } => !healthy_workers.is_empty(),
         }
     };
 
