@@ -511,7 +511,7 @@ struct CliArgs {
     otlp_traces_endpoint: String,
 
     // ==================== Control Plane Authentication ====================
-    /// API key for worker authorization
+    /// API key for worker connections
     #[arg(long, help_heading = "Control Plane Authentication")]
     api_key: Option<String>,
 

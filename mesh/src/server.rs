@@ -33,7 +33,7 @@ use crate::{
         worker_manager::WorkerManager,
         Job,
     },
-    middleware::{self, AuthConfig, QueuedRequest},
+    middleware::{self, QueuedRequest},
     observability::{
         logging::{self, LoggingConfig},
         metrics::{self, PrometheusConfig},
@@ -498,7 +498,6 @@ pub struct ServerConfig {
 
 pub fn build_app(
     app_state: Arc<AppState>,
-    auth_config: AuthConfig,
     control_plane_auth_state: Option<crate::auth::ControlPlaneAuthState>,
     max_payload_size: usize,
     request_id_headers: Vec<String>,
@@ -539,10 +538,6 @@ pub fn build_app(
         .route_layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             middleware::concurrency_limit_middleware,
-        ))
-        .route_layer(axum::middleware::from_fn_with_state(
-            auth_config.clone(),
-            middleware::auth_middleware,
         ))
         .route_layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
@@ -598,10 +593,7 @@ pub fn build_app(
                 crate::auth::control_plane_auth_middleware,
             ))
         } else {
-            routes.route_layer(axum::middleware::from_fn_with_state(
-                auth_config.clone(),
-                middleware::auth_middleware,
-            ))
+            routes
         }
     };
     let admin_routes = apply_control_plane_auth(admin_routes);
@@ -620,11 +612,7 @@ pub fn build_app(
         .route("/ha/rate-limit", post(set_global_rate_limit))
         .route("/ha/rate-limit", get(get_global_rate_limit))
         .route("/ha/rate-limit/stats", get(get_global_rate_limit_stats))
-        .route("/ha/shutdown", post(trigger_graceful_shutdown))
-        .route_layer(axum::middleware::from_fn_with_state(
-            auth_config.clone(),
-            middleware::auth_middleware,
-        ));
+        .route("/ha/shutdown", post(trigger_graceful_shutdown));
 
     Router::new()
         .merge(protected_routes)
@@ -982,17 +970,12 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         ]
     });
 
-    let auth_config = AuthConfig {
-        api_key: config.router_config.api_key.clone(),
-    };
-
     // Initialize control plane authentication if configured
     let control_plane_auth_state =
         crate::auth::ControlPlaneAuthState::try_init(config.control_plane_auth.as_ref()).await;
 
     let app = build_app(
         app_state,
-        auth_config,
         control_plane_auth_state,
         config.max_payload_size,
         request_id_headers,

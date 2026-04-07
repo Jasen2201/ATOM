@@ -214,8 +214,6 @@ impl RouterConfigBuilder {
         self
     }
 
-    // ==================== Security ====================
-
     pub fn api_key<S: Into<String>>(mut self, key: S) -> Self {
         self.config.api_key = Some(key.into());
         self
@@ -470,6 +468,7 @@ impl RouterConfigBuilder {
         }
         self
     }
+
 
     pub fn maybe_discovery(mut self, discovery: Option<DiscoveryConfig>) -> Self {
         self.config.discovery = discovery;
