@@ -15,7 +15,6 @@ use crate::protocols::{
     classify::ClassifyRequest,
     embedding::EmbeddingRequest,
     generate::GenerateRequest,
-    rerank::RerankRequest,
     responses::{ResponsesGetParams, ResponsesRequest},
 };
 
@@ -169,16 +168,6 @@ pub trait RouterTrait: Send + Sync + Debug {
         _model_id: Option<&str>,
     ) -> Response {
         (StatusCode::NOT_IMPLEMENTED, "Classify not implemented").into_response()
-    }
-
-    /// Route rerank requests
-    async fn route_rerank(
-        &self,
-        _headers: Option<&HeaderMap>,
-        _body: &RerankRequest,
-        _model_id: Option<&str>,
-    ) -> Response {
-        (StatusCode::NOT_IMPLEMENTED, "Rerank not implemented").into_response()
     }
 
     /// Get router type name

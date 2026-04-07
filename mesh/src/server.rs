@@ -45,7 +45,6 @@ use crate::{
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
         parser::{ParseFunctionCallRequest, SeparateReasoningRequest},
-        rerank::{RerankRequest, V1RerankReqInput},
         responses::{ResponsesGetParams, ResponsesRequest},
         tokenize::{AddTokenizerRequest, DetokenizeRequest, TokenizeRequest},
         validated::ValidatedJson,
@@ -188,29 +187,6 @@ async fn v1_chat_completions(
     state
         .router
         .route_chat(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn rerank(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    ValidatedJson(body): ValidatedJson<RerankRequest>,
-) -> Response {
-    state
-        .router
-        .route_rerank(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_rerank(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    Json(body): Json<V1RerankReqInput>,
-) -> Response {
-    let rerank_body = &body.into();
-    state
-        .router
-        .route_rerank(Some(&headers), rerank_body, Some(&rerank_body.model))
         .await
 }
 
@@ -543,8 +519,6 @@ pub fn build_app(
     let protected_routes = Router::new()
         .route("/generate", post(generate))
         .route("/v1/chat/completions", post(v1_chat_completions))
-        .route("/rerank", post(rerank))
-        .route("/v1/rerank", post(v1_rerank))
         .route("/v1/responses", post(v1_responses))
         .route("/v1/embeddings", post(v1_embeddings))
         .route("/v1/classify", post(v1_classify))

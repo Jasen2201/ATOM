@@ -34,7 +34,6 @@ use crate::{
         common::InputIds,
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
-        rerank::RerankRequest,
     },
     routers::{
         error,
@@ -1300,32 +1299,6 @@ impl RouterTrait for PDRouter {
             is_stream,
             return_logprob,
             request_text,
-            model_id,
-            headers: headers.cloned(),
-        };
-
-        self.execute_dual_dispatch(headers, body, context).await
-    }
-
-    async fn route_rerank(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &RerankRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        // Extract text for cache-aware routing
-        let req_text = if self.policies_need_request_text() {
-            Some(body.query.clone())
-        } else {
-            None
-        };
-
-        let context = PDRequestContext {
-            route: "/v1/rerank",
-            batch_size: None,
-            is_stream: false,
-            return_logprob: false,
-            request_text: req_text,
             model_id,
             headers: headers.cloned(),
         };

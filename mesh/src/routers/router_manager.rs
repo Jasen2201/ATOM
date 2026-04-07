@@ -27,7 +27,6 @@ use crate::{
         classify::ClassifyRequest,
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
-        rerank::RerankRequest,
         responses::{ResponsesGetParams, ResponsesRequest},
     },
     routers::RouterTrait,
@@ -669,25 +668,6 @@ impl RouterTrait for RouterManager {
             (
                 StatusCode::NOT_FOUND,
                 format!("Model '{}' not found or no router available", body.model),
-            )
-                .into_response()
-        }
-    }
-
-    async fn route_rerank(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &RerankRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        let router = self.select_router_for_request(headers, model_id);
-
-        if let Some(router) = router {
-            router.route_rerank(headers, body, model_id).await
-        } else {
-            (
-                StatusCode::NOT_FOUND,
-                "No router available for rerank request",
             )
                 .into_response()
         }

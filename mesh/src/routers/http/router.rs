@@ -1,11 +1,10 @@
 use std::{sync::Arc, time::Instant};
 
 use axum::{
-    body::{to_bytes, Body},
+    body::Body,
     extract::Request,
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, StatusCode},
-    response::{IntoResponse, Response},
-    Json,
+    response::Response,
 };
 use futures_util::{stream, StreamExt};
 use reqwest::Client;
@@ -31,7 +30,6 @@ use crate::{
         common::GenerationRequest,
         embedding::EmbeddingRequest,
         generate::GenerateRequest,
-        rerank::{RerankRequest, RerankResponse, RerankResult},
         responses::{ResponsesGetParams, ResponsesRequest},
     },
     routers::{
@@ -638,24 +636,6 @@ impl Router {
         }
     }
 
-    async fn build_rerank_response(
-        req: &RerankRequest,
-        response: Response,
-    ) -> anyhow::Result<Response> {
-        let (_, response_body) = response.into_parts();
-        let body_bytes = to_bytes(response_body, usize::MAX).await?;
-        let rerank_results = serde_json::from_slice::<Vec<RerankResult>>(&body_bytes)?;
-        let mut rerank_response =
-            RerankResponse::new(rerank_results, req.model.clone(), req.rid.clone());
-        // Sorting is handled by Python worker (serving_rerank.py)
-        if let Some(top_k) = req.top_k {
-            rerank_response.apply_top_k(top_k);
-        }
-        if !req.return_documents {
-            rerank_response.drop_documents();
-        }
-        Ok(Json(rerank_response).into_response())
-    }
 }
 
 fn convert_reqwest_error(e: reqwest::Error) -> Response {
@@ -797,31 +777,6 @@ impl RouterTrait for Router {
     ) -> Response {
         self.route_typed_request(headers, body, "/v1/classify", model_id)
             .await
-    }
-
-    async fn route_rerank(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &RerankRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        let response = self
-            .route_typed_request(headers, body, "/v1/rerank", model_id)
-            .await;
-        if response.status().is_success() {
-            match Self::build_rerank_response(body, response).await {
-                Ok(rerank_response) => rerank_response,
-                Err(e) => {
-                    error!("Failed to build rerank response: {}", e);
-                    return error::internal_error(
-                        "rerank_response_build_failed",
-                        "Failed to build rerank response",
-                    );
-                }
-            }
-        } else {
-            response
-        }
     }
 
     fn router_type(&self) -> &'static str {
