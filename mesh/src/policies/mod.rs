@@ -10,11 +10,8 @@ use smg_mesh::OptionalMeshSyncManager;
 
 use crate::core::{HashRing, Worker};
 
-mod bucket;
 mod cache_aware;
-mod consistent_hashing;
 mod factory;
-mod manual;
 mod power_of_two;
 mod prefix_hash;
 mod random;
@@ -22,11 +19,8 @@ mod registry;
 mod round_robin;
 pub mod tree;
 pub(crate) mod utils;
-pub use bucket::BucketPolicy;
 pub use cache_aware::CacheAwarePolicy;
-pub use consistent_hashing::ConsistentHashingPolicy;
 pub use factory::PolicyFactory;
-pub use manual::{ManualConfig, ManualPolicy};
 pub use power_of_two::PowerOfTwoPolicy;
 pub use prefix_hash::{PrefixHashConfig, PrefixHashPolicy};
 pub use random::RandomPolicy;
@@ -111,23 +105,6 @@ impl Default for CacheAwareConfig {
             balance_rel_threshold: 1.1,
             eviction_interval_secs: 30,
             max_tree_size: 10000,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct BucketConfig {
-    pub balance_abs_threshold: usize,
-    pub balance_rel_threshold: f32,
-    pub bucket_adjust_interval_secs: usize,
-}
-
-impl Default for BucketConfig {
-    fn default() -> Self {
-        Self {
-            balance_abs_threshold: 32,
-            balance_rel_threshold: 1.0001,
-            bucket_adjust_interval_secs: 5,
         }
     }
 }

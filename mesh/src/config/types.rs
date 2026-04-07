@@ -206,19 +206,6 @@ impl RoutingMode {
     }
 }
 
-/// Assignment mode for manual policy when encountering a new routing key
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ManualAssignmentMode {
-    /// Random selection (default)
-    #[default]
-    Random,
-    /// Select worker with minimum running requests
-    MinLoad,
-    /// Select worker with minimum active routing keys
-    MinGroup,
-}
-
 /// Policy configuration for routing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -240,41 +227,6 @@ pub enum PolicyConfig {
 
     #[serde(rename = "power_of_two")]
     PowerOfTwo { load_check_interval_secs: u64 },
-
-    #[serde(rename = "bucket")]
-    Bucket {
-        /// Absolute load difference threshold for load balancing
-        balance_abs_threshold: usize,
-        /// Relative load ratio threshold for load balancing
-        balance_rel_threshold: f32,
-        /// Interval between bucket boundary adjustment cycles (seconds)
-        bucket_adjust_interval_secs: usize,
-    },
-
-    /// Manual routing policy with sticky sessions using DashMap.
-    /// - X-SMG-Routing-Key: Routes to a cached worker or assigns a new one
-    /// - Provides true sticky sessions with zero key redistribution on worker add
-    /// - Falls back to random selection if no routing key is provided
-    /// - Supports LRU eviction when cache size exceeds max_entries
-    #[serde(rename = "manual")]
-    Manual {
-        /// Interval between TTL eviction cycles (seconds, default: 60)
-        #[serde(default = "default_manual_eviction_interval_secs")]
-        eviction_interval_secs: u64,
-        /// Maximum idle time before eviction (seconds, default: 14400 = 4 hours)
-        #[serde(default = "default_manual_max_idle_secs")]
-        max_idle_secs: u64,
-        /// Assignment mode for new routing keys (default: random)
-        #[serde(default)]
-        assignment_mode: ManualAssignmentMode,
-    },
-
-    /// Consistent hashing policy using hash ring for session affinity:
-    /// - X-SMG-Target-Worker: Direct routing to a specific worker by URL
-    /// - X-SMG-Routing-Key: Consistent hash routing for session affinity
-    /// - Provides O(log n) lookup with minimal redistribution (~1/N keys) on topology change
-    #[serde(rename = "consistent_hashing")]
-    ConsistentHashing,
 
     /// Prefix hash policy for KV cache-aware load balancing.
     /// A lightweight alternative to cache_aware radix tree.
@@ -301,14 +253,6 @@ fn default_load_factor() -> f64 {
     1.25
 }
 
-fn default_manual_eviction_interval_secs() -> u64 {
-    60
-}
-
-fn default_manual_max_idle_secs() -> u64 {
-    4 * 3600
-}
-
 impl PolicyConfig {
     pub fn name(&self) -> &'static str {
         match self {
@@ -316,9 +260,6 @@ impl PolicyConfig {
             PolicyConfig::RoundRobin => "round_robin",
             PolicyConfig::CacheAware { .. } => "cache_aware",
             PolicyConfig::PowerOfTwo { .. } => "power_of_two",
-            PolicyConfig::Bucket { .. } => "bucket",
-            PolicyConfig::Manual { .. } => "manual",
-            PolicyConfig::ConsistentHashing => "consistent_hashing",
             PolicyConfig::PrefixHash { .. } => "prefix_hash",
         }
     }
@@ -818,28 +759,6 @@ mod tests {
                 assert_eq!(load_check_interval_secs, 120);
             }
             _ => panic!("Expected PowerOfTwo"),
-        }
-    }
-
-    #[test]
-    fn test_bucket_parameters() {
-        let bucket = PolicyConfig::Bucket {
-            balance_abs_threshold: 20,
-            balance_rel_threshold: 2.0,
-            bucket_adjust_interval_secs: 5,
-        };
-
-        match bucket {
-            PolicyConfig::Bucket {
-                balance_abs_threshold,
-                balance_rel_threshold,
-                bucket_adjust_interval_secs,
-            } => {
-                assert_eq!(balance_abs_threshold, 20);
-                assert!((balance_rel_threshold - 2.0).abs() < 0.0001);
-                assert_eq!(bucket_adjust_interval_secs, 5);
-            }
-            _ => panic!("Expected Bucket"),
         }
     }
 

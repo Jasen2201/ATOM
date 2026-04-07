@@ -11,7 +11,7 @@ use tracing::{debug, info, warn};
 /// When the first worker of a new model is added, it determines the policy for that model.
 /// All subsequent workers of the same model use the established policy.
 /// When the last worker of a model is removed, the policy mapping is cleaned up.
-use super::{BucketPolicy, CacheAwarePolicy, LoadBalancingPolicy, PolicyFactory};
+use super::{CacheAwarePolicy, LoadBalancingPolicy, PolicyFactory};
 use crate::{config::types::PolicyConfig, core::Worker};
 
 /// Registry for managing model-to-policy mappings
@@ -369,23 +369,6 @@ impl PolicyRegistry {
         }
     }
 
-    /// Initialize bucket policies for PD mode - lock-free
-    pub fn init_pd_bucket_policies(&self, prefill_workers: &[Arc<dyn Worker>]) {
-        // Initialize prefill policy if it's bucket (lock-free via OnceLock::get)
-        if let Some(prefill_policy) = self.prefill_policy.get() {
-            if prefill_policy.name() == "bucket" {
-                if let Some(bucket) = prefill_policy.as_any().downcast_ref::<BucketPolicy>() {
-                    if !prefill_workers.is_empty() {
-                        debug!(
-                            "Initializing prefill bucket policy with {} workers",
-                            prefill_workers.len()
-                        );
-                        bucket.init_prefill_worker_urls(prefill_workers);
-                    }
-                }
-            }
-        }
-    }
 
     /// Apply remote tree operation to cache-aware policy for a model
     /// This is called when receiving tree state updates from mesh

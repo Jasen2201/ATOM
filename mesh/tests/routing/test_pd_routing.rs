@@ -183,10 +183,9 @@ mod pd_routing_unit_tests {
                     prefill_policy: None,
                     decode_policy: None,
                 },
-                PolicyConfig::Bucket {
-                    balance_abs_threshold: 20,
-                    balance_rel_threshold: 1.2,
-                    bucket_adjust_interval_secs: 5,
+                PolicyConfig::PrefixHash {
+                    prefix_token_count: 256,
+                    load_factor: 1.25,
                 },
             ),
         ];

@@ -3,9 +3,7 @@
 //! Provides pre-configured RouterConfig and MockWorkerConfig builders
 //! for common test scenarios.
 
-use smg::config::{
-    CircuitBreakerConfig, ManualAssignmentMode, PolicyConfig, RetryConfig, RouterConfig,
-};
+use smg::config::{CircuitBreakerConfig, PolicyConfig, RetryConfig, RouterConfig};
 
 use super::mock_worker::{HealthStatus, MockWorkerConfig, WorkerType};
 
@@ -83,36 +81,6 @@ impl TestRouterConfig {
         RouterConfig::builder()
             .regular_mode(vec![])
             .power_of_two_policy(5) // load_check_interval_secs
-            .host(defaults::HOST)
-            .port(port)
-            .max_payload_size(defaults::MAX_PAYLOAD_SIZE)
-            .request_timeout_secs(defaults::REQUEST_TIMEOUT_SECS)
-            .worker_startup_timeout_secs(defaults::WORKER_STARTUP_TIMEOUT_SECS)
-            .worker_startup_check_interval_secs(defaults::WORKER_STARTUP_CHECK_INTERVAL_SECS)
-            .max_concurrent_requests(defaults::MAX_CONCURRENT_REQUESTS)
-            .queue_timeout_secs(defaults::QUEUE_TIMEOUT_SECS)
-            .build_unchecked()
-    }
-
-    /// Create a manual routing config (for sticky routing tests)
-    pub fn manual(port: u16) -> RouterConfig {
-        Self::manual_with_mode(port, ManualAssignmentMode::Random)
-    }
-
-    /// Create a manual routing config with min_group assignment mode
-    pub fn manual_min_group(port: u16) -> RouterConfig {
-        Self::manual_with_mode(port, ManualAssignmentMode::MinGroup)
-    }
-
-    /// Create a manual routing config with specified assignment mode
-    pub fn manual_with_mode(port: u16, assignment_mode: ManualAssignmentMode) -> RouterConfig {
-        RouterConfig::builder()
-            .regular_mode(vec![])
-            .policy(PolicyConfig::Manual {
-                eviction_interval_secs: 60,
-                max_idle_secs: 3600,
-                assignment_mode,
-            })
             .host(defaults::HOST)
             .port(port)
             .max_payload_size(defaults::MAX_PAYLOAD_SIZE)

@@ -130,17 +130,6 @@ impl<D: WorkerRegistrationData + WorkflowData> StepExecutor<D> for UpdatePolicie
             }
         }
 
-        // Initialize bucket policies for prefill workers (local workers only)
-        let prefill_workers = app_context.worker_registry.get_prefill_workers();
-        if !prefill_workers.is_empty() {
-            let policy = app_context.policy_registry.get_prefill_policy();
-            if policy.name() == "bucket" {
-                app_context
-                    .policy_registry
-                    .init_pd_bucket_policies(&prefill_workers);
-            }
-        }
-
         debug!(
             "Updated policies for {} workers across {} models",
             workers.len(),

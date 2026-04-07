@@ -143,10 +143,6 @@ serial_test = "3.0"
 rsa = { version = "0.9", features = ["sha2"] }
 
 [[bench]]
-name = "consistent_hash_bench"
-harness = false
-path = "benches/consistent_hash_bench.rs"
-[[bench]]
 name = "wasm_middleware_latency"
 harness = false
 path = "benches/wasm_middleware_latency.rs"
@@ -158,11 +154,6 @@ path = "benches/request_processing.rs"
 [[bench]]
 name = "router_registry_bench"
 harness = false
-
-[[bench]]
-name = "manual_policy_benchmark"
-harness = false
-path = "benches/manual_policy_benchmark.rs"
 
 [profile.release]
 opt-level = "z"     # Optimize for size
