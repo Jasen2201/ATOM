@@ -317,14 +317,14 @@ impl AppContextBuilder {
         self
     }
 
-    /// Create reasoning parser factory for gRPC mode or IGW mode
+    /// Create reasoning parser factory for gRPC mode
     fn with_reasoning_parser_factory(mut self) -> Self {
         // Initialize reasoning parser factory
         self.reasoning_parser_factory = Some(ReasoningParserFactory::new());
         self
     }
 
-    /// Create tool parser factory for gRPC mode or IGW mode
+    /// Create tool parser factory for gRPC mode
     fn with_tool_parser_factory(mut self) -> Self {
         // Initialize tool parser factory
         self.tool_parser_factory = Some(ToolParserFactory::new());

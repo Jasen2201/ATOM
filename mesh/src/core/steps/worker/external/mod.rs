@@ -10,8 +10,7 @@ use std::{sync::Arc, time::Duration};
 
 pub use create_workers::CreateExternalWorkersStep;
 pub use discover_models::{
-    group_models_into_cards, infer_model_type_from_id, DiscoverModelsStep, ModelInfo,
-    ModelsResponse,
+    group_model_ids, DiscoverModelsStep, ModelInfo, ModelsResponse,
 };
 use wfaas::{BackoffStrategy, FailureAction, RetryPolicy, StepDefinition, WorkflowDefinition};
 
@@ -112,7 +111,7 @@ pub fn create_external_worker_workflow_data(
 ) -> ExternalWorkerWorkflowData {
     ExternalWorkerWorkflowData {
         config,
-        model_cards: Vec::new(),
+        discovered_model_ids: Vec::new(),
         workers: None,
         labels: std::collections::HashMap::new(),
         app_context: Some(app_context),

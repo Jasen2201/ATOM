@@ -26,8 +26,7 @@ pub use worker::{
     create_worker_update_workflow,
     create_worker_update_workflow_data,
     // Utility functions
-    group_models_into_cards,
-    infer_model_type_from_id,
+    group_model_ids,
     // Shared steps
     ActivateWorkersStep,
     // External registration steps

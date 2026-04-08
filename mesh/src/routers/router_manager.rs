@@ -139,7 +139,6 @@ impl RouterManager {
 
     /// Resolve model_id for a request, inferring from available workers if not specified.
     ///
-    /// Behavior in IGW mode (must fail fast if model not resolvable):
     /// - If model_id is provided, use it directly
     /// - If not provided and only one model exists, use it as implicit default
     /// - If not provided and multiple models exist, return error requiring specification
@@ -255,7 +254,7 @@ impl RouterTrait for RouterManager {
     }
 
     async fn health_generate(&self, _req: Request<Body>) -> Response {
-        // IGW readiness: return 200 if at least one router has healthy workers
+        // Return 200 if at least one router has healthy workers
         let has_healthy_workers = self
             .worker_registry
             .get_all()

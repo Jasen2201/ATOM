@@ -102,9 +102,23 @@ impl StepExecutor<WorkerUpdateWorkflowData> for UpdateWorkerPropertiesStep {
                         .connection_mode(worker.connection_mode().clone())
                         .runtime_type(worker.metadata().runtime_type.clone())
                         .labels(updated_labels)
-                        .health_config(updated_health_config.clone())
-                        .models(worker.metadata().models.clone());
+                        .health_config(updated_health_config.clone());
 
+                if let Some(ref model_id) = worker.metadata().model_id {
+                    builder = builder.model_id(model_id.clone());
+                }
+                if let Some(ref tokenizer_path) = worker.metadata().tokenizer_path {
+                    builder = builder.tokenizer_path(tokenizer_path.clone());
+                }
+                if let Some(ref reasoning_parser) = worker.metadata().reasoning_parser {
+                    builder = builder.reasoning_parser(reasoning_parser.clone());
+                }
+                if let Some(ref tool_parser) = worker.metadata().tool_parser {
+                    builder = builder.tool_parser(tool_parser.clone());
+                }
+                if let Some(ref chat_template) = worker.metadata().chat_template {
+                    builder = builder.chat_template(chat_template.clone());
+                }
                 if let Some(ref api_key) = updated_api_key {
                     builder = builder.api_key(api_key.clone());
                 }
@@ -117,9 +131,23 @@ impl StepExecutor<WorkerUpdateWorkflowData> for UpdateWorkerPropertiesStep {
                     .connection_mode(worker.connection_mode().clone())
                     .runtime_type(worker.metadata().runtime_type.clone())
                     .labels(updated_labels)
-                    .health_config(updated_health_config.clone())
-                    .models(worker.metadata().models.clone());
+                    .health_config(updated_health_config.clone());
 
+                if let Some(ref model_id) = worker.metadata().model_id {
+                    builder = builder.model_id(model_id.clone());
+                }
+                if let Some(ref tokenizer_path) = worker.metadata().tokenizer_path {
+                    builder = builder.tokenizer_path(tokenizer_path.clone());
+                }
+                if let Some(ref reasoning_parser) = worker.metadata().reasoning_parser {
+                    builder = builder.reasoning_parser(reasoning_parser.clone());
+                }
+                if let Some(ref tool_parser) = worker.metadata().tool_parser {
+                    builder = builder.tool_parser(tool_parser.clone());
+                }
+                if let Some(ref chat_template) = worker.metadata().chat_template {
+                    builder = builder.chat_template(chat_template.clone());
+                }
                 if let Some(ref api_key) = updated_api_key {
                     builder = builder.api_key(api_key.clone());
                 }

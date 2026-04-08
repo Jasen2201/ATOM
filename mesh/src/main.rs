@@ -475,7 +475,6 @@ impl CliArgs {
         prefill_urls: Vec<(String, Option<u16>)>,
     ) -> ConfigResult<RouterConfig> {
         // Determine routing mode based on PD disaggregation flag
-        // IGW mode doesn't change routing mode, only affects router initialization
         let mode = if self.pd_disaggregation {
             RoutingMode::PrefillDecode {
                 prefill_urls,

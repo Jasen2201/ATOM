@@ -9,7 +9,7 @@ use mesh::{
     app_context::AppContext,
     config::RouterConfig,
     core::{
-        BasicWorkerBuilder, LoadMonitor, ModelCard, RuntimeType, Worker, WorkerRegistry, WorkerType,
+        BasicWorkerBuilder, LoadMonitor, RuntimeType, Worker, WorkerRegistry, WorkerType,
     },
     middleware::TokenBucket,
     policies::PolicyRegistry,
@@ -192,39 +192,16 @@ pub async fn create_test_app_context() -> Arc<AppContext> {
 /// # Arguments
 /// * `ctx` - The AppContext to register the worker in
 /// * `url` - The base URL of the external API endpoint
-/// * `models` - Optional list of model IDs this worker supports. If empty, uses "gpt-3.5-turbo" as default.
+/// * `model_id` - Optional model ID this worker supports. If None, uses "gpt-3.5-turbo" as default.
 #[allow(dead_code)]
-pub fn register_external_worker(ctx: &Arc<AppContext>, url: &str, models: Option<Vec<&str>>) {
-    let model_list: Vec<ModelCard> = models
-        .unwrap_or_else(|| vec!["gpt-3.5-turbo"])
-        .into_iter()
-        .map(ModelCard::new)
-        .collect();
+pub fn register_external_worker(ctx: &Arc<AppContext>, url: &str, model_id: Option<&str>) {
+    let model = model_id.unwrap_or("gpt-3.5-turbo");
 
     let worker: Arc<dyn Worker> = Arc::new(
         BasicWorkerBuilder::new(url)
             .worker_type(WorkerType::Regular)
             .runtime_type(RuntimeType::External)
-            .models(model_list)
-            .build(),
-    );
-
-    ctx.worker_registry.register(worker);
-}
-
-/// Register an external worker with a custom model card that has aliases.
-///
-/// # Arguments
-/// * `ctx` - The AppContext to register the worker in
-/// * `url` - The base URL of the external API endpoint
-/// * `model_card` - A fully configured ModelCard with aliases, provider, etc.
-#[allow(dead_code)]
-pub fn register_external_worker_with_card(ctx: &Arc<AppContext>, url: &str, model_card: ModelCard) {
-    let worker: Arc<dyn Worker> = Arc::new(
-        BasicWorkerBuilder::new(url)
-            .worker_type(WorkerType::Regular)
-            .runtime_type(RuntimeType::External)
-            .model(model_card)
+            .model_id(model)
             .build(),
     );
 

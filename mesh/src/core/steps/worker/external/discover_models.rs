@@ -10,11 +10,7 @@ use serde::Deserialize;
 use tracing::{debug, info};
 use wfaas::{StepExecutor, StepId, StepResult, WorkflowContext, WorkflowError, WorkflowResult};
 
-use crate::core::{
-    model_card::{ModelCard, ProviderType},
-    model_type::ModelType,
-    steps::workflow_data::ExternalWorkerWorkflowData,
-};
+use crate::core::steps::workflow_data::ExternalWorkerWorkflowData;
 
 // HTTP client for API calls
 static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
@@ -48,12 +44,12 @@ pub struct ModelInfo {
     pub owned_by: Option<String>,
 }
 
-/// Group models by base name (stripping date suffixes) and create ModelCards with aliases.
+/// Group models by base name (stripping date suffixes), returning deduplicated primary model IDs.
 ///
 /// # Example
 /// Input:  `["gpt-4o", "gpt-4o-2024-05-13", "gpt-4o-2024-08-06", "gpt-4o-2024-11-20"]`
-/// Output: `ModelCard { id: "gpt-4o", aliases: ["gpt-4o-2024-05-13", "gpt-4o-2024-08-06", "gpt-4o-2024-11-20"] }`
-pub fn group_models_into_cards(models: Vec<ModelInfo>) -> Vec<ModelCard> {
+/// Output: `["gpt-4o"]`
+pub fn group_model_ids(models: Vec<ModelInfo>) -> Vec<String> {
     // Group model IDs by base name (with date stripped)
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
     for model in &models {
@@ -61,122 +57,19 @@ pub fn group_models_into_cards(models: Vec<ModelInfo>) -> Vec<ModelCard> {
         groups.entry(base).or_default().push(model.id.clone());
     }
 
-    // Create ModelCard for each group
+    // Return the shortest (base) name from each group
     groups
         .into_values()
         .map(|mut variants| {
             // Sort: shortest first (base name), then alphabetically
             variants.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
-
-            let primary_id = variants.remove(0); // shortest = primary ID
-            let aliases = variants; // rest = aliases
-
-            let model_type = infer_model_type_from_id(&primary_id);
-            let provider = infer_provider_from_id(&primary_id);
-
-            let mut card = ModelCard::new(&primary_id)
-                .with_aliases(aliases)
-                .with_model_type(model_type);
-
-            if let Some(p) = provider {
-                card = card.with_provider(p);
-            }
-
-            card
+            variants.remove(0) // shortest = primary ID
         })
         .collect()
 }
 
-/// Infer ModelType from model ID string.
-pub fn infer_model_type_from_id(id: &str) -> ModelType {
-    let id_lower = id.to_lowercase();
-
-    // Embedding models
-    if id_lower.contains("embed") || id_lower.contains("ada-002") {
-        return ModelType::EMBED_MODEL;
-    }
-
-    // Rerank models
-    if id_lower.contains("rerank") {
-        return ModelType::RERANK_MODEL;
-    }
-
-    // Image generation models
-    if id_lower.starts_with("dall-e")
-        || id_lower.starts_with("sora")
-        || (id_lower.contains("image") && !id_lower.contains("vision"))
-    {
-        return ModelType::IMAGE_MODEL;
-    }
-
-    // Audio models
-    if id_lower.starts_with("tts")
-        || id_lower.starts_with("whisper")
-        || id_lower.contains("audio")
-        || id_lower.contains("realtime")
-        || id_lower.contains("transcribe")
-    {
-        return ModelType::AUDIO_MODEL;
-    }
-
-    // Moderation models
-    if id_lower.contains("moderation") {
-        return ModelType::MODERATION_MODEL;
-    }
-
-    // Vision LLM
-    if id_lower.contains("vision") || id_lower.contains("4o") {
-        return ModelType::VISION_LLM;
-    }
-
-    // Reasoning models
-    if id_lower.starts_with("o1") || id_lower.starts_with("o3") {
-        return ModelType::REASONING_LLM;
-    }
-
-    // Default to standard LLM
-    ModelType::LLM
-}
-
-/// Infer provider type from model ID string.
-fn infer_provider_from_id(id: &str) -> Option<ProviderType> {
-    let id_lower = id.to_lowercase();
-
-    // OpenAI models
-    if id_lower.starts_with("gpt")
-        || id_lower.starts_with("o1")
-        || id_lower.starts_with("o3")
-        || id_lower.starts_with("dall-e")
-        || id_lower.starts_with("whisper")
-        || id_lower.starts_with("tts")
-        || id_lower.starts_with("text-embedding")
-        || id_lower.starts_with("babbage")
-        || id_lower.starts_with("davinci")
-        || id_lower.contains("omni")
-    {
-        return Some(ProviderType::OpenAI);
-    }
-
-    // xAI/Grok models
-    if id_lower.starts_with("grok") {
-        return Some(ProviderType::XAI);
-    }
-
-    // Anthropic Claude models
-    if id_lower.starts_with("claude") {
-        return Some(ProviderType::Anthropic);
-    }
-
-    // Google Gemini models
-    if id_lower.starts_with("gemini") {
-        return Some(ProviderType::Gemini);
-    }
-
-    None
-}
-
 /// Fetch models from /v1/models endpoint.
-async fn fetch_models(url: &str, api_key: Option<&str>) -> Result<Vec<ModelCard>, String> {
+async fn fetch_models(url: &str, api_key: Option<&str>) -> Result<Vec<String>, String> {
     let base_url = url.trim_end_matches('/');
     let models_url = format!("{}/v1/models", base_url);
 
@@ -209,14 +102,14 @@ async fn fetch_models(url: &str, api_key: Option<&str>) -> Result<Vec<ModelCard>
         url
     );
 
-    let model_cards = group_models_into_cards(models_response.data);
+    let model_ids = group_model_ids(models_response.data);
 
     debug!(
-        "Grouped into {} model cards with aliases",
-        model_cards.len()
+        "Grouped into {} unique model IDs",
+        model_ids.len()
     );
 
-    Ok(model_cards)
+    Ok(model_ids)
 }
 
 /// Step 1: Discover models from external /v1/models endpoint.
@@ -237,20 +130,20 @@ impl StepExecutor<ExternalWorkerWorkflowData> for DiscoverModelsStep {
                  User's Authorization header will be forwarded to backend.",
                 config.url
             );
-            // Leave model_cards empty for wildcard mode
+            // Leave discovered_model_ids empty for wildcard mode
             return Ok(StepResult::Success);
         }
 
         debug!("Discovering models from external endpoint {}", config.url);
 
-        let model_cards = fetch_models(&config.url, config.api_key.as_deref())
+        let model_ids = fetch_models(&config.url, config.api_key.as_deref())
             .await
             .map_err(|e| WorkflowError::StepFailed {
                 step_id: StepId::new("discover_models"),
                 message: format!("Failed to discover models from {}: {}", config.url, e),
             })?;
 
-        if model_cards.is_empty() {
+        if model_ids.is_empty() {
             return Err(WorkflowError::StepFailed {
                 step_id: StepId::new("discover_models"),
                 message: format!("No models discovered from {}", config.url),
@@ -259,12 +152,12 @@ impl StepExecutor<ExternalWorkerWorkflowData> for DiscoverModelsStep {
 
         info!(
             "Discovered {} models from {}: {:?}",
-            model_cards.len(),
+            model_ids.len(),
             config.url,
-            model_cards.iter().map(|c| &c.id).collect::<Vec<_>>()
+            model_ids
         );
 
-        context.data.model_cards = model_cards;
+        context.data.discovered_model_ids = model_ids;
         Ok(StepResult::Success)
     }
 

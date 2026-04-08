@@ -16,7 +16,6 @@ pub mod circuit_breaker;
 pub mod error;
 pub mod job_queue;
 pub mod metrics_aggregator;
-pub mod model_card;
 pub mod model_type;
 pub mod retry;
 pub mod steps;
@@ -31,7 +30,6 @@ pub mod worker_service;
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
 pub use error::{WorkerError, WorkerResult};
 pub use job_queue::{Job, JobQueue, JobQueueConfig};
-pub use model_card::{ModelCard, ProviderType};
 pub use retry::{is_retryable_status, RetryExecutor};
 pub use worker::{
     AttachedBody, BasicWorker, ConnectionMode, HealthConfig, RuntimeType, Worker, WorkerLoadGuard,

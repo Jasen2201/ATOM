@@ -10,7 +10,6 @@ use crate::{
     app_context::AppContext,
     core::{
         circuit_breaker::CircuitBreakerConfig,
-        model_card::ModelCard,
         steps::workflow_data::LocalWorkerWorkflowData,
         worker::{HealthConfig, RuntimeType, WorkerType},
         BasicWorkerBuilder, ConnectionMode, DPAwareWorkerBuilder, Worker, UNKNOWN_MODEL_ID,
@@ -23,9 +22,8 @@ use crate::{
 /// This step:
 /// 1. Merges discovered labels with config labels
 /// 2. Determines the model ID from various sources
-/// 3. Creates ModelCard with metadata
-/// 4. Builds worker(s) - either single worker or multiple DP-aware workers
-/// 5. Outputs unified `workers: Vec<Arc<dyn Worker>>` for downstream steps
+/// 3. Builds worker(s) - either single worker or multiple DP-aware workers
+/// 4. Outputs unified `workers: Vec<Arc<dyn Worker>>` for downstream steps
 pub struct CreateLocalWorkerStep;
 
 #[async_trait]
@@ -85,9 +83,6 @@ impl StepExecutor<LocalWorkerWorkflowData> for CreateLocalWorkerStep {
             debug!("Using model_id: {}", model_id);
         }
 
-        // Create ModelCard
-        let model_card = build_model_card(&model_id, config, &final_labels);
-
         debug!(
             "Creating worker {} with {} discovered + {} config = {} final labels",
             config.url,
@@ -123,7 +118,7 @@ impl StepExecutor<LocalWorkerWorkflowData> for CreateLocalWorkerStep {
             create_dp_aware_workers(
                 &context.data,
                 &normalized_url,
-                model_card,
+                &model_id,
                 worker_type,
                 connection_mode,
                 runtime_type,
@@ -135,7 +130,7 @@ impl StepExecutor<LocalWorkerWorkflowData> for CreateLocalWorkerStep {
         } else {
             create_single_worker(
                 &normalized_url,
-                model_card,
+                &model_id,
                 worker_type,
                 connection_mode,
                 runtime_type,
@@ -155,71 +150,6 @@ impl StepExecutor<LocalWorkerWorkflowData> for CreateLocalWorkerStep {
     fn is_retryable(&self, _error: &WorkflowError) -> bool {
         false
     }
-}
-
-fn build_model_card(
-    model_id: &str,
-    config: &WorkerConfigRequest,
-    labels: &HashMap<String, String>,
-) -> ModelCard {
-    let mut card = ModelCard::new(model_id);
-
-    if let Some(ref tokenizer_path) = config.tokenizer_path {
-        card = card.with_tokenizer_path(tokenizer_path.clone());
-    }
-    if let Some(ref reasoning_parser) = config.reasoning_parser {
-        card = card.with_reasoning_parser(reasoning_parser.clone());
-    }
-    if let Some(ref tool_parser) = config.tool_parser {
-        card = card.with_tool_parser(tool_parser.clone());
-    }
-    if let Some(ref chat_template) = config.chat_template {
-        card = card.with_chat_template(chat_template.clone());
-    }
-    if let Some(model_type_str) = labels.get("model_type") {
-        card = card.with_hf_model_type(model_type_str.clone());
-    }
-    if let Some(architectures_json) = labels.get("architectures") {
-        if let Ok(architectures) = serde_json::from_str::<Vec<String>>(architectures_json) {
-            card = card.with_architectures(architectures);
-        }
-    }
-
-    // Parse classification model id2label mapping
-    // The proto field is id2label_json: JSON string like {"0": "negative", "1": "positive"}
-    if let Some(id2label_json) = labels.get("id2label_json") {
-        if !id2label_json.is_empty() {
-            // Parse JSON: keys are string indices, values are label names
-            if let Ok(string_map) = serde_json::from_str::<HashMap<String, String>>(id2label_json) {
-                // Convert string keys ("0", "1") to u32 keys (0, 1)
-                let id2label: HashMap<u32, String> = string_map
-                    .into_iter()
-                    .filter_map(|(k, v)| k.parse::<u32>().ok().map(|idx| (idx, v)))
-                    .collect();
-
-                if !id2label.is_empty() {
-                    card = card.with_id2label(id2label);
-                    debug!("Parsed id2label with {} classes", card.num_labels);
-                }
-            }
-        }
-    }
-    // Fallback: if num_labels is set but id2label wasn't parsed, create default labels
-    // Match logic in serving_classify.py::_get_id2label_mapping
-    else if let Some(num_labels_str) = labels.get("num_labels") {
-        if let Ok(num_labels) = num_labels_str.parse::<u32>() {
-            if num_labels > 0 {
-                // Create default mapping: {0: "LABEL_0", 1: "LABEL_1", ...}
-                let id2label: HashMap<u32, String> = (0..num_labels)
-                    .map(|i| (i, format!("LABEL_{}", i)))
-                    .collect();
-                card = card.with_id2label(id2label);
-                debug!("Created default id2label with {} classes", num_labels);
-            }
-        }
-    }
-
-    card
 }
 
 fn parse_worker_type(config: &WorkerConfigRequest) -> WorkerType {
@@ -297,7 +227,7 @@ fn normalize_url(url: &str, connection_mode: &ConnectionMode) -> String {
 fn create_dp_aware_workers(
     data: &LocalWorkerWorkflowData,
     normalized_url: &str,
-    model_card: ModelCard,
+    model_id: &str,
     worker_type: WorkerType,
     connection_mode: &ConnectionMode,
     runtime_type: RuntimeType,
@@ -320,7 +250,7 @@ fn create_dp_aware_workers(
     for rank in 0..dp_info.dp_size {
         let mut builder =
             DPAwareWorkerBuilder::new(normalized_url.to_string(), rank, dp_info.dp_size)
-                .model(model_card.clone())
+                .model_id(model_id)
                 .worker_type(worker_type.clone())
                 .connection_mode(connection_mode.clone())
                 .runtime_type(runtime_type.clone())
@@ -329,6 +259,18 @@ fn create_dp_aware_workers(
 
         if let Some(ref api_key) = config.api_key {
             builder = builder.api_key(api_key.clone());
+        }
+        if let Some(ref tokenizer_path) = config.tokenizer_path {
+            builder = builder.tokenizer_path(tokenizer_path.clone());
+        }
+        if let Some(ref reasoning_parser) = config.reasoning_parser {
+            builder = builder.reasoning_parser(reasoning_parser.clone());
+        }
+        if let Some(ref tool_parser) = config.tool_parser {
+            builder = builder.tool_parser(tool_parser.clone());
+        }
+        if let Some(ref chat_template) = config.chat_template {
+            builder = builder.chat_template(chat_template.clone());
         }
         if !final_labels.is_empty() {
             builder = builder.labels(final_labels.clone());
@@ -354,7 +296,7 @@ fn create_dp_aware_workers(
 #[allow(clippy::too_many_arguments)]
 fn create_single_worker(
     normalized_url: &str,
-    model_card: ModelCard,
+    model_id: &str,
     worker_type: WorkerType,
     connection_mode: &ConnectionMode,
     runtime_type: RuntimeType,
@@ -366,7 +308,7 @@ fn create_single_worker(
     let health_check_disabled = health_config.disable_health_check;
 
     let mut builder = BasicWorkerBuilder::new(normalized_url.to_string())
-        .model(model_card)
+        .model_id(model_id)
         .worker_type(worker_type)
         .connection_mode(connection_mode.clone())
         .runtime_type(runtime_type)
@@ -375,6 +317,18 @@ fn create_single_worker(
 
     if let Some(ref api_key) = config.api_key {
         builder = builder.api_key(api_key.clone());
+    }
+    if let Some(ref tokenizer_path) = config.tokenizer_path {
+        builder = builder.tokenizer_path(tokenizer_path.clone());
+    }
+    if let Some(ref reasoning_parser) = config.reasoning_parser {
+        builder = builder.reasoning_parser(reasoning_parser.clone());
+    }
+    if let Some(ref tool_parser) = config.tool_parser {
+        builder = builder.tool_parser(tool_parser.clone());
+    }
+    if let Some(ref chat_template) = config.chat_template {
+        builder = builder.chat_template(chat_template.clone());
     }
     if !final_labels.is_empty() {
         builder = builder.labels(final_labels.clone());

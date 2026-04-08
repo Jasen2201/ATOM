@@ -22,7 +22,7 @@ pub use crate::protocols::worker_spec::{
 };
 use crate::{
     app_context::AppContext,
-    core::{model_card::ModelCard, Worker},
+    core::Worker,
     protocols::worker_spec::{
         WorkerConfigRequest as ProtocolWorkerConfigRequest,
         WorkerUpdateRequest as ProtocolWorkerUpdateRequest,
@@ -160,8 +160,8 @@ impl WorkerRegistrationData for LocalWorkerWorkflowData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalWorkerWorkflowData {
     pub config: ProtocolWorkerConfigRequest,
-    /// Discovered model cards from /v1/models endpoint
-    pub model_cards: Vec<ModelCard>,
+    /// Discovered model IDs from /v1/models endpoint
+    pub discovered_model_ids: Vec<String>,
     pub workers: Option<WorkerList>,
     /// Labels for policies (derived from config)
     pub labels: HashMap<String, String>,

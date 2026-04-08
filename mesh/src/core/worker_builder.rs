@@ -2,8 +2,6 @@ use std::collections::HashMap;
 
 use super::{
     circuit_breaker::{CircuitBreaker, CircuitBreakerConfig},
-    model_card::ModelCard,
-    model_type::ModelType,
     worker::{
         BasicWorker, ConnectionMode, DPAwareWorker, HealthConfig, RuntimeType, WorkerMetadata,
         WorkerRoutingKeyLoad, WorkerType,
@@ -19,7 +17,11 @@ pub struct BasicWorkerBuilder {
     connection_mode: ConnectionMode,
     runtime_type: RuntimeType,
     labels: HashMap<String, String>,
-    models: Vec<ModelCard>,
+    model_id: Option<String>,
+    tokenizer_path: Option<String>,
+    reasoning_parser: Option<String>,
+    tool_parser: Option<String>,
+    chat_template: Option<String>,
     health_config: HealthConfig,
     circuit_breaker_config: CircuitBreakerConfig,
     grpc_client: Option<GrpcClient>,
@@ -35,7 +37,11 @@ impl BasicWorkerBuilder {
             connection_mode: ConnectionMode::Http,
             runtime_type: RuntimeType::default(),
             labels: HashMap::new(),
-            models: Vec::new(),
+            model_id: None,
+            tokenizer_path: None,
+            reasoning_parser: None,
+            tool_parser: None,
+            chat_template: None,
             health_config: HealthConfig::default(),
             circuit_breaker_config: CircuitBreakerConfig::default(),
             grpc_client: None,
@@ -51,7 +57,11 @@ impl BasicWorkerBuilder {
             connection_mode: ConnectionMode::Http,
             runtime_type: RuntimeType::default(),
             labels: HashMap::new(),
-            models: Vec::new(),
+            model_id: None,
+            tokenizer_path: None,
+            reasoning_parser: None,
+            tool_parser: None,
+            chat_template: None,
             health_config: HealthConfig::default(),
             circuit_breaker_config: CircuitBreakerConfig::default(),
             grpc_client: None,
@@ -112,15 +122,33 @@ impl BasicWorkerBuilder {
         self
     }
 
-    /// Set models this worker can serve
-    pub fn models(mut self, models: Vec<ModelCard>) -> Self {
-        self.models = models;
+    /// Set the model ID this worker serves
+    pub fn model_id(mut self, model_id: impl Into<String>) -> Self {
+        self.model_id = Some(model_id.into());
         self
     }
 
-    /// Add a single model this worker can serve
-    pub fn model(mut self, model: ModelCard) -> Self {
-        self.models.push(model);
+    /// Set the tokenizer path
+    pub fn tokenizer_path(mut self, path: impl Into<String>) -> Self {
+        self.tokenizer_path = Some(path.into());
+        self
+    }
+
+    /// Set the reasoning parser type
+    pub fn reasoning_parser(mut self, parser: impl Into<String>) -> Self {
+        self.reasoning_parser = Some(parser.into());
+        self
+    }
+
+    /// Set the tool parser type
+    pub fn tool_parser(mut self, parser: impl Into<String>) -> Self {
+        self.tool_parser = Some(parser.into());
+        self
+    }
+
+    /// Set the chat template
+    pub fn chat_template(mut self, template: impl Into<String>) -> Self {
+        self.chat_template = Some(template.into());
         self
     }
 
@@ -128,7 +156,7 @@ impl BasicWorkerBuilder {
     pub fn build(self) -> BasicWorker {
         use std::sync::{
             atomic::{AtomicBool, AtomicUsize},
-            Arc, RwLock as StdRwLock,
+            Arc,
         };
 
         use tokio::sync::OnceCell;
@@ -171,9 +199,11 @@ impl BasicWorkerBuilder {
             health_config: self.health_config,
             bootstrap_host,
             bootstrap_port,
-            models: self.models,                // Empty = accepts any model
-            default_provider: None,             // Native/passthrough
-            default_model_type: ModelType::LLM, // Standard LLM capabilities
+            model_id: self.model_id,
+            tokenizer_path: self.tokenizer_path,
+            reasoning_parser: self.reasoning_parser,
+            tool_parser: self.tool_parser,
+            chat_template: self.chat_template,
         };
 
         // Use OnceCell for lock-free gRPC client access after initialization
@@ -203,7 +233,6 @@ impl BasicWorkerBuilder {
                 self.url.clone(),
             ),
             grpc_client,
-            models_override: Arc::new(StdRwLock::new(None)),
         }
     }
 }
@@ -218,7 +247,11 @@ pub struct DPAwareWorkerBuilder {
     connection_mode: ConnectionMode,
     runtime_type: RuntimeType,
     labels: HashMap<String, String>,
-    models: Vec<ModelCard>,
+    model_id: Option<String>,
+    tokenizer_path: Option<String>,
+    reasoning_parser: Option<String>,
+    tool_parser: Option<String>,
+    chat_template: Option<String>,
     health_config: HealthConfig,
     circuit_breaker_config: CircuitBreakerConfig,
     grpc_client: Option<GrpcClient>,
@@ -236,7 +269,11 @@ impl DPAwareWorkerBuilder {
             connection_mode: ConnectionMode::Http,
             runtime_type: RuntimeType::default(),
             labels: HashMap::new(),
-            models: Vec::new(),
+            model_id: None,
+            tokenizer_path: None,
+            reasoning_parser: None,
+            tool_parser: None,
+            chat_template: None,
             health_config: HealthConfig::default(),
             circuit_breaker_config: CircuitBreakerConfig::default(),
             grpc_client: None,
@@ -259,7 +296,11 @@ impl DPAwareWorkerBuilder {
             connection_mode: ConnectionMode::Http,
             runtime_type: RuntimeType::default(),
             labels: HashMap::new(),
-            models: Vec::new(),
+            model_id: None,
+            tokenizer_path: None,
+            reasoning_parser: None,
+            tool_parser: None,
+            chat_template: None,
             health_config: HealthConfig::default(),
             circuit_breaker_config: CircuitBreakerConfig::default(),
             grpc_client: None,
@@ -320,15 +361,33 @@ impl DPAwareWorkerBuilder {
         self
     }
 
-    /// Set models this worker can serve
-    pub fn models(mut self, models: Vec<ModelCard>) -> Self {
-        self.models = models;
+    /// Set the model ID this worker serves
+    pub fn model_id(mut self, model_id: impl Into<String>) -> Self {
+        self.model_id = Some(model_id.into());
         self
     }
 
-    /// Add a single model this worker can serve
-    pub fn model(mut self, model: ModelCard) -> Self {
-        self.models.push(model);
+    /// Set the tokenizer path
+    pub fn tokenizer_path(mut self, path: impl Into<String>) -> Self {
+        self.tokenizer_path = Some(path.into());
+        self
+    }
+
+    /// Set the reasoning parser type
+    pub fn reasoning_parser(mut self, parser: impl Into<String>) -> Self {
+        self.reasoning_parser = Some(parser.into());
+        self
+    }
+
+    /// Set the tool parser type
+    pub fn tool_parser(mut self, parser: impl Into<String>) -> Self {
+        self.tool_parser = Some(parser.into());
+        self
+    }
+
+    /// Set the chat template
+    pub fn chat_template(mut self, template: impl Into<String>) -> Self {
+        self.chat_template = Some(template.into());
         self
     }
 
@@ -336,7 +395,6 @@ impl DPAwareWorkerBuilder {
     pub fn build(self) -> DPAwareWorker {
         let worker_url = format!("{}@{}", self.base_url, self.dp_rank);
         let mut builder = BasicWorkerBuilder::new(worker_url)
-            .models(self.models)
             .worker_type(self.worker_type)
             .connection_mode(self.connection_mode)
             .runtime_type(self.runtime_type)
@@ -349,6 +407,21 @@ impl DPAwareWorkerBuilder {
         }
         if let Some(api_key) = self.api_key {
             builder = builder.api_key(api_key);
+        }
+        if let Some(model_id) = self.model_id {
+            builder = builder.model_id(model_id);
+        }
+        if let Some(tokenizer_path) = self.tokenizer_path {
+            builder = builder.tokenizer_path(tokenizer_path);
+        }
+        if let Some(reasoning_parser) = self.reasoning_parser {
+            builder = builder.reasoning_parser(reasoning_parser);
+        }
+        if let Some(tool_parser) = self.tool_parser {
+            builder = builder.tool_parser(tool_parser);
+        }
+        if let Some(chat_template) = self.chat_template {
+            builder = builder.chat_template(chat_template);
         }
 
         let base_worker = builder.build();
@@ -604,35 +677,18 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_worker_model() {
+    fn test_basic_worker_model_id() {
         let worker = BasicWorkerBuilder::new("http://w:8000")
-            .model(ModelCard::new("llama-3-8b"))
-            .model(ModelCard::new("mistral-7b"))
+            .model_id("llama-3-8b")
             .build();
 
-        assert_eq!(worker.metadata().models.len(), 2);
-        assert_eq!(worker.metadata().models[0].id, "llama-3-8b");
-        assert_eq!(worker.metadata().models[1].id, "mistral-7b");
+        assert_eq!(worker.metadata().model_id.as_deref(), Some("llama-3-8b"));
     }
 
     #[test]
-    fn test_basic_worker_models_vec() {
-        let models = vec![
-            ModelCard::new("model-a"),
-            ModelCard::new("model-b"),
-        ];
-        let worker = BasicWorkerBuilder::new("http://w:8000")
-            .models(models)
-            .build();
-
-        assert_eq!(worker.metadata().models.len(), 2);
-        assert_eq!(worker.metadata().models[0].id, "model-a");
-    }
-
-    #[test]
-    fn test_basic_worker_empty_models_default() {
+    fn test_basic_worker_no_model_id_default() {
         let worker = BasicWorkerBuilder::new("http://w:8000").build();
-        assert!(worker.metadata().models.is_empty());
+        assert!(worker.metadata().model_id.is_none());
     }
 
     #[test]
@@ -721,13 +777,12 @@ mod tests {
     }
 
     #[test]
-    fn test_dp_aware_worker_models() {
+    fn test_dp_aware_worker_model_id() {
         let worker = DPAwareWorkerBuilder::new("http://w:8000", 0, 2)
-            .model(ModelCard::new("my-model"))
+            .model_id("my-model")
             .build();
 
-        assert_eq!(worker.metadata().models.len(), 1);
-        assert_eq!(worker.metadata().models[0].id, "my-model");
+        assert_eq!(worker.metadata().model_id.as_deref(), Some("my-model"));
     }
 
     #[test]

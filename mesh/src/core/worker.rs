@@ -2,7 +2,7 @@ use std::{
     fmt,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, LazyLock, RwLock as StdRwLock,
+        Arc, LazyLock,
     },
     time::Duration,
 };
@@ -12,11 +12,7 @@ use axum::body::Body;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::OnceCell, time};
 
-use super::{
-    model_card::{ModelCard, ProviderType},
-    model_type::{Endpoint, ModelType},
-    CircuitBreaker, WorkerError, WorkerResult, UNKNOWN_MODEL_ID,
-};
+use super::{CircuitBreaker, WorkerError, WorkerResult, UNKNOWN_MODEL_ID};
 use crate::{
     observability::metrics::{metrics_labels, Metrics},
     protocols::worker_spec::WorkerInfo,
@@ -241,17 +237,11 @@ pub trait Worker: Send + Sync + fmt::Debug {
     }
 
     /// Get the model ID this worker serves
-    /// Checks ModelCards first, then falls back to labels
     fn model_id(&self) -> &str {
-        // Check ModelCards first
         self.metadata()
-            .models
-            .first()
-            .map(|m| m.id.as_str())
-            .or_else(|| {
-                // Fall back to labels
-                self.metadata().labels.get("model_id").map(|s| s.as_str())
-            })
+            .model_id
+            .as_deref()
+            .or_else(|| self.metadata().labels.get("model_id").map(|s| s.as_str()))
             .unwrap_or(UNKNOWN_MODEL_ID)
     }
 
@@ -273,107 +263,24 @@ pub trait Worker: Send + Sync + fmt::Debug {
             .unwrap_or(DEFAULT_WORKER_COST)
     }
 
-    /// Get tokenizer path for a specific model.
-    fn tokenizer_path(&self, model_id: &str) -> Option<&str> {
-        self.metadata()
-            .find_model(model_id)
-            .and_then(|m| m.tokenizer_path.as_deref())
+    /// Get tokenizer path for this worker.
+    fn tokenizer_path(&self) -> Option<&str> {
+        self.metadata().tokenizer_path.as_deref()
     }
 
-    /// Get reasoning parser for a specific model.
-    fn reasoning_parser(&self, model_id: &str) -> Option<&str> {
-        self.metadata()
-            .find_model(model_id)
-            .and_then(|m| m.reasoning_parser.as_deref())
+    /// Get reasoning parser for this worker.
+    fn reasoning_parser(&self) -> Option<&str> {
+        self.metadata().reasoning_parser.as_deref()
     }
 
-    /// Get tool parser for a specific model.
-    fn tool_parser(&self, model_id: &str) -> Option<&str> {
-        self.metadata()
-            .find_model(model_id)
-            .and_then(|m| m.tool_parser.as_deref())
+    /// Get tool parser for this worker.
+    fn tool_parser(&self) -> Option<&str> {
+        self.metadata().tool_parser.as_deref()
     }
 
-    /// Get chat template for a specific model.
-    fn chat_template(&self, model_id: &str) -> Option<&str> {
-        self.metadata()
-            .find_model(model_id)
-            .and_then(|m| m.chat_template.as_deref())
-    }
-
-    /// Get the default provider type for this worker.
-    /// `None` means native/passthrough.
-    fn default_provider(&self) -> Option<&ProviderType> {
-        self.metadata().default_provider.as_ref()
-    }
-
-    /// Get provider for a specific model.
-    /// Priority: ModelCard.provider > worker.default_provider
-    fn provider_for_model(&self, model_id: &str) -> Option<&ProviderType> {
-        self.metadata().provider_for_model(model_id)
-    }
-
-    /// Check if a model is a classifier (has id2label mapping).
-    fn is_classifier(&self, model_id: &str) -> bool {
-        self.metadata()
-            .find_model(model_id)
-            .map(|m| m.is_classifier())
-            .unwrap_or(false)
-    }
-
-    /// Get the id2label mapping for a classification model.
-    /// Returns None if model is not a classifier or not found.
-    fn id2label(&self, model_id: &str) -> Option<&std::collections::HashMap<u32, String>> {
-        self.metadata()
-            .find_model(model_id)
-            .filter(|m| m.is_classifier())
-            .map(|m| &m.id2label)
-    }
-
-    /// Get the number of classification labels for a model.
-    fn num_labels(&self, model_id: &str) -> u32 {
-        self.metadata()
-            .find_model(model_id)
-            .map(|m| m.num_labels)
-            .unwrap_or(0)
-    }
-
-    /// Get label for a class index from a classification model.
-    /// Returns generic label (LABEL_N) if model not found or index not in mapping.
-    fn get_label(&self, model_id: &str, class_idx: u32) -> String {
-        self.metadata()
-            .find_model(model_id)
-            .map(|m| m.get_label(class_idx))
-            .unwrap_or_else(|| format!("LABEL_{}", class_idx))
-    }
-
-    /// Check if this worker supports a specific model.
-    /// If models list is empty, worker accepts any model.
-    fn supports_model(&self, model_id: &str) -> bool {
-        self.metadata().supports_model(model_id)
-    }
-
-    /// Check if this worker supports an endpoint for a given model.
-    /// Falls back to default_model_type if model not found.
-    fn supports_endpoint(&self, model_id: &str, endpoint: Endpoint) -> bool {
-        self.metadata().supports_endpoint(model_id, endpoint)
-    }
-
-    /// Get all models this worker can serve.
-    fn models(&self) -> &[ModelCard] {
-        &self.metadata().models
-    }
-
-    /// Set models for this worker (for lazy discovery).
-    /// Default implementation does nothing - only BasicWorker supports this.
-    fn set_models(&self, _models: Vec<ModelCard>) {
-        // Default: no-op. BasicWorker overrides this.
-    }
-
-    /// Check if models have been discovered for this worker.
-    /// Returns true if models were set via set_models() or if metadata has models.
-    fn has_models_discovered(&self) -> bool {
-        !self.metadata().models.is_empty()
+    /// Get chat template for this worker.
+    fn chat_template(&self) -> Option<&str> {
+        self.metadata().chat_template.as_deref()
     }
 
     /// Get or create a gRPC client for this worker
@@ -569,50 +476,16 @@ pub struct WorkerMetadata {
     pub bootstrap_host: String,
     /// Cached bootstrap port (from WorkerType::Prefill)
     pub bootstrap_port: Option<u16>,
-    /// Models this worker can serve.
-    /// If empty, worker accepts any model (backward compatible behavior).
-    pub models: Vec<ModelCard>,
-    /// Default provider for this worker (used when model doesn't specify one).
-    /// `None` means native/passthrough.
-    pub default_provider: Option<ProviderType>,
-    /// Default model type for unknown models (defaults to LLM capabilities).
-    pub default_model_type: ModelType,
-}
-
-impl WorkerMetadata {
-    /// Find a model card by ID (including aliases)
-    pub fn find_model(&self, model_id: &str) -> Option<&ModelCard> {
-        self.models.iter().find(|m| m.matches(model_id))
-    }
-
-    /// Check if this worker can serve a given model.
-    /// If models list is empty, worker accepts any model (backward compatible).
-    pub fn supports_model(&self, model_id: &str) -> bool {
-        self.models.is_empty() || self.find_model(model_id).is_some()
-    }
-
-    /// Check if this worker supports an endpoint for a given model.
-    /// Falls back to default_model_type if model not found.
-    pub fn supports_endpoint(&self, model_id: &str, endpoint: Endpoint) -> bool {
-        if let Some(model) = self.find_model(model_id) {
-            model.supports_endpoint(endpoint)
-        } else {
-            self.default_model_type.supports_endpoint(endpoint)
-        }
-    }
-
-    /// Get the provider for a given model.
-    /// Returns the model's provider if found, otherwise the worker's default provider.
-    pub fn provider_for_model(&self, model_id: &str) -> Option<&ProviderType> {
-        self.find_model(model_id)
-            .and_then(|m| m.provider.as_ref())
-            .or(self.default_provider.as_ref())
-    }
-
-    /// Get all model IDs this worker can serve
-    pub fn model_ids(&self) -> impl Iterator<Item = &str> {
-        self.models.iter().map(|m| m.id.as_str())
-    }
+    /// Primary model ID this worker serves
+    pub model_id: Option<String>,
+    /// Tokenizer path
+    pub tokenizer_path: Option<String>,
+    /// Reasoning parser type
+    pub reasoning_parser: Option<String>,
+    /// Tool parser type
+    pub tool_parser: Option<String>,
+    /// Chat template
+    pub chat_template: Option<String>,
 }
 
 /// Basic worker implementation
@@ -629,10 +502,6 @@ pub struct BasicWorker {
     /// Lazily initialized gRPC client for gRPC workers.
     /// Uses OnceCell for lock-free reads after initialization.
     pub grpc_client: Arc<OnceCell<Arc<GrpcClient>>>,
-    /// Runtime-mutable models override (for lazy discovery)
-    /// When set, overrides metadata.models for routing decisions.
-    /// Uses std::sync::RwLock for synchronous access in supports_model().
-    pub models_override: Arc<StdRwLock<Option<Vec<ModelCard>>>>,
 }
 
 impl fmt::Debug for BasicWorker {
@@ -799,40 +668,6 @@ impl Worker for BasicWorker {
 
     fn circuit_breaker(&self) -> &CircuitBreaker {
         &self.circuit_breaker
-    }
-
-    fn supports_model(&self, model_id: &str) -> bool {
-        // Check models_override first (for lazy discovery)
-        if let Ok(guard) = self.models_override.read() {
-            if let Some(ref models) = *guard {
-                // Models were discovered - check if this model is supported
-                return models.iter().any(|m| m.matches(model_id));
-            }
-        }
-        // Fall back to metadata.models (empty = wildcard = supports nothing until discovery)
-        self.metadata.supports_model(model_id)
-    }
-
-    fn set_models(&self, models: Vec<ModelCard>) {
-        if let Ok(mut guard) = self.models_override.write() {
-            tracing::debug!(
-                "Setting {} models for worker {} via lazy discovery",
-                models.len(),
-                self.metadata.url
-            );
-            *guard = Some(models);
-        }
-    }
-
-    fn has_models_discovered(&self) -> bool {
-        // Check if models_override has been set
-        if let Ok(guard) = self.models_override.read() {
-            if guard.is_some() {
-                return true;
-            }
-        }
-        // Fall back to checking metadata.models
-        !self.metadata.models.is_empty()
     }
 
     async fn get_grpc_client(&self) -> WorkerResult<Option<Arc<GrpcClient>>> {
@@ -1237,10 +1072,10 @@ pub fn worker_to_info(worker: &Arc<dyn Worker>) -> WorkerInfo {
         load: worker.load(),
         connection_mode: connection_mode.to_string(),
         runtime_type,
-        tokenizer_path: worker.tokenizer_path(model_id).map(String::from),
-        reasoning_parser: worker.reasoning_parser(model_id).map(String::from),
-        tool_parser: worker.tool_parser(model_id).map(String::from),
-        chat_template: worker.chat_template(model_id).map(String::from),
+        tokenizer_path: worker.tokenizer_path().map(String::from),
+        reasoning_parser: worker.reasoning_parser().map(String::from),
+        tool_parser: worker.tool_parser().map(String::from),
+        chat_template: worker.chat_template().map(String::from),
         bootstrap_port,
         metadata: worker.metadata().labels.clone(),
         disable_health_check: worker.metadata().health_config.disable_health_check,
@@ -1922,10 +1757,10 @@ mod tests {
         assert_eq!(workers[5].worker_type(), &WorkerType::Decode);
     }
 
-    // === Phase 1.3: WorkerMetadata model methods tests ===
+    // === WorkerMetadata model methods tests ===
 
     #[test]
-    fn test_worker_metadata_empty_models_accepts_all() {
+    fn test_worker_metadata_model_id() {
         let metadata = WorkerMetadata {
             url: "http://test:8080".to_string(),
             worker_type: WorkerType::Regular,
@@ -1936,51 +1771,14 @@ mod tests {
             api_key: None,
             bootstrap_host: "test".to_string(),
             bootstrap_port: None,
-            models: Vec::new(), // Empty = accepts any model
-            default_provider: None,
-            default_model_type: ModelType::LLM,
+            model_id: Some("my-model".to_string()),
+            tokenizer_path: None,
+            reasoning_parser: None,
+            tool_parser: None,
+            chat_template: None,
         };
 
-        // Empty models list should accept any model
-        assert!(metadata.supports_model("any-model"));
-        assert!(metadata.supports_model("gpt-4"));
-        assert!(metadata.supports_model("llama-3.1"));
-    }
-
-    #[test]
-    fn test_worker_metadata_find_model() {
-        use super::ModelCard;
-
-        let model1 = ModelCard::new("meta-llama/Llama-3.1-8B")
-            .with_alias("llama-3.1-8b")
-            .with_alias("llama3.1");
-        let model2 = ModelCard::new("gpt-4o");
-
-        let metadata = WorkerMetadata {
-            url: "http://test:8080".to_string(),
-            worker_type: WorkerType::Regular,
-            connection_mode: ConnectionMode::Http,
-            runtime_type: RuntimeType::default(),
-            labels: std::collections::HashMap::new(),
-            health_config: HealthConfig::default(),
-            api_key: None,
-            bootstrap_host: "test".to_string(),
-            bootstrap_port: None,
-            models: vec![model1, model2],
-            default_provider: None,
-            default_model_type: ModelType::LLM,
-        };
-
-        // Find by primary ID
-        assert!(metadata.find_model("meta-llama/Llama-3.1-8B").is_some());
-        assert!(metadata.find_model("gpt-4o").is_some());
-
-        // Find by alias
-        assert!(metadata.find_model("llama-3.1-8b").is_some());
-        assert!(metadata.find_model("llama3.1").is_some());
-
-        // Not found
-        assert!(metadata.find_model("unknown-model").is_none());
+        assert_eq!(metadata.model_id.as_deref(), Some("my-model"));
     }
 
     #[test]

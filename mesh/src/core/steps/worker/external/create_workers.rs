@@ -37,7 +37,7 @@ impl StepExecutor<ExternalWorkerWorkflowData> for CreateExternalWorkersStep {
             .app_context
             .as_ref()
             .ok_or_else(|| WorkflowError::ContextValueNotFound("app_context".to_string()))?;
-        let model_cards = &context.data.model_cards;
+        let discovered_model_ids = &context.data.discovered_model_ids;
 
         // Build configs from router settings
         let circuit_breaker_config = {
@@ -76,12 +76,11 @@ impl StepExecutor<ExternalWorkerWorkflowData> for CreateExternalWorkersStep {
 
         let mut workers = Vec::new();
 
-        // Handle wildcard mode: create a single worker with empty models list
-        if model_cards.is_empty() {
+        // Handle wildcard mode: create a single worker with no model_id
+        if discovered_model_ids.is_empty() {
             debug!("Creating wildcard worker (no models) for {}", config.url);
 
             let mut builder = BasicWorkerBuilder::new(normalized_url.clone())
-                .models(vec![]) // Empty models = accepts any model
                 .worker_type(WorkerType::Regular)
                 .connection_mode(ConnectionMode::Http)
                 .runtime_type(RuntimeType::External)
@@ -112,14 +111,14 @@ impl StepExecutor<ExternalWorkerWorkflowData> for CreateExternalWorkersStep {
         } else {
             debug!(
                 "Creating {} external workers for {}",
-                model_cards.len(),
+                discovered_model_ids.len(),
                 config.url
             );
 
             // Create a worker for each model
-            for model_card in model_cards.iter() {
+            for model_id in discovered_model_ids.iter() {
                 let mut builder = BasicWorkerBuilder::new(normalized_url.clone())
-                    .model(model_card.clone())
+                    .model_id(model_id.clone())
                     .worker_type(WorkerType::Regular)
                     .connection_mode(ConnectionMode::Http)
                     .runtime_type(RuntimeType::External)
@@ -143,7 +142,7 @@ impl StepExecutor<ExternalWorkerWorkflowData> for CreateExternalWorkersStep {
 
                 debug!(
                     "Created external worker for model {} at {}",
-                    model_card.id, normalized_url
+                    model_id, normalized_url
                 );
 
                 workers.push(worker);

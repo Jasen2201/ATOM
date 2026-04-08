@@ -3,9 +3,8 @@ pub mod local;
 pub mod shared;
 
 pub use external::{
-    create_external_worker_workflow, create_external_worker_workflow_data, group_models_into_cards,
-    infer_model_type_from_id, CreateExternalWorkersStep, DiscoverModelsStep, ModelInfo,
-    ModelsResponse,
+    create_external_worker_workflow, create_external_worker_workflow_data, group_model_ids,
+    CreateExternalWorkersStep, DiscoverModelsStep, ModelInfo, ModelsResponse,
 };
 pub use local::{
     create_local_worker_workflow, create_local_worker_workflow_data,
