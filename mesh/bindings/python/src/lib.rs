@@ -11,9 +11,6 @@ pub enum PolicyType {
     RoundRobin,
     CacheAware,
     PowerOfTwo,
-    Bucket,
-    Manual,
-    ConsistentHashing,
     PrefixHash,
 }
 
@@ -22,158 +19,6 @@ pub enum PolicyType {
 pub enum BackendType {
     Sglang,
 }
-
-#[pyclass(eq)]
-#[derive(Clone, PartialEq, Debug, Default)]
-pub enum PyRole {
-    Admin,
-    #[default]
-    User,
-}
-
-impl PyRole {
-    pub fn to_auth_role(&self) -> auth::Role {
-        match self {
-            PyRole::Admin => auth::Role::Admin,
-            PyRole::User => auth::Role::User,
-        }
-    }
-}
-
-#[pyclass]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyApiKeyEntry {
-    #[pyo3(get, set)]
-    pub id: String,
-    #[pyo3(get, set)]
-    pub name: String,
-    #[pyo3(get, set)]
-    pub key: String,
-    #[pyo3(get, set)]
-    pub role: PyRole,
-}
-
-#[pymethods]
-impl PyApiKeyEntry {
-    #[new]
-    #[pyo3(signature = (id, name, key, role = PyRole::User))]
-    fn new(id: String, name: String, key: String, role: PyRole) -> Self {
-        PyApiKeyEntry {
-            id,
-            name,
-            key,
-            role,
-        }
-    }
-}
-
-impl PyApiKeyEntry {
-    pub fn to_auth_api_key_entry(&self) -> auth::ApiKeyEntry {
-        auth::ApiKeyEntry::new(&self.id, &self.name, &self.key, self.role.to_auth_role())
-    }
-}
-
-#[pyclass]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyJwtConfig {
-    #[pyo3(get, set)]
-    pub issuer: String,
-    #[pyo3(get, set)]
-    pub audience: String,
-    #[pyo3(get, set)]
-    pub jwks_uri: Option<String>,
-    #[pyo3(get, set)]
-    pub role_mapping: HashMap<String, String>,
-}
-
-#[pymethods]
-impl PyJwtConfig {
-    #[new]
-    #[pyo3(signature = (
-        issuer,
-        audience,
-        jwks_uri = None,
-        role_mapping = HashMap::new(),
-    ))]
-    fn new(
-        issuer: String,
-        audience: String,
-        jwks_uri: Option<String>,
-        role_mapping: HashMap<String, String>,
-    ) -> Self {
-        PyJwtConfig {
-            issuer,
-            audience,
-            jwks_uri,
-            role_mapping,
-        }
-    }
-}
-
-impl PyJwtConfig {
-    pub fn to_auth_jwt_config(&self) -> auth::JwtConfig {
-        let mut config = auth::JwtConfig::new(&self.issuer, &self.audience);
-
-        // Conditionally set JWKS URI
-        if let Some(ref uri) = self.jwks_uri {
-            config = config.with_jwks_uri(uri);
-        }
-
-        // Add role mappings
-        for (idp_role, gateway_role) in &self.role_mapping {
-            let role = match gateway_role.to_lowercase().as_str() {
-                "admin" => auth::Role::Admin,
-                _ => auth::Role::User,
-            };
-            config = config.with_role_mapping(idp_role, role);
-        }
-
-        config
-    }
-}
-
-#[pyclass]
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct PyControlPlaneAuthConfig {
-    #[pyo3(get, set)]
-    pub jwt: Option<PyJwtConfig>,
-    #[pyo3(get, set)]
-    pub api_keys: Vec<PyApiKeyEntry>,
-    #[pyo3(get, set)]
-    pub audit_enabled: bool,
-}
-
-#[pymethods]
-impl PyControlPlaneAuthConfig {
-    #[new]
-    #[pyo3(signature = (
-        jwt = None,
-        api_keys = vec![],
-        audit_enabled = true,
-    ))]
-    fn new(jwt: Option<PyJwtConfig>, api_keys: Vec<PyApiKeyEntry>, audit_enabled: bool) -> Self {
-        PyControlPlaneAuthConfig {
-            jwt,
-            api_keys,
-            audit_enabled,
-        }
-    }
-}
-
-impl PyControlPlaneAuthConfig {
-    pub fn to_auth_control_plane_config(&self) -> auth::ControlPlaneAuthConfig {
-        auth::ControlPlaneAuthConfig {
-            jwt: self.jwt.as_ref().map(|j| j.to_auth_jwt_config()),
-            api_keys: self
-                .api_keys
-                .iter()
-                .map(|k| k.to_auth_api_key_entry())
-                .collect(),
-            audit_enabled: self.audit_enabled,
-        }
-    }
-}
-
 
 #[pyclass]
 #[derive(Debug, Clone, PartialEq)]
@@ -189,8 +34,6 @@ struct Router {
     balance_rel_threshold: f32,
     eviction_interval_secs: u64,
     max_tree_size: usize,
-    max_idle_secs: u64,
-    assignment_mode: String,
     max_payload_size: usize,
     dp_aware: bool,
     api_key: Option<String>,
@@ -211,13 +54,11 @@ struct Router {
     shutdown_grace_period_secs: u64,
     request_id_headers: Option<Vec<String>>,
     pd_disaggregation: bool,
-    bucket_adjust_interval_secs: usize,
     prefill_urls: Option<Vec<(String, Option<u16>)>>,
     decode_urls: Option<Vec<String>>,
     prefill_policy: Option<PolicyType>,
     decode_policy: Option<PolicyType>,
     max_concurrent_requests: i32,
-    cors_allowed_origins: Vec<String>,
     retry_max_retries: u32,
     retry_initial_backoff_ms: u64,
     retry_max_backoff_ms: u64,
@@ -249,14 +90,8 @@ struct Router {
     reasoning_parser: Option<String>,
     tool_call_parser: Option<String>,
     backend: BackendType,
-    client_cert_path: Option<String>,
-    client_key_path: Option<String>,
-    ca_cert_paths: Vec<String>,
-    server_cert_path: Option<String>,
-    server_key_path: Option<String>,
     enable_trace: bool,
     otlp_traces_endpoint: String,
-    control_plane_auth: Option<PyControlPlaneAuthConfig>,
 }
 
 impl Router {
@@ -288,22 +123,6 @@ impl Router {
                 PolicyType::PowerOfTwo => ConfigPolicyConfig::PowerOfTwo {
                     load_check_interval_secs: 5,
                 },
-                PolicyType::Bucket => ConfigPolicyConfig::Bucket {
-                    balance_abs_threshold: self.balance_abs_threshold,
-                    balance_rel_threshold: self.balance_rel_threshold,
-                    bucket_adjust_interval_secs: self.bucket_adjust_interval_secs,
-                },
-                PolicyType::Manual => ConfigPolicyConfig::Manual {
-                    eviction_interval_secs: self.eviction_interval_secs,
-                    max_idle_secs: self.max_idle_secs,
-                    assignment_mode: match self.assignment_mode.as_str() {
-                        "random" => config::ManualAssignmentMode::Random,
-                        "min_load" => config::ManualAssignmentMode::MinLoad,
-                        "min_group" => config::ManualAssignmentMode::MinGroup,
-                        other => panic!("Unknown assignment mode: {}", other),
-                    },
-                },
-                PolicyType::ConsistentHashing => ConfigPolicyConfig::ConsistentHashing,
                 PolicyType::PrefixHash => ConfigPolicyConfig::PrefixHash {
                     prefix_token_count: 256,
                     load_factor: 1.25,
@@ -369,7 +188,6 @@ impl Router {
             .max_concurrent_requests(self.max_concurrent_requests)
             .queue_size(self.queue_size)
             .queue_timeout_secs(self.queue_timeout_secs)
-            .cors_allowed_origins(self.cors_allowed_origins.clone())
             .retry_config(config::RetryConfig {
                 max_retries: self.retry_max_retries,
                 initial_backoff_ms: self.retry_initial_backoff_ms,
@@ -413,15 +231,6 @@ impl Router {
             .dp_aware(self.dp_aware)
             .retries(!self.disable_retries)
             .circuit_breaker(!self.disable_circuit_breaker)
-            .maybe_client_cert_and_key(
-                self.client_cert_path.as_ref(),
-                self.client_key_path.as_ref(),
-            )
-            .add_ca_certificates(self.ca_cert_paths.clone())
-            .maybe_server_cert_and_key(
-                self.server_cert_path.as_ref(),
-                self.server_key_path.as_ref(),
-            )
             .build()
     }
 }
@@ -441,8 +250,6 @@ impl Router {
         balance_rel_threshold = 1.5,
         eviction_interval_secs = 120,
         max_tree_size = 2usize.pow(26),
-        max_idle_secs = 14400,
-        assignment_mode = String::from("random"),
         max_payload_size = 512 * 1024 * 1024,
         dp_aware = false,
         api_key = None,
@@ -463,13 +270,11 @@ impl Router {
         shutdown_grace_period_secs = 180,
         request_id_headers = None,
         pd_disaggregation = false,
-        bucket_adjust_interval_secs = 5,
         prefill_urls = None,
         decode_urls = None,
         prefill_policy = None,
         decode_policy = None,
         max_concurrent_requests = -1,
-        cors_allowed_origins = vec![],
         retry_max_retries = 5,
         retry_initial_backoff_ms = 50,
         retry_max_backoff_ms = 30_000,
@@ -500,14 +305,8 @@ impl Router {
         reasoning_parser = None,
         tool_call_parser = None,
         backend = BackendType::Sglang,
-        client_cert_path = None,
-        client_key_path = None,
-        ca_cert_paths = vec![],
-        server_cert_path = None,
-        server_key_path = None,
         enable_trace = false,
         otlp_traces_endpoint = String::from("localhost:4317"),
-        control_plane_auth = None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -522,8 +321,6 @@ impl Router {
         balance_rel_threshold: f32,
         eviction_interval_secs: u64,
         max_tree_size: usize,
-        max_idle_secs: u64,
-        assignment_mode: String,
         max_payload_size: usize,
         dp_aware: bool,
         api_key: Option<String>,
@@ -544,13 +341,11 @@ impl Router {
         shutdown_grace_period_secs: u64,
         request_id_headers: Option<Vec<String>>,
         pd_disaggregation: bool,
-        bucket_adjust_interval_secs: usize,
         prefill_urls: Option<Vec<(String, Option<u16>)>>,
         decode_urls: Option<Vec<String>>,
         prefill_policy: Option<PolicyType>,
         decode_policy: Option<PolicyType>,
         max_concurrent_requests: i32,
-        cors_allowed_origins: Vec<String>,
         retry_max_retries: u32,
         retry_initial_backoff_ms: u64,
         retry_max_backoff_ms: u64,
@@ -568,7 +363,7 @@ impl Router {
         health_check_interval_secs: u64,
         health_check_endpoint: String,
         disable_health_check: bool,
-            queue_size: usize,
+        queue_size: usize,
         queue_timeout_secs: u64,
         rate_limit_tokens_per_second: Option<i32>,
         model_path: Option<String>,
@@ -581,14 +376,8 @@ impl Router {
         reasoning_parser: Option<String>,
         tool_call_parser: Option<String>,
         backend: BackendType,
-        client_cert_path: Option<String>,
-        client_key_path: Option<String>,
-        ca_cert_paths: Vec<String>,
-        server_cert_path: Option<String>,
-        server_key_path: Option<String>,
         enable_trace: bool,
         otlp_traces_endpoint: String,
-        control_plane_auth: Option<PyControlPlaneAuthConfig>,
     ) -> PyResult<Self> {
         let mut all_urls = worker_urls.clone();
 
@@ -616,8 +405,6 @@ impl Router {
             balance_rel_threshold,
             eviction_interval_secs,
             max_tree_size,
-            max_idle_secs,
-            assignment_mode,
             max_payload_size,
             dp_aware,
             api_key,
@@ -638,13 +425,11 @@ impl Router {
             shutdown_grace_period_secs,
             request_id_headers,
             pd_disaggregation,
-            bucket_adjust_interval_secs,
             prefill_urls,
             decode_urls,
             prefill_policy,
             decode_policy,
             max_concurrent_requests,
-            cors_allowed_origins,
             retry_max_retries,
             retry_initial_backoff_ms,
             retry_max_backoff_ms,
@@ -676,14 +461,8 @@ impl Router {
             reasoning_parser,
             tool_call_parser,
             backend,
-            client_cert_path,
-            client_key_path,
-            ca_cert_paths,
-            server_cert_path,
-            server_key_path,
             enable_trace,
             otlp_traces_endpoint,
-            control_plane_auth,
         })
     }
 
@@ -745,10 +524,6 @@ impl Router {
                 request_timeout_secs: self.request_timeout_secs,
                 request_id_headers: self.request_id_headers.clone(),
                 shutdown_grace_period_secs: self.shutdown_grace_period_secs,
-                control_plane_auth: self
-                    .control_plane_auth
-                    .as_ref()
-                    .map(|c| c.to_auth_control_plane_config()),
             })
             .await
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
@@ -784,10 +559,6 @@ fn get_available_tool_call_parsers() -> Vec<String> {
 fn mesh_router_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PolicyType>()?;
     m.add_class::<BackendType>()?;
-    m.add_class::<PyRole>()?;
-    m.add_class::<PyApiKeyEntry>()?;
-    m.add_class::<PyJwtConfig>()?;
-    m.add_class::<PyControlPlaneAuthConfig>()?;
     m.add_class::<Router>()?;
     m.add_function(wrap_pyfunction!(get_version_string, m)?)?;
     m.add_function(wrap_pyfunction!(get_verbose_version_string, m)?)?;
