@@ -235,4 +235,197 @@ mod tests {
         assert!(!should_forward_request_header("x-custom-header"));
         assert!(!should_forward_request_header("x-api-key"));
     }
+
+    // ===================== should_forward_header_no_alloc tests =====================
+
+    #[test]
+    fn test_hop_by_hop_headers_filtered() {
+        let hop_by_hop = [
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailers",
+            "transfer-encoding",
+            "upgrade",
+            "content-encoding",
+            "host",
+        ];
+        for h in hop_by_hop {
+            assert!(
+                !should_forward_header_no_alloc(h),
+                "{h} should be filtered"
+            );
+        }
+    }
+
+    #[test]
+    fn test_hop_by_hop_case_insensitive() {
+        assert!(!should_forward_header_no_alloc("Connection"));
+        assert!(!should_forward_header_no_alloc("CONNECTION"));
+        assert!(!should_forward_header_no_alloc("Keep-Alive"));
+        assert!(!should_forward_header_no_alloc("Transfer-Encoding"));
+        assert!(!should_forward_header_no_alloc("Host"));
+        assert!(!should_forward_header_no_alloc("HOST"));
+    }
+
+    #[test]
+    fn test_regular_headers_forwarded() {
+        let forward = [
+            "content-type",
+            "content-length",
+            "authorization",
+            "x-request-id",
+            "accept",
+            "user-agent",
+            "x-custom-header",
+        ];
+        for h in forward {
+            assert!(
+                should_forward_header_no_alloc(h),
+                "{h} should be forwarded"
+            );
+        }
+    }
+
+    // ===================== preserve_response_headers tests =====================
+
+    #[test]
+    fn test_preserve_response_headers_filters_hop_by_hop() {
+        let mut input = HeaderMap::new();
+        input.insert("content-type", HeaderValue::from_static("application/json"));
+        input.insert("connection", HeaderValue::from_static("keep-alive"));
+        input.insert("x-request-id", HeaderValue::from_static("abc123"));
+        input.insert(
+            "transfer-encoding",
+            HeaderValue::from_static("chunked"),
+        );
+
+        let result = preserve_response_headers(&input);
+        assert!(result.contains_key("content-type"));
+        assert!(result.contains_key("x-request-id"));
+        assert!(!result.contains_key("connection"));
+        assert!(!result.contains_key("transfer-encoding"));
+    }
+
+    #[test]
+    fn test_preserve_response_headers_empty() {
+        let input = HeaderMap::new();
+        let result = preserve_response_headers(&input);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_preserve_response_headers_all_forwardable() {
+        let mut input = HeaderMap::new();
+        input.insert("content-type", HeaderValue::from_static("text/plain"));
+        input.insert("x-custom", HeaderValue::from_static("value"));
+
+        let result = preserve_response_headers(&input);
+        assert_eq!(result.len(), 2);
+    }
+
+    // ===================== ApiProvider tests =====================
+
+    #[test]
+    fn test_api_provider_from_url() {
+        assert_eq!(
+            ApiProvider::from_url("https://api.anthropic.com/v1/messages"),
+            ApiProvider::Anthropic
+        );
+        assert_eq!(
+            ApiProvider::from_url("https://api.x.ai/v1/chat/completions"),
+            ApiProvider::Xai
+        );
+        assert_eq!(
+            ApiProvider::from_url("https://api.openai.com/v1/chat/completions"),
+            ApiProvider::OpenAi
+        );
+        assert_eq!(
+            ApiProvider::from_url("https://generativelanguage.googleapis.com/v1beta"),
+            ApiProvider::Gemini
+        );
+        assert_eq!(
+            ApiProvider::from_url("http://localhost:8000/v1/chat"),
+            ApiProvider::Generic
+        );
+    }
+
+    #[test]
+    fn test_api_provider_debug_and_traits() {
+        let p = ApiProvider::Anthropic;
+        assert_eq!(p, p.clone());
+        let _ = format!("{:?}", p);
+    }
+
+    // ===================== extract_auth_header tests =====================
+
+    #[test]
+    fn test_extract_auth_user_header_takes_priority() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer user-key"),
+        );
+        let worker_key = Some("worker-key".to_string());
+
+        let result = extract_auth_header(Some(&headers), &worker_key);
+        assert_eq!(result.unwrap().to_str().unwrap(), "Bearer user-key");
+    }
+
+    #[test]
+    fn test_extract_auth_fallback_to_worker_key() {
+        let headers = HeaderMap::new(); // no auth header
+        let worker_key = Some("worker-key".to_string());
+
+        let result = extract_auth_header(Some(&headers), &worker_key);
+        assert_eq!(result.unwrap().to_str().unwrap(), "Bearer worker-key");
+    }
+
+    #[test]
+    fn test_extract_auth_no_headers_no_key() {
+        let result = extract_auth_header(None, &None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_auth_none_headers_with_worker_key() {
+        let worker_key = Some("fallback".to_string());
+        let result = extract_auth_header(None, &worker_key);
+        assert_eq!(result.unwrap().to_str().unwrap(), "Bearer fallback");
+    }
+
+    #[test]
+    fn test_extract_auth_capital_authorization() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_static("Bearer cap-key"),
+        );
+
+        let result = extract_auth_header(Some(&headers), &None);
+        assert_eq!(result.unwrap().to_str().unwrap(), "Bearer cap-key");
+    }
+
+    // ===================== copy_request_headers tests =====================
+
+    #[test]
+    fn test_copy_request_headers_basic() {
+        let mut req = Request::builder();
+        req = req.header("content-type", "application/json");
+        req = req.header("x-custom", "value");
+        let request = req.body(Body::empty()).unwrap();
+
+        let copied = copy_request_headers(&request);
+        assert!(copied.iter().any(|(k, v)| k == "content-type" && v == "application/json"));
+        assert!(copied.iter().any(|(k, v)| k == "x-custom" && v == "value"));
+    }
+
+    #[test]
+    fn test_copy_request_headers_empty() {
+        let request = Request::builder().body(Body::empty()).unwrap();
+        let copied = copy_request_headers(&request);
+        assert!(copied.is_empty());
+    }
 }
