@@ -293,7 +293,7 @@ O(log n) 查找代替 CacheAware 的 O(prefix_len) 前缀树遍历。
 ---
 
 ### 4.5 Embedding API (`/v1/embeddings`)
-- [] 保留 - [] 删除 - [x] 待讨论
+- [] 保留 - [x] 删除 - [] 待讨论
 
 > **Claude 意见**: 理解你改为待讨论。**倾向删除**。Embedding 模型是 encoder-only 架构，不存在 prefill/decode 分离的概念。如果你们只做 LLM（decoder-only）的 PD 分离，embedding 路由完全不相关。除非你们长期要做统一推理网关（同时服务 LLM + embedding），否则建议删除。
 
@@ -457,7 +457,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ## 5. Mesh / HA 高可用功能
 
 ### 5.1 Mesh Server (Gossip 协议集群)
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [] 待讨论
 
 > **建议待讨论理由**: 短期打榜不需要，但长期分布式方案可能需要多 router 实例的状态同步。这是最大的复杂度来源之一（mesh-sync crate、Gossip、CRDT、redis）。**建议短期删除、代码先 fork 保存，长期路线图中再评估是否需要。**
 >
@@ -476,7 +476,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 5.2 Mesh 管理 API (`/ha/*`)
-- [ ] 保留 - [] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [] 待讨论
 
 > **建议删除理由**: 随 Mesh Server 一起删除。
 >
@@ -501,7 +501,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 5.3 全局速率限制 (Global Rate Limiting)
-- [ ] 保留 - [] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [] 待讨论
 
 > **建议删除理由**: 随 Mesh Server 一起删除。全局速率限制依赖 mesh 集群。
 >
@@ -733,7 +733,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 8.5 Event System
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [x] 保留 - [ ] 删除 - [] 待讨论
 
 > **建议待讨论理由**: 事件系统定义了 worker_selected、request_dispatched 等关键事件，即使不用 OTel，这些结构化事件在日志中也有价值（debug PD 路由决策时可以看到选择了哪个 prefill/decode worker）。代码量小。如果 OTel 删除可以简化，但事件定义本身建议保留。
 >
@@ -1070,7 +1070,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 17.4 Benchmark 基准测试
-- [ ] 保留 - [ ] 删除 - [x] 待讨论
+- [x] 保留 - [ ] 删除 - [] 待讨论
 
 > **建议待讨论理由**: `request_processing.rs`（请求处理延迟）和 `tree_benchmark.rs`（CacheAware 前缀树性能）对优化路由层延迟有参考价值。`wasm_middleware_latency.rs` 和 `manual_policy_benchmark.rs` 可删。保留有价值的，删除与已删功能相关的。
 >
@@ -1207,7 +1207,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 ## 建议决策汇总（AMD PD 分离 + 对标 Dynamo + InferMax 打榜）
 
-### 明确保留 — 40 项
+### 明确保留 — 42 项
 > 这些是 PD 分离核心 + 性能优化 + 长期分布式方案所必需的。
 
 | # | 功能 | 理由 |
@@ -1247,6 +1247,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 | 8.1 | Prometheus Metrics | **打榜必须：量化性能指标** |
 | 8.3 | Structured Logging | 调试必需 |
 | 8.4 | InFlight Tracker | GPU 利用率指标 |
+| 8.5 | Event System | 代码小，debug PD 路由决策有用 |
 | **基础设施** | | |
 | 7.1 | K8s Service Discovery | 分布式部署必需 |
 | 9.5 | Request ID 中间件 | PD 调试追踪 |
@@ -1255,11 +1256,12 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 | 15.1 | 优雅关闭 | 基本运维 |
 | 17.2 | Makefile | 构建基础 |
 | 17.3 | E2E 测试（裁剪后） | 打榜验证准确性+性能 |
+| 17.4 | Benchmark（裁剪后） | request_processing + tree_benchmark 有参考价值 |
 | 18.1 | Workflow Engine | Worker 生命周期管理 |
 | 19.1 | Version 模块 | 基础设施 |
 | 21.1 | 配置系统 | 基础设施 |
 
-### 明确删除 — 21 项
+### 明确删除 — 25 项
 > 这些与 PD 分离/性能优化无关，删除可大幅减少代码量和依赖。
 
 | # | 功能 | 理由 |
@@ -1270,8 +1272,12 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 | 3.6 | Manual 策略 | 粘性会话，非性能场景 |
 | 3.7 | ConsistentHashing | 会话亲和性，非性能场景 |
 | 4.2 | Completion API | 旧格式 API |
+| 4.5 | Embedding API | Encoder-only 架构，不涉及 PD 分离 |
 | 4.6 | Rerank API | 非生成类模型 |
 | 4.7 | Classify API | 非生成类模型 |
+| 5.1 | Mesh Server | Gossip/CRDT 复杂度高，短期不需要 |
+| 5.2 | Mesh 管理 API | 随 Mesh Server 删除 |
+| 5.3 | 全局速率限制 | 依赖 Mesh 集群，随 Mesh 删除 |
 | 9.1 | Auth 中间件 | 内部服务不需要 |
 | 9.2 | Control Plane Auth | JWT/OIDC 内部不需要 |
 | 9.4 | WASM 中间件 | 非核心，wasmtime 重依赖 |
@@ -1286,21 +1292,15 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 | 17.1 | Docker 构建 | 自己的构建流程 |
 | 20.1 | Header-based Routing | 服务于 Manual/ConsistentHashing |
 
-### 待讨论 — 10 项
+### 待讨论 — 4 项
 > 需要根据具体部署拓扑和短期/长期优先级决定。
 
 | # | 功能 | 关键考虑 |
 |---|------|---------|
-| 4.5 | Embedding API | 是否需要 embedding 模型的 PD 分离？ |
 | 4.8 | Conversations API | 对话管理是否是长期产品需求？ |
-| 5.1 | Mesh Server | 长期分布式需要多 router HA。**短期删除，长期路线图** |
-| 5.2 | Mesh 管理 API | 随 Mesh 决策 |
-| 5.3 | 全局速率限制 | 随 Mesh 决策 |
 | 8.2 | OpenTelemetry | 分布式追踪对多节点调试有价值 |
-| 8.5 | Event System | 代码小，对 debug PD 路由决策有用。倾向保留 |
 | 9.3 | Concurrency Limiter | 打榜时防 OOM 有用，但默认禁用可保留代码 |
 | 16.1 | Python Binding | 取决于 ATOM 的集成方式 |
-| 17.4 | Benchmark（裁剪后） | 保留 request_processing + tree_benchmark |
 
 ### 依赖裁剪建议
 
@@ -1310,7 +1310,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 - `mesh-wasm`, `wasmtime`, `sha2` — WASM 支持
 - `mesh-auth`, `jsonwebtoken`, `subtle` — 认证
 - `data-connector` — 数据持久化（简化为纯内存 stub）
-- `crdts`, `redis` — Mesh/CRDT（如果 Mesh 最终删除）
+- `crdts`, `redis` — Mesh/CRDT（Mesh 已确认删除）
 - `serde_yaml` — YAML 配置（MCP config）
 - `wasm-encoder` — 测试用 WASM 编码
 - `npyz` — 测试用 numpy 读取
