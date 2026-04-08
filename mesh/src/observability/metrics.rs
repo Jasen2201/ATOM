@@ -363,9 +363,6 @@ pub mod metrics_labels {
     pub const ENDPOINT_GENERATE: &str = "generate";
     pub const ENDPOINT_RESPONSES: &str = "responses";
     pub const ENDPOINT_COMPLETIONS: &str = "completions";
-    pub const ENDPOINT_RERANK: &str = "rerank";
-    pub const ENDPOINT_EMBEDDINGS: &str = "embeddings";
-    pub const ENDPOINT_CLASSIFY: &str = "classify";
 
     // Worker types
     pub const WORKER_REGULAR: &str = "regular";
@@ -870,15 +867,6 @@ impl Metrics {
     /// Set manual policy cache entries count
     pub fn set_manual_policy_cache_entries(count: usize) {
         gauge!("mesh_manual_policy_cache_entries").set(count as f64);
-    }
-
-    /// Record consistent hashing policy execution branch for routing decisions
-    pub fn record_worker_consistent_hashing_policy_branch(branch: &'static str) {
-        counter!(
-            "mesh_consistent_hashing_policy_branch_total",
-            "branch" => branch
-        )
-        .increment(1);
     }
 
     /// Record prefix hash policy execution branch for routing decisions
