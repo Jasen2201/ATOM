@@ -100,4 +100,105 @@ mod tests {
         assert!(PolicyFactory::create_by_name("CacheAware").is_some());
         assert!(PolicyFactory::create_by_name("unknown").is_none());
     }
+
+    #[tokio::test]
+    async fn test_create_prefix_hash_from_config() {
+        let policy = PolicyFactory::create_from_config(&PolicyConfig::PrefixHash {
+            prefix_token_count: 128,
+            load_factor: 1.5,
+        });
+        assert_eq!(policy.name(), "prefix_hash");
+    }
+
+    #[tokio::test]
+    async fn test_create_by_name_prefix_hash() {
+        let p1 = PolicyFactory::create_by_name("prefix_hash");
+        assert!(p1.is_some());
+        assert_eq!(p1.unwrap().name(), "prefix_hash");
+
+        let p2 = PolicyFactory::create_by_name("PrefixHash");
+        assert!(p2.is_some());
+        assert_eq!(p2.unwrap().name(), "prefix_hash");
+    }
+
+    #[tokio::test]
+    async fn test_create_by_name_returns_none_for_empty() {
+        assert!(PolicyFactory::create_by_name("").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_all_configs_produce_named_policies() {
+        let configs = vec![
+            ("random", PolicyConfig::Random),
+            ("round_robin", PolicyConfig::RoundRobin),
+            (
+                "power_of_two",
+                PolicyConfig::PowerOfTwo {
+                    load_check_interval_secs: 10,
+                },
+            ),
+            (
+                "cache_aware",
+                PolicyConfig::CacheAware {
+                    cache_threshold: 0.5,
+                    balance_abs_threshold: 5,
+                    balance_rel_threshold: 1.2,
+                    eviction_interval_secs: 60,
+                    max_tree_size: 500,
+                },
+            ),
+            (
+                "prefix_hash",
+                PolicyConfig::PrefixHash {
+                    prefix_token_count: 256,
+                    load_factor: 1.25,
+                },
+            ),
+        ];
+
+        for (expected_name, config) in configs {
+            let policy = PolicyFactory::create_from_config(&config);
+            assert_eq!(
+                policy.name(),
+                expected_name,
+                "Config {:?} should produce policy named '{}'",
+                config,
+                expected_name
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_by_name_case_insensitive() {
+        // All supported names in various cases
+        let cases = vec![
+            ("random", "random"),
+            ("RANDOM", "random"),
+            ("Random", "random"),
+            ("round_robin", "round_robin"),
+            ("roundrobin", "round_robin"),
+            ("power_of_two", "power_of_two"),
+            ("poweroftwo", "power_of_two"),
+            ("cache_aware", "cache_aware"),
+            ("cacheaware", "cache_aware"),
+            ("prefix_hash", "prefix_hash"),
+            ("prefixhash", "prefix_hash"),
+        ];
+
+        for (input, expected_name) in cases {
+            let policy = PolicyFactory::create_by_name(input);
+            assert!(
+                policy.is_some(),
+                "create_by_name('{}') should return Some",
+                input
+            );
+            assert_eq!(
+                policy.unwrap().name(),
+                expected_name,
+                "create_by_name('{}') should produce '{}'",
+                input,
+                expected_name
+            );
+        }
+    }
 }
