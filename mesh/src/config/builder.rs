@@ -551,4 +551,637 @@ mod tests {
             _ => panic!("Expected CacheAware policy"),
         }
     }
+
+    #[test]
+    fn test_builder_new_produces_defaults() {
+        let config = RouterConfigBuilder::new().build_unchecked();
+        let default = RouterConfig::default();
+        assert_eq!(config.port, default.port);
+        assert_eq!(config.host, default.host);
+        assert!(matches!(config.policy, PolicyConfig::Random));
+    }
+
+    #[test]
+    fn test_builder_from_config_preserves_all_fields() {
+        let original = RouterConfig {
+            port: 9999,
+            host: "127.0.0.1".to_string(),
+            dp_aware: true,
+            api_key: Some("secret".to_string()),
+            ..Default::default()
+        };
+        let rebuilt = RouterConfigBuilder::from_config(original.clone()).build_unchecked();
+        assert_eq!(rebuilt.port, 9999);
+        assert_eq!(rebuilt.host, "127.0.0.1");
+        assert!(rebuilt.dp_aware);
+        assert_eq!(rebuilt.api_key.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn test_builder_from_config_ref() {
+        let original = RouterConfig {
+            port: 7777,
+            ..Default::default()
+        };
+        let rebuilt = RouterConfigBuilder::from_config_ref(&original).build_unchecked();
+        assert_eq!(rebuilt.port, 7777);
+    }
+
+    #[test]
+    fn test_builder_regular_mode() {
+        let config = RouterConfigBuilder::new()
+            .regular_mode(vec![
+                "http://w1:8000".to_string(),
+                "http://w2:8000".to_string(),
+            ])
+            .build()
+            .unwrap();
+
+        assert!(!config.mode.is_pd_mode());
+        assert_eq!(config.mode.worker_count(), 2);
+    }
+
+    #[test]
+    fn test_builder_pd_mode_with_policies() {
+        let config = RouterConfigBuilder::new()
+            .prefill_decode_mode_with_policies(
+                vec![("http://p1:8000".to_string(), Some(8001))],
+                vec!["http://d1:8000".to_string()],
+                Some(PolicyConfig::RoundRobin),
+                Some(PolicyConfig::Random),
+            )
+            .build()
+            .unwrap();
+
+        assert!(config.mode.is_pd_mode());
+        if let RoutingMode::PrefillDecode {
+            prefill_policy,
+            decode_policy,
+            ..
+        } = &config.mode
+        {
+            assert!(matches!(prefill_policy, Some(PolicyConfig::RoundRobin)));
+            assert!(matches!(decode_policy, Some(PolicyConfig::Random)));
+        } else {
+            panic!("Expected PrefillDecode mode");
+        }
+    }
+
+    #[test]
+    fn test_builder_mode_direct() {
+        let config = RouterConfigBuilder::new()
+            .mode(RoutingMode::Regular {
+                worker_urls: vec!["http://w:8000".to_string()],
+            })
+            .build()
+            .unwrap();
+        assert!(!config.mode.is_pd_mode());
+        assert_eq!(config.mode.worker_count(), 1);
+    }
+
+    #[test]
+    fn test_builder_random_policy() {
+        let config = RouterConfigBuilder::new()
+            .regular_mode(vec!["http://w:8000".to_string()])
+            .random_policy()
+            .build()
+            .unwrap();
+        assert!(matches!(config.policy, PolicyConfig::Random));
+    }
+
+    #[test]
+    fn test_builder_round_robin_policy() {
+        let config = RouterConfigBuilder::new()
+            .regular_mode(vec!["http://w:8000".to_string()])
+            .round_robin_policy()
+            .build()
+            .unwrap();
+        assert!(matches!(config.policy, PolicyConfig::RoundRobin));
+    }
+
+    #[test]
+    fn test_builder_power_of_two_policy() {
+        let config = RouterConfigBuilder::new()
+            .regular_mode(vec![
+                "http://w1:8000".to_string(),
+                "http://w2:8000".to_string(),
+            ])
+            .power_of_two_policy(120)
+            .build()
+            .unwrap();
+        match config.policy {
+            PolicyConfig::PowerOfTwo {
+                load_check_interval_secs,
+            } => assert_eq!(load_check_interval_secs, 120),
+            _ => panic!("Expected PowerOfTwo policy"),
+        }
+    }
+
+    #[test]
+    fn test_builder_policy_generic() {
+        let config = RouterConfigBuilder::new()
+            .regular_mode(vec!["http://w:8000".to_string()])
+            .policy(PolicyConfig::RoundRobin)
+            .build()
+            .unwrap();
+        assert!(matches!(config.policy, PolicyConfig::RoundRobin));
+    }
+
+    #[test]
+    fn test_builder_http_connection() {
+        let config = RouterConfigBuilder::new().http_connection().build_unchecked();
+        assert!(matches!(config.connection_mode, ConnectionMode::Http));
+    }
+
+    #[test]
+    fn test_builder_grpc_connection() {
+        let config = RouterConfigBuilder::new()
+            .grpc_connection(Some(50051))
+            .build_unchecked();
+        assert!(matches!(
+            config.connection_mode,
+            ConnectionMode::Grpc { port: Some(50051) }
+        ));
+    }
+
+    #[test]
+    fn test_builder_grpc_connection_default() {
+        let config = RouterConfigBuilder::new()
+            .grpc_connection_default()
+            .build_unchecked();
+        assert!(matches!(
+            config.connection_mode,
+            ConnectionMode::Grpc { port: None }
+        ));
+    }
+
+    #[test]
+    fn test_builder_connection_mode_direct() {
+        let config = RouterConfigBuilder::new()
+            .connection_mode(ConnectionMode::Grpc { port: Some(9000) })
+            .build_unchecked();
+        assert!(matches!(
+            config.connection_mode,
+            ConnectionMode::Grpc { port: Some(9000) }
+        ));
+    }
+
+    #[test]
+    fn test_builder_host_and_port() {
+        let config = RouterConfigBuilder::new()
+            .host("127.0.0.1")
+            .port(8080)
+            .build_unchecked();
+        assert_eq!(config.host, "127.0.0.1");
+        assert_eq!(config.port, 8080);
+    }
+
+    #[test]
+    fn test_builder_request_settings() {
+        let config = RouterConfigBuilder::new()
+            .max_payload_size(1024)
+            .request_timeout_secs(60)
+            .worker_startup_timeout_secs(120)
+            .worker_startup_check_interval_secs(5)
+            .build_unchecked();
+        assert_eq!(config.max_payload_size, 1024);
+        assert_eq!(config.request_timeout_secs, 60);
+        assert_eq!(config.worker_startup_timeout_secs, 120);
+        assert_eq!(config.worker_startup_check_interval_secs, 5);
+    }
+
+    #[test]
+    fn test_builder_rate_limiting() {
+        let config = RouterConfigBuilder::new()
+            .max_concurrent_requests(100)
+            .queue_size(50)
+            .queue_timeout_secs(30)
+            .rate_limit_tokens_per_second(500)
+            .build_unchecked();
+        assert_eq!(config.max_concurrent_requests, 100);
+        assert_eq!(config.queue_size, 50);
+        assert_eq!(config.queue_timeout_secs, 30);
+        assert_eq!(config.rate_limit_tokens_per_second, Some(500));
+    }
+
+    #[test]
+    fn test_builder_disable_rate_limiting() {
+        let config = RouterConfigBuilder::new()
+            .disable_rate_limiting()
+            .build_unchecked();
+        assert_eq!(config.max_concurrent_requests, -1);
+    }
+
+    #[test]
+    fn test_builder_api_key() {
+        let config = RouterConfigBuilder::new()
+            .api_key("my-key")
+            .build_unchecked();
+        assert_eq!(config.api_key.as_deref(), Some("my-key"));
+    }
+
+    #[test]
+    fn test_builder_retry_config() {
+        let retry = RetryConfig {
+            max_retries: 3,
+            initial_backoff_ms: 100,
+            max_backoff_ms: 5000,
+            backoff_multiplier: 2.0,
+            jitter_factor: 0.1,
+        };
+        let config = RouterConfigBuilder::new()
+            .retry_config(retry)
+            .build_unchecked();
+        assert_eq!(config.retry.max_retries, 3);
+        assert_eq!(config.retry.initial_backoff_ms, 100);
+    }
+
+    #[test]
+    fn test_builder_disable_enable_retries() {
+        let config = RouterConfigBuilder::new()
+            .disable_retries()
+            .build_unchecked();
+        assert!(config.disable_retries);
+
+        let config = RouterConfigBuilder::new()
+            .disable_retries()
+            .enable_retries()
+            .build_unchecked();
+        assert!(!config.disable_retries);
+    }
+
+    #[test]
+    fn test_builder_circuit_breaker_config() {
+        let cb = CircuitBreakerConfig {
+            failure_threshold: 5,
+            success_threshold: 2,
+            timeout_duration_secs: 30,
+            window_duration_secs: 60,
+        };
+        let config = RouterConfigBuilder::new()
+            .circuit_breaker_config(cb)
+            .build_unchecked();
+        assert_eq!(config.circuit_breaker.failure_threshold, 5);
+    }
+
+    #[test]
+    fn test_builder_disable_enable_circuit_breaker() {
+        let config = RouterConfigBuilder::new()
+            .disable_circuit_breaker()
+            .build_unchecked();
+        assert!(config.disable_circuit_breaker);
+
+        let config = RouterConfigBuilder::new()
+            .disable_circuit_breaker()
+            .enable_circuit_breaker()
+            .build_unchecked();
+        assert!(!config.disable_circuit_breaker);
+    }
+
+    #[test]
+    fn test_builder_health_check_config() {
+        let hc = HealthCheckConfig {
+            failure_threshold: 5,
+            success_threshold: 1,
+            timeout_secs: 10,
+            check_interval_secs: 30,
+            endpoint: "/ready".to_string(),
+            disable_health_check: false,
+        };
+        let config = RouterConfigBuilder::new()
+            .health_check_config(hc)
+            .build_unchecked();
+        assert_eq!(config.health_check.endpoint, "/ready");
+        assert_eq!(config.health_check.failure_threshold, 5);
+    }
+
+    #[test]
+    fn test_builder_discovery() {
+        let config = RouterConfigBuilder::new()
+            .enable_discovery()
+            .build_unchecked();
+        assert!(config.discovery.is_some());
+        assert!(config.discovery.as_ref().unwrap().enabled);
+    }
+
+    #[test]
+    fn test_builder_discovery_config() {
+        let disc = DiscoveryConfig {
+            enabled: true,
+            namespace: Some("prod".to_string()),
+            ..Default::default()
+        };
+        let config = RouterConfigBuilder::new()
+            .discovery_config(disc)
+            .build_unchecked();
+        assert_eq!(
+            config.discovery.as_ref().unwrap().namespace.as_deref(),
+            Some("prod")
+        );
+    }
+
+    #[test]
+    fn test_builder_metrics() {
+        let config = RouterConfigBuilder::new()
+            .enable_metrics("0.0.0.0", 9090)
+            .build_unchecked();
+        let m = config.metrics.unwrap();
+        assert_eq!(m.host, "0.0.0.0");
+        assert_eq!(m.port, 9090);
+    }
+
+    #[test]
+    fn test_builder_metrics_config() {
+        let mc = MetricsConfig {
+            host: "localhost".to_string(),
+            port: 8080,
+        };
+        let config = RouterConfigBuilder::new()
+            .metrics_config(mc)
+            .build_unchecked();
+        assert_eq!(config.metrics.as_ref().unwrap().port, 8080);
+    }
+
+    #[test]
+    fn test_builder_trace() {
+        let config = RouterConfigBuilder::new()
+            .enable_trace("http://jaeger:4317")
+            .build_unchecked();
+        let tc = config.trace_config.unwrap();
+        assert!(tc.enable_trace);
+        assert_eq!(tc.otlp_traces_endpoint, "http://jaeger:4317");
+    }
+
+    #[test]
+    fn test_builder_disable_trace() {
+        let config = RouterConfigBuilder::new()
+            .disable_trace()
+            .build_unchecked();
+        let tc = config.trace_config.unwrap();
+        assert!(!tc.enable_trace);
+    }
+
+    #[test]
+    fn test_builder_logging() {
+        let config = RouterConfigBuilder::new()
+            .log_dir("/var/log/mesh")
+            .log_level("debug")
+            .build_unchecked();
+        assert_eq!(config.log_dir.as_deref(), Some("/var/log/mesh"));
+        assert_eq!(config.log_level.as_deref(), Some("debug"));
+    }
+
+    #[test]
+    fn test_builder_request_id_headers() {
+        let config = RouterConfigBuilder::new()
+            .request_id_headers(vec!["X-Request-ID".to_string()])
+            .build_unchecked();
+        let headers = config.request_id_headers.unwrap();
+        assert_eq!(headers, vec!["X-Request-ID"]);
+    }
+
+    #[test]
+    fn test_builder_model_and_tokenizer_paths() {
+        let config = RouterConfigBuilder::new()
+            .model_path("meta-llama/Llama-3-8B")
+            .tokenizer_path("/models/tokenizer.json")
+            .chat_template("/templates/chat.jinja")
+            .build_unchecked();
+        assert_eq!(config.model_path.as_deref(), Some("meta-llama/Llama-3-8B"));
+        assert_eq!(
+            config.tokenizer_path.as_deref(),
+            Some("/models/tokenizer.json")
+        );
+        assert_eq!(
+            config.chat_template.as_deref(),
+            Some("/templates/chat.jinja")
+        );
+    }
+
+    #[test]
+    fn test_builder_parsers() {
+        let config = RouterConfigBuilder::new()
+            .reasoning_parser("deepseek-r1")
+            .tool_call_parser("hermes")
+            .build_unchecked();
+        assert_eq!(config.reasoning_parser.as_deref(), Some("deepseek-r1"));
+        assert_eq!(config.tool_call_parser.as_deref(), Some("hermes"));
+    }
+
+    #[test]
+    fn test_builder_tokenizer_cache() {
+        let config = RouterConfigBuilder::new()
+            .enable_l0_cache(5000)
+            .enable_l1_cache(100 * 1024 * 1024)
+            .build_unchecked();
+        assert!(config.tokenizer_cache.enable_l0);
+        assert_eq!(config.tokenizer_cache.l0_max_entries, 5000);
+        assert!(config.tokenizer_cache.enable_l1);
+        assert_eq!(config.tokenizer_cache.l1_max_memory, 100 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_builder_tokenizer_cache_config() {
+        let cache = TokenizerCacheConfig {
+            enable_l0: true,
+            l0_max_entries: 1000,
+            enable_l1: false,
+            l1_max_memory: 0,
+        };
+        let config = RouterConfigBuilder::new()
+            .tokenizer_cache(cache.clone())
+            .build_unchecked();
+        assert_eq!(config.tokenizer_cache, cache);
+    }
+
+    #[test]
+    fn test_builder_dp_aware() {
+        let config = RouterConfigBuilder::new()
+            .enable_dp_aware()
+            .build_unchecked();
+        assert!(config.dp_aware);
+
+        let config = RouterConfigBuilder::new()
+            .enable_dp_aware()
+            .disable_dp_aware()
+            .build_unchecked();
+        assert!(!config.dp_aware);
+    }
+
+    #[test]
+    fn test_builder_bool_setters() {
+        let config = RouterConfigBuilder::new()
+            .dp_aware(true)
+            .retries(false)
+            .circuit_breaker(false)
+            .build_unchecked();
+        assert!(config.dp_aware);
+        assert!(config.disable_retries);
+        assert!(config.disable_circuit_breaker);
+
+        let config = RouterConfigBuilder::new()
+            .retries(true)
+            .circuit_breaker(true)
+            .build_unchecked();
+        assert!(!config.disable_retries);
+        assert!(!config.disable_circuit_breaker);
+    }
+
+    #[test]
+    fn test_builder_maybe_api_key_some() {
+        let config = RouterConfigBuilder::new()
+            .maybe_api_key(Some("key123"))
+            .build_unchecked();
+        assert_eq!(config.api_key.as_deref(), Some("key123"));
+    }
+
+    #[test]
+    fn test_builder_maybe_api_key_none() {
+        let config = RouterConfigBuilder::new()
+            .maybe_api_key(None::<String>)
+            .build_unchecked();
+        assert!(config.api_key.is_none());
+    }
+
+    #[test]
+    fn test_builder_maybe_setters_with_none() {
+        let config = RouterConfigBuilder::new()
+            .maybe_discovery(None)
+            .maybe_metrics(None)
+            .maybe_trace(None)
+            .maybe_log_dir(None::<String>)
+            .maybe_log_level(None::<String>)
+            .maybe_request_id_headers(None)
+            .maybe_rate_limit_tokens_per_second(None)
+            .maybe_model_path(None::<String>)
+            .maybe_tokenizer_path(None::<String>)
+            .maybe_chat_template(None::<String>)
+            .maybe_reasoning_parser(None::<String>)
+            .maybe_tool_call_parser(None::<String>)
+            .build_unchecked();
+        assert!(config.discovery.is_none());
+        assert!(config.metrics.is_none());
+        assert!(config.trace_config.is_none());
+        assert!(config.log_dir.is_none());
+        assert!(config.log_level.is_none());
+        assert!(config.request_id_headers.is_none());
+        assert!(config.rate_limit_tokens_per_second.is_none());
+        assert!(config.model_path.is_none());
+        assert!(config.tokenizer_path.is_none());
+        assert!(config.chat_template.is_none());
+        assert!(config.reasoning_parser.is_none());
+        assert!(config.tool_call_parser.is_none());
+    }
+
+    #[test]
+    fn test_builder_maybe_setters_with_some() {
+        let config = RouterConfigBuilder::new()
+            .maybe_log_dir(Some("/logs"))
+            .maybe_log_level(Some("info"))
+            .maybe_rate_limit_tokens_per_second(Some(100))
+            .maybe_model_path(Some("model/path"))
+            .maybe_tokenizer_path(Some("tok/path"))
+            .maybe_chat_template(Some("tmpl"))
+            .maybe_reasoning_parser(Some("rp"))
+            .maybe_tool_call_parser(Some("tp"))
+            .build_unchecked();
+        assert_eq!(config.log_dir.as_deref(), Some("/logs"));
+        assert_eq!(config.log_level.as_deref(), Some("info"));
+        assert_eq!(config.rate_limit_tokens_per_second, Some(100));
+        assert_eq!(config.model_path.as_deref(), Some("model/path"));
+        assert_eq!(config.tokenizer_path.as_deref(), Some("tok/path"));
+        assert_eq!(config.chat_template.as_deref(), Some("tmpl"));
+        assert_eq!(config.reasoning_parser.as_deref(), Some("rp"));
+        assert_eq!(config.tool_call_parser.as_deref(), Some("tp"));
+    }
+
+    #[test]
+    fn test_builder_build_validates() {
+        // Port 0 should fail validation
+        let result = RouterConfigBuilder::new().port(0).build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_builder_build_unchecked_skips_validation() {
+        // Port 0 is invalid but build_unchecked skips validation
+        let config = RouterConfigBuilder::new().port(0).build_unchecked();
+        assert_eq!(config.port, 0);
+    }
+
+    #[test]
+    fn test_builder_build_with_validation_false() {
+        let result = RouterConfigBuilder::new().port(0).build_with_validation(false);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_builder_into_router_config() {
+        let builder = RouterConfigBuilder::new().port(5555);
+        let config: RouterConfig = builder.into();
+        assert_eq!(config.port, 5555);
+    }
+
+    #[test]
+    fn test_router_config_builder_method() {
+        let builder = RouterConfig::builder();
+        let config = builder.port(6666).build_unchecked();
+        assert_eq!(config.port, 6666);
+    }
+
+    #[test]
+    fn test_builder_chaining_overwrites_last_wins() {
+        let config = RouterConfigBuilder::new()
+            .port(1000)
+            .port(2000)
+            .port(3000)
+            .build_unchecked();
+        assert_eq!(config.port, 3000);
+    }
+
+    #[test]
+    fn test_builder_full_complex_config() {
+        let config = RouterConfigBuilder::new()
+            .prefill_decode_mode_with_policies(
+                vec![
+                    ("http://p1:8000".to_string(), Some(8001)),
+                    ("http://p2:8000".to_string(), None),
+                ],
+                vec![
+                    "http://d1:8000".to_string(),
+                    "http://d2:8000".to_string(),
+                ],
+                Some(PolicyConfig::RoundRobin),
+                Some(PolicyConfig::Random),
+            )
+            .cache_aware_policy(0.7, 5, 1.2, 60, 500)
+            .host("10.0.0.1")
+            .port(8080)
+            .max_payload_size(1024 * 1024)
+            .request_timeout_secs(300)
+            .max_concurrent_requests(200)
+            .api_key("secret-key")
+            .enable_metrics("0.0.0.0", 9090)
+            .enable_trace("localhost:4317")
+            .log_dir("/var/log")
+            .log_level("info")
+            .enable_dp_aware()
+            .enable_l0_cache(10000)
+            .model_path("my-model")
+            .reasoning_parser("deepseek-r1")
+            .build()
+            .unwrap();
+
+        assert!(config.mode.is_pd_mode());
+        assert_eq!(config.mode.worker_count(), 4);
+        assert_eq!(config.host, "10.0.0.1");
+        assert_eq!(config.port, 8080);
+        assert_eq!(config.max_concurrent_requests, 200);
+        assert_eq!(config.api_key.as_deref(), Some("secret-key"));
+        assert!(config.metrics.is_some());
+        assert!(config.trace_config.is_some());
+        assert!(config.dp_aware);
+        assert!(config.tokenizer_cache.enable_l0);
+        assert_eq!(config.model_path.as_deref(), Some("my-model"));
+    }
 }
