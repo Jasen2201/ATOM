@@ -492,4 +492,137 @@ mod tests {
         let default = registry.get_default_policy();
         assert_eq!(default.name(), "round_robin");
     }
+
+    #[tokio::test]
+    async fn test_get_policy_or_default() {
+        let registry = PolicyRegistry::new(PolicyConfig::Random);
+
+        // No policy for model -> returns default
+        let policy = registry.get_policy_or_default("no-model");
+        assert_eq!(policy.name(), "random");
+
+        // Add worker with explicit policy -> returns that policy
+        registry.on_worker_added("llama", Some("round_robin"));
+        let policy = registry.get_policy_or_default("llama");
+        assert_eq!(policy.name(), "round_robin");
+    }
+
+    #[tokio::test]
+    async fn test_pd_mode_policies() {
+        let registry = PolicyRegistry::new(PolicyConfig::RoundRobin);
+
+        // Before setting PD policies, should fallback to default
+        let prefill = registry.get_prefill_policy();
+        assert_eq!(prefill.name(), "round_robin");
+        let decode = registry.get_decode_policy();
+        assert_eq!(decode.name(), "round_robin");
+
+        // Set PD policies
+        registry.set_prefill_policy(Arc::new(crate::policies::RandomPolicy::new()));
+        registry.set_decode_policy(Arc::new(crate::policies::PowerOfTwoPolicy::new()));
+
+        assert_eq!(registry.get_prefill_policy().name(), "random");
+        assert_eq!(registry.get_decode_policy().name(), "power_of_two");
+    }
+
+    #[tokio::test]
+    async fn test_pd_policies_set_once() {
+        let registry = PolicyRegistry::new(PolicyConfig::RoundRobin);
+
+        // First set succeeds
+        registry.set_prefill_policy(Arc::new(crate::policies::RandomPolicy::new()));
+        assert_eq!(registry.get_prefill_policy().name(), "random");
+
+        // Second set is ignored (OnceLock)
+        registry.set_prefill_policy(Arc::new(crate::policies::PowerOfTwoPolicy::new()));
+        assert_eq!(registry.get_prefill_policy().name(), "random"); // Still random
+    }
+
+    #[tokio::test]
+    async fn test_get_all_power_of_two_policies_default() {
+        let registry = PolicyRegistry::new(PolicyConfig::PowerOfTwo {
+            load_check_interval_secs: 10,
+        });
+
+        let p2_policies = registry.get_all_power_of_two_policies();
+        assert_eq!(p2_policies.len(), 1);
+        assert_eq!(p2_policies[0].name(), "power_of_two");
+    }
+
+    #[tokio::test]
+    async fn test_get_all_power_of_two_policies_with_pd() {
+        let registry = PolicyRegistry::new(PolicyConfig::RoundRobin);
+
+        // Set prefill to power_of_two
+        registry.set_prefill_policy(Arc::new(crate::policies::PowerOfTwoPolicy::new()));
+
+        let p2_policies = registry.get_all_power_of_two_policies();
+        assert_eq!(p2_policies.len(), 1);
+
+        // Also set decode to power_of_two
+        registry.set_decode_policy(Arc::new(crate::policies::PowerOfTwoPolicy::new()));
+
+        let p2_policies = registry.get_all_power_of_two_policies();
+        assert_eq!(p2_policies.len(), 2); // prefill + decode (different instances)
+    }
+
+    #[tokio::test]
+    async fn test_get_all_power_of_two_no_duplicates() {
+        // Default is power_of_two, but it shouldn't appear twice
+        let registry = PolicyRegistry::new(PolicyConfig::PowerOfTwo {
+            load_check_interval_secs: 10,
+        });
+
+        // Add a model-specific power_of_two via worker
+        registry.on_worker_added("llama", Some("power_of_two"));
+
+        let p2_policies = registry.get_all_power_of_two_policies();
+        // default + model-specific = 2 distinct instances
+        assert_eq!(p2_policies.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_clear() {
+        let registry = PolicyRegistry::new(PolicyConfig::RoundRobin);
+
+        registry.on_worker_added("llama", Some("random"));
+        registry.on_worker_added("gpt-4", Some("cache_aware"));
+        assert_eq!(registry.get_all_mappings().len(), 2);
+
+        registry.clear();
+        assert_eq!(registry.get_all_mappings().len(), 0);
+        assert_eq!(registry.get_worker_counts().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_on_worker_removed_nonexistent() {
+        let registry = PolicyRegistry::new(PolicyConfig::RoundRobin);
+
+        // Removing from a model with no workers should not panic
+        registry.on_worker_removed("nonexistent-model");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_models_independent() {
+        let registry = PolicyRegistry::new(PolicyConfig::RoundRobin);
+
+        registry.on_worker_added("llama", Some("random"));
+        registry.on_worker_added("gpt-4", Some("cache_aware"));
+
+        // Remove all workers from llama
+        registry.on_worker_removed("llama");
+
+        // llama policy should be cleaned up, gpt-4 should remain
+        assert!(registry.get_policy("llama").is_none());
+        assert_eq!(registry.get_policy("gpt-4").unwrap().name(), "cache_aware");
+    }
+
+    #[tokio::test]
+    async fn test_create_policy_from_type_unknown() {
+        let registry = PolicyRegistry::new(PolicyConfig::RoundRobin);
+
+        // Unknown policy type should fall back to default
+        let policy = registry.on_worker_added("model", Some("nonexistent_policy"));
+        assert_eq!(policy.name(), "round_robin"); // Falls back to default
+    }
 }
