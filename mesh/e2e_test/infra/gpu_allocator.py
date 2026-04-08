@@ -21,6 +21,15 @@ except ImportError:
     NVML_AVAILABLE = False
     logger.debug("nvidia-ml-py not available, GPU detection will be limited")
 
+# Try to import amdsmi for AMD GPU detection
+try:
+    import amdsmi
+
+    AMDSMI_AVAILABLE = True
+except ImportError:
+    AMDSMI_AVAILABLE = False
+    logger.debug("amdsmi not available, AMD GPU detection will be limited")
+
 
 @contextmanager
 def nvml_context():
@@ -204,47 +213,105 @@ class GPUAllocator:
         self._lock = threading.RLock()  # Protects slots and _used_gpus
 
     def _detect_gpus(self) -> list[GPUInfo]:
-        """Auto-detect available GPUs via nvidia-ml-py (NVML)."""
-        if not NVML_AVAILABLE:
-            logger.warning("nvidia-ml-py not available - no GPUs detected")
-            return []
-
-        # Check for CUDA_VISIBLE_DEVICES restriction
-        visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+        """Auto-detect available GPUs via nvidia-ml-py (NVML) or amdsmi."""
+        # Check for CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES restriction
+        visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES") or os.environ.get(
+            "HIP_VISIBLE_DEVICES"
+        )
         allowed_ids: set[int] | None = None
         if visible_devices:
             allowed_ids = set(int(x) for x in visible_devices.split(",") if x.strip())
 
+        # Try NVIDIA first
+        if NVML_AVAILABLE:
+            gpus = self._detect_gpus_nvml(allowed_ids)
+            if gpus:
+                return gpus
+
+        # Try AMD
+        if AMDSMI_AVAILABLE:
+            gpus = self._detect_gpus_amdsmi(allowed_ids)
+            if gpus:
+                return gpus
+
+        logger.warning("No GPU detection library available - no GPUs detected")
+        return []
+
+    def _detect_gpus_nvml(self, allowed_ids: set[int] | None) -> list[GPUInfo]:
+        """Detect GPUs via NVIDIA NVML."""
         try:
             with nvml_context():
                 device_count = pynvml.nvmlDeviceGetCount()
 
                 gpus = []
                 for idx in range(device_count):
-                    # Skip GPUs not in CUDA_VISIBLE_DEVICES if set
                     if allowed_ids is not None and idx not in allowed_ids:
                         continue
 
                     handle = pynvml.nvmlDeviceGetHandleByIndex(idx)
                     name = pynvml.nvmlDeviceGetName(handle)
-                    # Handle bytes vs string return type (varies by pynvml version)
                     if isinstance(name, bytes):
                         name = name.decode("utf-8", errors="replace")
                     mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                    # Convert bytes to MB
                     memory_mb = mem_info.total // (1024 * 1024)
 
                     gpus.append(GPUInfo(idx, name, memory_mb))
 
-            logger.info("Detected %d GPUs: %s", len(gpus), [g.name for g in gpus])
+            logger.info("Detected %d NVIDIA GPUs: %s", len(gpus), [g.name for g in gpus])
             return gpus
 
         except pynvml.NVMLError as e:
             logger.warning("NVML error during GPU detection: %s", e)
             return []
         except Exception as e:
-            logger.warning("Failed to detect GPUs: %s", e)
+            logger.warning("Failed to detect NVIDIA GPUs: %s", e)
             return []
+
+    def _detect_gpus_amdsmi(self, allowed_ids: set[int] | None) -> list[GPUInfo]:
+        """Detect GPUs via AMD SMI."""
+        try:
+            amdsmi.amdsmi_init()
+            handles = amdsmi.amdsmi_get_processor_handles()
+
+            gpus = []
+            for idx, handle in enumerate(handles):
+                if allowed_ids is not None and idx not in allowed_ids:
+                    continue
+
+                try:
+                    info = amdsmi.amdsmi_get_gpu_asic_info(handle)
+                    name = info.get("market_name", f"AMD GPU {idx}")
+                    if isinstance(name, bytes):
+                        name = name.decode("utf-8", errors="replace")
+                except Exception:
+                    name = f"AMD GPU {idx}"
+
+                try:
+                    vram_info = amdsmi.amdsmi_get_gpu_vram_info(handle)
+                    memory_mb = vram_info.get("vram_size_mb", 0)
+                    if memory_mb == 0:
+                        # Fallback: try memory total
+                        mem_usage = amdsmi.amdsmi_get_gpu_memory_total(
+                            handle, amdsmi.AmdSmiMemoryType.VRAM
+                        )
+                        memory_mb = mem_usage // (1024 * 1024)
+                except Exception:
+                    # Default to 256GB for MI355X if detection fails
+                    memory_mb = 256 * 1024
+
+                gpus.append(GPUInfo(idx, name, memory_mb))
+
+            logger.info("Detected %d AMD GPUs: %s", len(gpus), [g.name for g in gpus])
+            return gpus
+
+        except Exception as e:
+            logger.warning("Failed to detect AMD GPUs: %s", e)
+            return []
+        finally:
+            try:
+                amdsmi.amdsmi_shut_down()
+            except Exception:
+                pass
 
     def allocate_slots(
         self, model_specs: dict[str, dict], preserve_order: bool = False

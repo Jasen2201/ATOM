@@ -284,11 +284,12 @@ def get_pool_requirements() -> list["WorkerIdentity"]:
 def _count_gpus_without_cuda() -> int:
     """Count available GPUs without initializing CUDA.
 
-    Uses nvidia-smi to avoid CUDA initialization, which is critical for
-    pytest-parallel compatibility. CUDA cannot be re-initialized after a fork.
+    Uses nvidia-smi or rocm-smi to avoid CUDA initialization, which is critical
+    for pytest-parallel compatibility. CUDA cannot be re-initialized after a fork.
     """
     import subprocess
 
+    # Try NVIDIA first
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
@@ -297,9 +298,31 @@ def _count_gpus_without_cuda() -> int:
             timeout=10,
         )
         if result.returncode == 0:
-            return len([line for line in result.stdout.strip().split("\n") if line])
+            count = len([line for line in result.stdout.strip().split("\n") if line])
+            if count > 0:
+                return count
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
         pass
+
+    # Try AMD ROCm
+    try:
+        result = subprocess.run(
+            ["rocm-smi", "--showid"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            count = sum(
+                1
+                for line in result.stdout.split("\n")
+                if line.strip().startswith("GPU[")
+            )
+            if count > 0:
+                return count
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        pass
+
     return 0
 
 

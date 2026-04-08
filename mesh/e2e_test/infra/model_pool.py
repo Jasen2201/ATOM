@@ -492,6 +492,11 @@ class ModelPool:
         if gpu_slot:
             env["CUDA_VISIBLE_DEVICES"] = gpu_slot.cuda_visible_devices()
 
+        # ATOM/AITER environment for MI355X (gfx950) compatibility
+        env.setdefault("SGLANG_EXTERNAL_MODEL_PACKAGE", "atom.plugin.sglang.models")
+        env.setdefault("SGLANG_USE_AITER", "1")
+        env.setdefault("AITER_LOG_LEVEL", "WARNING")
+
         # Build command
         cmd = [
             "python3",
@@ -507,6 +512,9 @@ class ModelPool:
             str(tp_size),
             "--log-level",
             "warning",
+            "--attention-backend",
+            "aiter",
+            "--trust-remote-code",
         ]
 
         if mode == ConnectionMode.GRPC:

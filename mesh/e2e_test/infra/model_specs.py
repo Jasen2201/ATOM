@@ -91,6 +91,14 @@ MODEL_SPECS: dict[str, dict] = {
         "tp": 2,
         "features": ["chat", "streaming", "reasoning", "harmony"],
     },
+    # DeepSeek-R1 (full, DeepseekV3ForCausalLM - supported by ATOM plugin)
+    "deepseek-r1": {
+        "model": _resolve_model_path("deepseek-ai/DeepSeek-R1"),
+        "memory_gb": 256,
+        "tp": 8,
+        "features": ["chat", "streaming", "reasoning"],
+        "worker_args": ["--kv-cache-dtype", "fp8_e4m3"],
+    },
 }
 
 
