@@ -1487,4 +1487,288 @@ mod tests {
         assert_eq!(prefill_ref.load(), 0);
         assert_eq!(decode_ref.load(), 0);
     }
+
+    // --- select_pd_pair tests ---
+
+    #[tokio::test]
+    async fn test_select_pd_pair_no_decode_workers() {
+        let router = create_test_pd_router();
+
+        let prefill = create_test_worker(
+            "http://prefill".to_string(),
+            WorkerType::Prefill {
+                bootstrap_port: None,
+            },
+            true,
+        );
+        router.worker_registry.register(Arc::from(prefill));
+
+        let result = router.select_pd_pair(None, None, None).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("decode"));
+    }
+
+    #[tokio::test]
+    async fn test_select_pd_pair_all_unhealthy() {
+        let router = create_test_pd_router();
+
+        let prefill = create_test_worker(
+            "http://prefill".to_string(),
+            WorkerType::Prefill {
+                bootstrap_port: None,
+            },
+            false,
+        );
+        let decode = create_test_worker("http://decode".to_string(), WorkerType::Decode, true);
+        router.worker_registry.register(Arc::from(prefill));
+        router.worker_registry.register(Arc::from(decode));
+
+        let result = router.select_pd_pair(None, None, None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_select_pd_pair_multiple_workers() {
+        let router = create_test_pd_router();
+
+        for i in 0..3 {
+            let prefill = create_test_worker(
+                format!("http://prefill-{}", i),
+                WorkerType::Prefill {
+                    bootstrap_port: None,
+                },
+                true,
+            );
+            let decode = create_test_worker(
+                format!("http://decode-{}", i),
+                WorkerType::Decode,
+                true,
+            );
+            router.worker_registry.register(Arc::from(prefill));
+            router.worker_registry.register(Arc::from(decode));
+        }
+
+        let result = router.select_pd_pair(None, None, None).await;
+        assert!(result.is_ok());
+        let (p, d) = result.unwrap();
+        assert!(p.url().starts_with("http://prefill-"));
+        assert!(d.url().starts_with("http://decode-"));
+    }
+
+    // --- get_chat_batch_size / get_generate_batch_size ---
+
+    #[test]
+    fn test_get_chat_batch_size_none() {
+        let req: ChatCompletionRequest = serde_json::from_str(
+            r#"{"model": "test", "messages": [{"role": "user", "content": "hi"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(PDRouter::get_chat_batch_size(&req), None);
+    }
+
+    #[test]
+    fn test_get_chat_batch_size_n_1() {
+        let req: ChatCompletionRequest = serde_json::from_str(
+            r#"{"model": "test", "messages": [{"role": "user", "content": "hi"}], "n": 1}"#,
+        )
+        .unwrap();
+        assert_eq!(PDRouter::get_chat_batch_size(&req), None);
+    }
+
+    #[test]
+    fn test_get_chat_batch_size_n_4() {
+        let req: ChatCompletionRequest = serde_json::from_str(
+            r#"{"model": "test", "messages": [{"role": "user", "content": "hi"}], "n": 4}"#,
+        )
+        .unwrap();
+        assert_eq!(PDRouter::get_chat_batch_size(&req), Some(4));
+    }
+
+    // --- merge_logprobs_in_json ---
+
+    #[test]
+    fn test_merge_logprobs_basic() {
+        let prefill_json = json!({
+            "meta_info": {
+                "input_token_logprobs": [1.0, 2.0, 3.0]
+            }
+        });
+        let mut decode_json = json!({
+            "meta_info": {
+                "input_token_logprobs": [4.0, 5.0]
+            }
+        });
+
+        let result = PDRouter::merge_logprobs_in_json(&prefill_json, &mut decode_json);
+        assert!(result);
+
+        let merged = decode_json["meta_info"]["input_token_logprobs"]
+            .as_array()
+            .unwrap();
+        assert_eq!(merged.len(), 5);
+        assert_eq!(merged[0], 1.0);
+        assert_eq!(merged[4], 5.0);
+    }
+
+    #[test]
+    fn test_merge_logprobs_no_meta_info() {
+        let prefill_json = json!({"text": "hello"});
+        let mut decode_json = json!({"text": "world"});
+        assert!(!PDRouter::merge_logprobs_in_json(
+            &prefill_json,
+            &mut decode_json
+        ));
+    }
+
+    #[test]
+    fn test_merge_logprobs_empty_prefill() {
+        let prefill_json = json!({
+            "meta_info": {
+                "input_token_logprobs": []
+            }
+        });
+        let mut decode_json = json!({
+            "meta_info": {
+                "input_token_logprobs": [1.0, 2.0]
+            }
+        });
+
+        let result = PDRouter::merge_logprobs_in_json(&prefill_json, &mut decode_json);
+        assert!(result);
+        let merged = decode_json["meta_info"]["input_token_logprobs"]
+            .as_array()
+            .unwrap();
+        assert_eq!(merged.len(), 2);
+    }
+
+    // --- merge_streaming_logprobs ---
+
+    #[test]
+    fn test_merge_streaming_logprobs_non_data_chunk() {
+        let result = PDRouter::merge_streaming_logprobs(None, b"event: heartbeat\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_streaming_logprobs_done_chunk() {
+        let result = PDRouter::merge_streaming_logprobs(None, b"data: [DONE]\n\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_streaming_logprobs_no_prefill() {
+        let chunk = b"data: {\"meta_info\":{\"input_token_logprobs\":[1.0]}}\n\n";
+        let result = PDRouter::merge_streaming_logprobs(None, chunk);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_merge_streaming_logprobs_with_prefill() {
+        let prefill_logprobs = json!([0.1, 0.2]);
+        let chunk = b"data: {\"meta_info\":{\"input_token_logprobs\":[0.3]}}\n\n";
+        let result = PDRouter::merge_streaming_logprobs(Some(prefill_logprobs), chunk);
+        assert!(result.is_ok());
+        let bytes = result.unwrap();
+        let s = std::str::from_utf8(&bytes).unwrap();
+        assert!(s.starts_with("data: "));
+        let json_str = s.trim_start_matches("data: ").trim();
+        let parsed: Value = serde_json::from_str(json_str).unwrap();
+        let logprobs = parsed["meta_info"]["input_token_logprobs"]
+            .as_array()
+            .unwrap();
+        assert_eq!(logprobs.len(), 3); // 2 prefill + 1 decode
+    }
+
+    // --- policies_need_request_text ---
+
+    #[test]
+    fn test_policies_need_request_text_default() {
+        let router = create_test_pd_router();
+        // Default RoundRobin doesn't need request text
+        assert!(!router.policies_need_request_text());
+    }
+
+    #[test]
+    fn test_policies_need_request_text_cache_aware() {
+        let router = create_test_pd_router();
+        router.policy_registry.set_prefill_policy(Arc::new(
+            crate::policies::CacheAwarePolicy::new(),
+        ));
+        assert!(router.policies_need_request_text());
+    }
+
+    // --- handle_server_selection_error ---
+
+    #[test]
+    fn test_handle_server_selection_error() {
+        let response = PDRouter::handle_server_selection_error("test error".to_string());
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn test_handle_serialization_error() {
+        let response = PDRouter::handle_serialization_error("bad json");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // --- inject_bootstrap_into_value ---
+
+    #[test]
+    fn test_inject_bootstrap_no_batch() {
+        let worker = BasicWorkerBuilder::new("http://prefill:8000")
+            .worker_type(WorkerType::Prefill {
+                bootstrap_port: Some(9000),
+            })
+            .build();
+
+        let original = json!({"text": "hello"});
+        let result = PDRouter::inject_bootstrap_into_value(original, &worker, None);
+        assert!(result.is_ok());
+        let val = result.unwrap();
+        assert!(val.get("bootstrap_host").is_some());
+        assert!(val.get("bootstrap_port").is_some());
+        assert!(val.get("bootstrap_room").is_some());
+    }
+
+    #[test]
+    fn test_inject_bootstrap_with_batch() {
+        let worker = BasicWorkerBuilder::new("http://prefill:8000")
+            .worker_type(WorkerType::Prefill {
+                bootstrap_port: Some(9000),
+            })
+            .build();
+
+        let original = json!({"text": "hello"});
+        let result = PDRouter::inject_bootstrap_into_value(original, &worker, Some(3));
+        assert!(result.is_ok());
+        let val = result.unwrap();
+        // With batch, bootstrap fields should be arrays
+        let hosts = val["bootstrap_host"].as_array().unwrap();
+        assert_eq!(hosts.len(), 3);
+        let ports = val["bootstrap_port"].as_array().unwrap();
+        assert_eq!(ports.len(), 3);
+        let rooms = val["bootstrap_room"].as_array().unwrap();
+        assert_eq!(rooms.len(), 3);
+    }
+
+    #[test]
+    fn test_inject_bootstrap_non_object() {
+        let worker = BasicWorkerBuilder::new("http://prefill:8000")
+            .worker_type(WorkerType::Prefill {
+                bootstrap_port: None,
+            })
+            .build();
+
+        let original = json!("not an object");
+        let result = PDRouter::inject_bootstrap_into_value(original, &worker, None);
+        assert!(result.is_err());
+    }
+
+    // --- router_type ---
+
+    #[test]
+    fn test_router_type() {
+        let router = create_test_pd_router();
+        assert_eq!(router.router_type(), "pd");
+    }
 }
