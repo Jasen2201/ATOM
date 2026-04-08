@@ -317,4 +317,327 @@ mod tests {
         assert_eq!(backoffs.load(Ordering::Relaxed), cfg.max_retries - 1);
         assert_eq!(exhausted.load(Ordering::Relaxed), 1);
     }
+
+    // ===================== is_retryable_status tests =====================
+
+    #[test]
+    fn test_retryable_statuses() {
+        let retryable = [
+            StatusCode::REQUEST_TIMEOUT,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_GATEWAY,
+            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::GATEWAY_TIMEOUT,
+        ];
+        for status in retryable {
+            assert!(
+                is_retryable_status(status),
+                "{status} should be retryable"
+            );
+        }
+    }
+
+    #[test]
+    fn test_non_retryable_statuses() {
+        let non_retryable = [
+            StatusCode::OK,
+            StatusCode::CREATED,
+            StatusCode::NO_CONTENT,
+            StatusCode::BAD_REQUEST,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::NOT_FOUND,
+            StatusCode::METHOD_NOT_ALLOWED,
+            StatusCode::CONFLICT,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            StatusCode::NOT_IMPLEMENTED,
+        ];
+        for status in non_retryable {
+            assert!(
+                !is_retryable_status(status),
+                "{status} should NOT be retryable"
+            );
+        }
+    }
+
+    // ===================== BackoffCalculator tests =====================
+
+    #[test]
+    fn test_backoff_attempt_zero_returns_initial() {
+        let cfg = RetryConfig {
+            initial_backoff_ms: 50,
+            max_backoff_ms: 10_000,
+            backoff_multiplier: 2.0,
+            jitter_factor: 0.0,
+            max_retries: 5,
+        };
+        assert_eq!(
+            BackoffCalculator::calculate_delay(&cfg, 0),
+            Duration::from_millis(50)
+        );
+    }
+
+    #[test]
+    fn test_backoff_multiplier_less_than_one() {
+        let cfg = RetryConfig {
+            initial_backoff_ms: 1000,
+            max_backoff_ms: 10_000,
+            backoff_multiplier: 0.5,
+            jitter_factor: 0.0,
+            max_retries: 5,
+        };
+        // attempt 0: 1000 * 0.5^0 = 1000
+        assert_eq!(
+            BackoffCalculator::calculate_delay(&cfg, 0),
+            Duration::from_millis(1000)
+        );
+        // attempt 1: 1000 * 0.5^1 = 500
+        assert_eq!(
+            BackoffCalculator::calculate_delay(&cfg, 1),
+            Duration::from_millis(500)
+        );
+        // attempt 2: 1000 * 0.5^2 = 250
+        assert_eq!(
+            BackoffCalculator::calculate_delay(&cfg, 2),
+            Duration::from_millis(250)
+        );
+    }
+
+    #[test]
+    fn test_backoff_jitter_clamped_above_one() {
+        // jitter_factor > 1.0 should be clamped to 1.0
+        let cfg = RetryConfig {
+            initial_backoff_ms: 100,
+            max_backoff_ms: 10_000,
+            backoff_multiplier: 1.0,
+            jitter_factor: 5.0, // should clamp to 1.0
+            max_retries: 5,
+        };
+        // With jitter_factor clamped to 1.0, delay in [0, 200]
+        for _ in 0..100 {
+            let d = BackoffCalculator::calculate_delay(&cfg, 0).as_millis();
+            assert!(d <= 200, "delay {d} exceeds upper bound 200");
+        }
+    }
+
+    #[test]
+    fn test_backoff_jitter_never_negative_duration() {
+        let cfg = RetryConfig {
+            initial_backoff_ms: 1,
+            max_backoff_ms: 10_000,
+            backoff_multiplier: 1.0,
+            jitter_factor: 1.0,
+            max_retries: 5,
+        };
+        for _ in 0..200 {
+            let d = BackoffCalculator::calculate_delay(&cfg, 0);
+            // Duration cannot be negative but the code clamps to 0
+            assert!(d.as_millis() <= 2);
+        }
+    }
+
+    #[test]
+    fn test_backoff_zero_initial_backoff() {
+        let cfg = RetryConfig {
+            initial_backoff_ms: 0,
+            max_backoff_ms: 10_000,
+            backoff_multiplier: 2.0,
+            jitter_factor: 0.0,
+            max_retries: 5,
+        };
+        assert_eq!(
+            BackoffCalculator::calculate_delay(&cfg, 0),
+            Duration::from_millis(0)
+        );
+        assert_eq!(
+            BackoffCalculator::calculate_delay(&cfg, 5),
+            Duration::from_millis(0)
+        );
+    }
+
+    #[test]
+    fn test_backoff_large_attempt_saturates_at_max() {
+        let cfg = RetryConfig {
+            initial_backoff_ms: 1,
+            max_backoff_ms: 100,
+            backoff_multiplier: 10.0,
+            jitter_factor: 0.0,
+            max_retries: 100,
+        };
+        assert_eq!(
+            BackoffCalculator::calculate_delay(&cfg, 50),
+            Duration::from_millis(100)
+        );
+    }
+
+    // ===================== RetryError tests =====================
+
+    #[test]
+    fn test_retry_error_display() {
+        let err = RetryError::MaxRetriesExceeded;
+        assert_eq!(err.to_string(), "maximum retry attempts exceeded");
+    }
+
+    // ===================== RetryExecutor tests =====================
+
+    #[tokio::test]
+    async fn test_execute_max_retries_one_no_retry() {
+        let cfg = RetryConfig {
+            max_retries: 1,
+            initial_backoff_ms: 1,
+            max_backoff_ms: 10,
+            backoff_multiplier: 2.0,
+            jitter_factor: 0.0,
+        };
+        let calls = Arc::new(AtomicU32::new(0));
+        let exhausted = Arc::new(AtomicU32::new(0));
+
+        let response = RetryExecutor::execute_response_with_retry(
+            &cfg,
+            {
+                let calls = calls.clone();
+                move |_| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    async move { (StatusCode::SERVICE_UNAVAILABLE, "fail").into_response() }
+                }
+            },
+            |_res, _attempt| true,
+            |_delay, _next| {},
+            {
+                let exhausted = exhausted.clone();
+                move || {
+                    exhausted.fetch_add(1, Ordering::Relaxed);
+                }
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(exhausted.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn test_execute_immediate_success() {
+        let cfg = base_retry_config();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let response = RetryExecutor::execute_response_with_retry(
+            &cfg,
+            {
+                let calls = calls.clone();
+                move |_| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    async move { (StatusCode::OK, "ok").into_response() }
+                }
+            },
+            |res, _| !res.status().is_success(),
+            |_, _| {},
+            || {},
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn test_execute_attempt_indices_passed_correctly() {
+        let cfg = RetryConfig {
+            max_retries: 4,
+            initial_backoff_ms: 1,
+            max_backoff_ms: 10,
+            backoff_multiplier: 1.0,
+            jitter_factor: 0.0,
+        };
+        let seen_attempts = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_backoff_nexts = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let response = RetryExecutor::execute_response_with_retry(
+            &cfg,
+            {
+                let seen = seen_attempts.clone();
+                move |attempt| {
+                    seen.lock().unwrap().push(attempt);
+                    async move { (StatusCode::SERVICE_UNAVAILABLE, "fail").into_response() }
+                }
+            },
+            |_res, _| true,
+            {
+                let seen = seen_backoff_nexts.clone();
+                move |_delay, next| {
+                    seen.lock().unwrap().push(next);
+                }
+            },
+            || {},
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(*seen_attempts.lock().unwrap(), vec![0, 1, 2, 3]);
+        assert_eq!(*seen_backoff_nexts.lock().unwrap(), vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_execute_max_retries_zero_treated_as_one() {
+        // max_retries = 0 should be clamped to 1 by .max(1)
+        let cfg = RetryConfig {
+            max_retries: 0,
+            initial_backoff_ms: 1,
+            max_backoff_ms: 10,
+            backoff_multiplier: 2.0,
+            jitter_factor: 0.0,
+        };
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let response = RetryExecutor::execute_response_with_retry(
+            &cfg,
+            {
+                let calls = calls.clone();
+                move |_| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    async move { (StatusCode::SERVICE_UNAVAILABLE, "fail").into_response() }
+                }
+            },
+            |_res, _| true,
+            |_, _| {},
+            || {},
+        )
+        .await;
+
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_execute_should_retry_receives_response_status() {
+        let cfg = base_retry_config();
+        let statuses_seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        RetryExecutor::execute_response_with_retry(
+            &cfg,
+            |attempt| async move {
+                if attempt == 0 {
+                    (StatusCode::BAD_GATEWAY, "bg").into_response()
+                } else {
+                    (StatusCode::OK, "ok").into_response()
+                }
+            },
+            {
+                let seen = statuses_seen.clone();
+                move |res, _| {
+                    seen.lock().unwrap().push(res.status());
+                    !res.status().is_success()
+                }
+            },
+            |_, _| {},
+            || {},
+        )
+        .await;
+
+        let seen = statuses_seen.lock().unwrap();
+        assert_eq!(seen[0], StatusCode::BAD_GATEWAY);
+        assert_eq!(seen[1], StatusCode::OK);
+    }
 }
