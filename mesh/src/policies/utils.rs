@@ -107,4 +107,48 @@ mod tests {
         // Should shutdown within ~200ms (2 check intervals), not 60 seconds
         assert!(elapsed < Duration::from_millis(500));
     }
+
+    #[test]
+    fn test_periodic_task_multiple_executions() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_clone = Arc::clone(&counter);
+
+        let _task = PeriodicTask::spawn(1, "multi_test", move || {
+            counter_clone.fetch_add(1, Ordering::SeqCst);
+        });
+
+        // Wait for at least 2 intervals
+        thread::sleep(Duration::from_millis(2500));
+        assert!(counter.load(Ordering::SeqCst) >= 2);
+    }
+
+    #[test]
+    fn test_periodic_task_debug_format() {
+        let task = PeriodicTask::spawn(60, "debug_test", || {});
+        let debug = format!("{:?}", task);
+        assert!(debug.contains("debug_test"));
+        drop(task);
+    }
+
+    #[test]
+    fn test_periodic_task_immediate_drop() {
+        // Drop immediately before first execution — should not panic
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_clone = Arc::clone(&counter);
+
+        let task = PeriodicTask::spawn(10, "immediate_drop", move || {
+            counter_clone.fetch_add(1, Ordering::SeqCst);
+        });
+        drop(task);
+
+        // Should not have executed
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_periodic_task_name_preserved() {
+        let task = PeriodicTask::spawn(60, "my_task_name", || {});
+        assert_eq!(task.debug_name, "my_task_name");
+        drop(task);
+    }
 }
