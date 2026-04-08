@@ -749,7 +749,6 @@ impl Router {
                     .control_plane_auth
                     .as_ref()
                     .map(|c| c.to_auth_control_plane_config()),
-                mesh_server_config: None,
             })
             .await
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))

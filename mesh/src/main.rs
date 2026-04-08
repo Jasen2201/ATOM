@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
-use rand::{distr::Alphanumeric, Rng};
 use mesh::{
     config::{
         CircuitBreakerConfig, ConfigResult, DiscoveryConfig, HealthCheckConfig,
@@ -18,7 +17,6 @@ use mesh::{
     service_discovery::ServiceDiscoveryConfig,
     version,
 };
-use mesh_sync::service::MeshServerConfig;
 fn parse_prefill_args() -> Vec<(String, Option<u16>)> {
     let args: Vec<String> = std::env::args().collect();
     let mut prefill_entries = Vec::new();
@@ -426,22 +424,6 @@ struct CliArgs {
     /// API key for worker connections
     #[arg(long, help_heading = "Control Plane Authentication")]
     api_key: Option<String>,
-
-    // ==================== Mesh Server ====================
-    #[arg(long, default_value_t = false)]
-    enable_mesh: bool,
-
-    #[arg(long)]
-    mesh_server_name: Option<String>,
-
-    #[arg(long, default_value = "0.0.0.0")]
-    mesh_host: String,
-
-    #[arg(long, default_value_t = 39527)]
-    mesh_port: u16,
-
-    #[arg(long, num_args = 0..)]
-    mesh_peer_urls: Vec<String>,
 }
 
 impl CliArgs {
@@ -657,38 +639,6 @@ impl CliArgs {
             },
         });
 
-        // ==================== Mesh Server ====================
-        let mesh_server_config = if self.enable_mesh {
-            let self_name = if let Some(name) = &self.mesh_server_name {
-                name.to_string()
-            } else {
-                // If name is not set, use a random name
-                let mut rng = rand::rng();
-                let random_string: String =
-                    (0..4).map(|_| rng.sample(Alphanumeric) as char).collect();
-                format!("Mesh_{}", random_string)
-            };
-
-            let peer = self
-                .mesh_peer_urls
-                .first()
-                .and_then(|url| url.parse::<std::net::SocketAddr>().ok());
-            if let Ok(addr) =
-                format!("{}:{}", self.mesh_host, self.mesh_port).parse::<std::net::SocketAddr>()
-            {
-                Some(MeshServerConfig {
-                    self_name,
-                    self_addr: addr,
-                    init_peer: peer,
-                })
-            } else {
-                tracing::warn!("Invalid mesh server address, so mesh server will not be started");
-                None
-            }
-        } else {
-            None
-        };
-
         ServerConfig {
             host: self.host.clone(),
             port: self.port,
@@ -706,7 +656,6 @@ impl CliArgs {
                 Some(self.request_id_headers.clone())
             },
             shutdown_grace_period_secs: self.shutdown_grace_period_secs,
-            mesh_server_config,
         }
     }
 }

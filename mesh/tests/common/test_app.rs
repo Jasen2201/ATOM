@@ -89,8 +89,6 @@ pub fn create_test_app(
         context: app_context,
         concurrency_queue_tx: None,
         router_manager: None,
-        mesh_handler: None,
-        mesh_sync_manager: None,
     });
 
     // Configure request ID headers (use defaults if not specified)
@@ -123,8 +121,6 @@ pub fn create_test_app_with_context(
         context: app_context.clone(),
         concurrency_queue_tx: None,
         router_manager: None,
-        mesh_handler: None,
-        mesh_sync_manager: None,
     });
 
     // Get config from the context

@@ -15,10 +15,6 @@ use kube::{
     Client,
 };
 use rustls;
-use mesh_sync::service::{
-    gossip::{NodeState, NodeStatus},
-    ClusterState,
-};
 use tokio::{task, time};
 use tracing::{debug, error, info, warn};
 
@@ -206,8 +202,6 @@ impl PodInfo {
 pub async fn start_service_discovery(
     config: ServiceDiscoveryConfig,
     app_context: Arc<AppContext>,
-    mesh_cluster_state: Option<ClusterState>,
-    mesh_port: Option<u16>,
 ) -> Result<task::JoinHandle<()>, kube::Error> {
     if !config.enabled {
         return Err(kube::Error::Api(kube::error::ErrorResponse {
@@ -256,20 +250,6 @@ pub async fn start_service_discovery(
         );
     }
 
-    // Log router discovery if enabled
-    if !config.router_selector.is_empty() {
-        let router_selector = config
-            .router_selector
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join(",");
-        info!(
-            "Router node discovery enabled | selector: '{}' | mesh port annotation: '{}'",
-            router_selector, config.router_mesh_port_annotation
-        );
-    }
-
     let handle = task::spawn(async move {
         let tracked_pods = Arc::new(Mutex::new(HashSet::new()));
 
@@ -283,27 +263,6 @@ pub async fn start_service_discovery(
 
         let config_arc = Arc::new(config.clone());
         let port = config.port;
-
-        // Spawn router discovery task if enabled and mesh is available
-        // Router discovery requires mesh to be enabled to update cluster state
-        // If mesh is not enabled, router discovery is skipped and service discovery works independently
-        if !config_arc.router_selector.is_empty() {
-            if let (Some(cluster_state), Some(mesh_port)) = (mesh_cluster_state.clone(), mesh_port)
-            {
-                let router_config = config_arc.clone();
-                let router_pods = pods.clone();
-                tokio::spawn(async move {
-                    start_router_discovery(router_config, router_pods, cluster_state, mesh_port)
-                        .await;
-                });
-                info!("Router discovery enabled (requires mesh to be enabled)");
-            } else {
-                warn!(
-                    "Router selector configured but mesh is not enabled (mesh cluster state or mesh port not provided). \
-                    Router discovery requires mesh to be enabled. Skipping router discovery."
-                );
-            }
-        }
 
         let mut retry_delay = Duration::from_secs(1);
         const MAX_RETRY_DELAY: Duration = Duration::from_secs(300);
@@ -593,139 +552,6 @@ async fn handle_pod_deletion(
             "Pod deletion event for untracked/already removed pod: {} (type: {:?}). Worker URL: {}",
             pod_info.name, pod_info.pod_type, worker_url
         );
-    }
-}
-
-/// Start router node discovery for mesh cluster
-async fn start_router_discovery(
-    config: Arc<ServiceDiscoveryConfig>,
-    pods: Api<Pod>,
-    cluster_state: ClusterState,
-    default_mesh_port: u16,
-) {
-    use std::collections::HashMap;
-
-    let mut retry_delay = Duration::from_secs(1);
-    const MAX_RETRY_DELAY: Duration = Duration::from_secs(300);
-
-    loop {
-        let watcher_config = Config::default();
-        let watcher_stream = watcher(pods.clone(), watcher_config).applied_objects();
-
-        let config_clone = Arc::clone(&config);
-
-        let filtered_stream = watcher_stream.filter_map(move |obj_res| {
-            let config_inner = Arc::clone(&config_clone);
-
-            async move {
-                match obj_res {
-                    Ok(pod) => {
-                        // Check if this pod matches router selector
-                        if PodInfo::matches_selector(&pod, &config_inner.router_selector) {
-                            Some(Ok(pod))
-                        } else {
-                            None
-                        }
-                    }
-                    Err(e) => Some(Err(e)),
-                }
-            }
-        });
-
-        let config_clone2 = Arc::clone(&config);
-        let cluster_state_clone2 = cluster_state.clone();
-
-        match filtered_stream
-            .try_for_each(move |pod| {
-                let config_inner = Arc::clone(&config_clone2);
-                let cluster_state_inner = cluster_state_clone2.clone();
-
-                async move {
-                    let pod_info = PodInfo::from_pod(&pod, Some(&config_inner));
-
-                    if let Some(pod_info) = pod_info {
-                        if pod_info.is_router {
-                            let mesh_port = pod_info.mesh_port.unwrap_or(default_mesh_port);
-                            let node_address = format!("{}:{}", pod_info.ip, mesh_port);
-
-                            if pod.metadata.deletion_timestamp.is_some() {
-                                // Pod is being deleted, mark node as Down
-                                let mut state = cluster_state_inner.write();
-                                if let Some(node) = state.get_mut(&pod_info.name) {
-                                    node.status = NodeStatus::Down as i32;
-                                    node.version += 1;
-                                    info!(
-                                        "Router node {} marked as Down (pod deleted)",
-                                        pod_info.name
-                                    );
-                                } else {
-                                    debug!(
-                                        "Router node {} not found in cluster state (already removed)",
-                                        pod_info.name
-                                    );
-                                }
-                            } else if pod_info.is_healthy() {
-                                // Pod is healthy, add or update node in cluster state
-                                let mut state = cluster_state_inner.write();
-                                let existing_version = state
-                                    .get(&pod_info.name)
-                                    .map(|n| n.version)
-                                    .unwrap_or(0);
-
-                                let node_state = NodeState {
-                                    name: pod_info.name.clone(),
-                                    address: node_address,
-                                    status: NodeStatus::Alive as i32,
-                                    version: existing_version + 1,
-                                    metadata: HashMap::new(),
-                                };
-
-                                state.insert(pod_info.name.clone(), node_state.clone());
-                                info!(
-                                    "Router node {} added/updated in mesh cluster (address: {})",
-                                    pod_info.name, node_state.address
-                                );
-                            } else {
-                                // Pod is not healthy, mark as Suspected
-                                let mut state = cluster_state_inner.write();
-                                if let Some(node) = state.get_mut(&pod_info.name) {
-                                    if node.status != NodeStatus::Down as i32 {
-                                        node.status = NodeStatus::Suspected as i32;
-                                        node.version += 1;
-                                        debug!(
-                                            "Router node {} marked as Suspected (pod not healthy)",
-                                            pod_info.name
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Ok(())
-                }
-            })
-            .await
-        {
-            Ok(_) => {
-                retry_delay = Duration::from_secs(1);
-            }
-            Err(err) => {
-                error!("Error in router discovery watcher: {}", err);
-                warn!(
-                    "Retrying router discovery in {} seconds with exponential backoff",
-                    retry_delay.as_secs()
-                );
-                time::sleep(retry_delay).await;
-
-                retry_delay = std::cmp::min(retry_delay * 2, MAX_RETRY_DELAY);
-            }
-        }
-
-        warn!(
-            "Router discovery watcher exited, restarting in {} seconds",
-            config.check_interval.as_secs()
-        );
-        time::sleep(config.check_interval).await;
     }
 }
 
