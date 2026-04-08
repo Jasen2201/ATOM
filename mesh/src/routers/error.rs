@@ -18,7 +18,7 @@ struct ErrorDetail<'a> {
     message: &'a str,
 }
 
-pub const HEADER_X_SMG_ERROR_CODE: &str = "X-SMG-Error-Code";
+pub const HEADER_X_MESH_ERROR_CODE: &str = "X-Mesh-Error-Code";
 
 pub fn internal_error(code: impl Into<String>, message: impl Into<String>) -> Response {
     create_error(StatusCode::INTERNAL_SERVER_ERROR, code, message)
@@ -62,7 +62,7 @@ pub fn create_error(
 
     let mut headers = HeaderMap::with_capacity(1);
     headers.insert(
-        HEADER_X_SMG_ERROR_CODE,
+        HEADER_X_MESH_ERROR_CODE,
         HeaderValue::from_str(&code_str).unwrap(),
     );
 
@@ -89,7 +89,7 @@ fn status_code_to_str(status_code: StatusCode) -> &'static str {
 pub fn extract_error_code_from_response<B>(response: &Response<B>) -> &str {
     response
         .headers()
-        .get(HEADER_X_SMG_ERROR_CODE)
+        .get(HEADER_X_MESH_ERROR_CODE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
 }

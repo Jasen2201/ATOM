@@ -14,7 +14,7 @@ use crate::policies::utils::PeriodicTask;
 static INFLIGHT_AGE_BOUNDS: BucketBounds<11> =
     BucketBounds::new([30, 60, 180, 300, 600, 1200, 3600, 7200, 14400, 28800, 86400]);
 static INFLIGHT_AGE_HISTOGRAM: GaugeHistogramVec<11> =
-    GaugeHistogramVec::new("smg_http_inflight_request_age_count", &INFLIGHT_AGE_BOUNDS);
+    GaugeHistogramVec::new("mesh_http_inflight_request_age_count", &INFLIGHT_AGE_BOUNDS);
 static INFLIGHT_AGE_HANDLE: LazyLock<GaugeHistogramHandle> =
     LazyLock::new(|| INFLIGHT_AGE_HISTOGRAM.register_no_labels());
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Script 3: Start PD Proxy - SGLang Multi-Node (sgl-model-gateway)
-# Routes requests through Prefill -> Decode across nodes via smg.
+# Script 3: Start PD Proxy - SGLang Multi-Node (atom-mesh)
+# Routes requests through Prefill -> Decode across nodes via mesh.
 # Run this INSIDE the docker container on the prefill node.
 #
 # Supports multi-prefill and multi-decode via environment variables.
@@ -11,17 +11,17 @@
 #
 # Usage:
 #   # 1P1D (default)
-#   PREFILL_MGMT_IP=10.28.104.181 DECODE_MGMT_IP=10.28.104.183 bash 3_start_proxy_smg.sh
+#   PREFILL_MGMT_IP=10.28.104.181 DECODE_MGMT_IP=10.28.104.183 bash 3_start_proxy_mesh.sh
 #
 #   # 2P1D (two prefill instances on same node)
 #   PREFILL_MGMT_IP=10.28.104.181 DECODE_MGMT_IP=10.28.104.183 \
 #       NUM_PREFILLS=2 PREFILL_PORT_2=8011 BOOTSTRAP_PORT_2=8999 \
-#       bash 3_start_proxy_smg.sh
+#       bash 3_start_proxy_mesh.sh
 #
 #   # 1P2D (two decode nodes)
 #   PREFILL_MGMT_IP=10.28.104.181 \
 #       DECODE_MGMT_IP=10.28.104.183 DECODE_MGMT_IP_2=10.28.104.181 \
-#       NUM_DECODES=2 bash 3_start_proxy_smg.sh
+#       NUM_DECODES=2 bash 3_start_proxy_mesh.sh
 # =============================================================================
 set -euo pipefail
 
@@ -51,16 +51,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "${LOG_DIR}"
 
-# smg binary
-SMG_BIN="${SMG_BIN:-/usr/local/bin/smg}"
-if [[ ! -x "${SMG_BIN}" ]]; then
+# mesh binary
+MESH_BIN="${MESH_BIN:-/usr/local/bin/mesh}"
+if [[ ! -x "${MESH_BIN}" ]]; then
     PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-    SMG_BIN="${PROJECT_ROOT}/target/release/smg"
+    MESH_BIN="${PROJECT_ROOT}/target/release/mesh"
 fi
 
 echo ""
 echo "============================================================"
-echo "  PD Proxy - SGLang Multi-Node (sgl-model-gateway)"
+echo "  PD Proxy - SGLang Multi-Node (atom-mesh)"
 echo "============================================================"
 echo " Prefill 1:  http://${PREFILL_MGMT_IP}:${PREFILL_PORT} (bootstrap=${BOOTSTRAP_PORT})"
 if [[ "${NUM_PREFILLS}" -ge 2 ]]; then
@@ -73,12 +73,12 @@ fi
 echo " Proxy:      0.0.0.0:${PROXY_PORT}"
 echo " Policy:     ${POLICY}"
 echo " Backend:    ${BACKEND}"
-echo " SMG bin:    ${SMG_BIN}"
+echo " MESH bin:    ${MESH_BIN}"
 echo "============================================================"
 
-# ---- Verify smg binary ----
-if [[ ! -x "${SMG_BIN}" ]]; then
-    echo "FATAL: smg binary not found at ${SMG_BIN}"
+# ---- Verify mesh binary ----
+if [[ ! -x "${MESH_BIN}" ]]; then
+    echo "FATAL: mesh binary not found at ${MESH_BIN}"
     exit 1
 fi
 
@@ -116,9 +116,9 @@ if [[ "${NUM_DECODES}" -ge 2 ]] && [[ -n "${DECODE_MGMT_IP_2}" ]]; then
     wait_for_server "${DECODE_MGMT_IP_2}" "${DECODE_PORT_2}" "Decode-2" || exit 1
 fi
 
-# ---- Build smg command ----
-SMG_CMD=(
-    "${SMG_BIN}" launch
+# ---- Build mesh command ----
+MESH_CMD=(
+    "${MESH_BIN}" launch
     --host 0.0.0.0
     --port "${PROXY_PORT}"
     --pd-disaggregation
@@ -126,16 +126,16 @@ SMG_CMD=(
 )
 
 if [[ "${NUM_PREFILLS}" -ge 2 ]]; then
-    SMG_CMD+=(--prefill "http://${PREFILL_MGMT_IP_2}:${PREFILL_PORT_2}" "${BOOTSTRAP_PORT_2}")
+    MESH_CMD+=(--prefill "http://${PREFILL_MGMT_IP_2}:${PREFILL_PORT_2}" "${BOOTSTRAP_PORT_2}")
 fi
 
-SMG_CMD+=(--decode "http://${DECODE_MGMT_IP}:${DECODE_PORT}")
+MESH_CMD+=(--decode "http://${DECODE_MGMT_IP}:${DECODE_PORT}")
 
 if [[ "${NUM_DECODES}" -ge 2 ]] && [[ -n "${DECODE_MGMT_IP_2}" ]]; then
-    SMG_CMD+=(--decode "http://${DECODE_MGMT_IP_2}:${DECODE_PORT_2}")
+    MESH_CMD+=(--decode "http://${DECODE_MGMT_IP_2}:${DECODE_PORT_2}")
 fi
 
-SMG_CMD+=(
+MESH_CMD+=(
     --policy "${POLICY}"
     --backend "${BACKEND}"
     --log-dir "${LOG_DIR}"
@@ -144,5 +144,5 @@ SMG_CMD+=(
     --prometheus-port "${PROMETHEUS_PORT}"
 )
 
-echo "[launch] Starting sgl-model-gateway PD proxy on port ${PROXY_PORT}..."
-"${SMG_CMD[@]}" 2>&1 | tee "${LOG_DIR}/proxy_smg.log"
+echo "[launch] Starting atom-mesh PD proxy on port ${PROXY_PORT}..."
+"${MESH_CMD[@]}" 2>&1 | tee "${LOG_DIR}/proxy_mesh.log"

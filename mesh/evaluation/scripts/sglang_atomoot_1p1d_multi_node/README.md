@@ -1,8 +1,8 @@
 # SGLang + ATOM OOT 1P1D Multi-Node Demo
 
-Multi-node Prefill-Decode disaggregation using SGLang with Mooncake RDMA KV transfer and sgl-model-gateway (smg) as the PD proxy.
+Multi-node Prefill-Decode disaggregation using SGLang with Mooncake RDMA KV transfer and atom-mesh (mesh) as the PD proxy.
 
-Two physical nodes: one runs the prefill server, the other runs the decode server. The smg proxy can run on either node.
+Two physical nodes: one runs the prefill server, the other runs the decode server. The mesh proxy can run on either node.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ Two physical nodes: one runs the prefill server, the other runs the decode serve
                            |
                            v
                    +--------------+
-                   |  SMG Proxy   |  :8080  (PD routing)
+                   |  MESH Proxy   |  :8080  (PD routing)
                    |  (Script 3)  |
                    +------+-------+
                           |
@@ -60,11 +60,11 @@ DECODE_HANDSHAKE_IP=<this_node_mgmt_ip> bash 2_start_decode.sh
 
 Wait for: `The server is fired up and ready to roll!`
 
-### Step 4: Start SMG Proxy (on either node)
+### Step 4: Start MESH Proxy (on either node)
 
 ```bash
 docker exec -it mesh_dev bash
-PREFILL_MGMT_IP=<prefill_ip> DECODE_MGMT_IP=<decode_ip> bash 3_start_proxy_smg.sh
+PREFILL_MGMT_IP=<prefill_ip> DECODE_MGMT_IP=<decode_ip> bash 3_start_proxy_mesh.sh
 ```
 
 The proxy waits for both servers to be healthy before starting.
@@ -102,7 +102,7 @@ CONCURRENCY=64 INPUT_LEN=4096 OUTPUT_LEN=512 bash 5_bench_serving.sh
 | `0_setup_docker.sh` | Start docker container with GPU/RDMA access | Each node (host) |
 | `1_start_prefill.sh` | SGLang prefill server (TP=4/8, port 8010) | Prefill node (container) |
 | `2_start_decode.sh` | SGLang decode server (TP=8, port 8020) | Decode node (container) |
-| `3_start_proxy_smg.sh` | SMG PD proxy (port 8080) | Either node (container) |
+| `3_start_proxy_mesh.sh` | MESH PD proxy (port 8080) | Either node (container) |
 | `4_eval_gsm8k.sh` | GSM8K accuracy evaluation (50 questions) | Either node (container) |
 | `5_bench_serving.sh` | Performance benchmark via sglang.bench_serving | Either node (container) |
 
@@ -131,7 +131,7 @@ All logs are written to the `logs/` subdirectory:
 
 - `logs/prefill.log`
 - `logs/decode.log`
-- `logs/proxy_smg.log`
+- `logs/proxy_mesh.log`
 - `logs/gsm8k_eval.log`
 - `logs/gsm8k_results.json`
 - `logs/bench_serving.log`

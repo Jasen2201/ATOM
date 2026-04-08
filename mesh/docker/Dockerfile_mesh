@@ -132,39 +132,39 @@ RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then \
 
 ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/mooncake:${LD_LIBRARY_PATH}"
 
-# ========== [4/5] SMG (sgl-model-gateway) PD Proxy ==========
-ARG INSTALL_SMG=1
+# ========== [4/5] MESH (atom-mesh) PD Proxy ==========
+ARG INSTALL_MESH=1
 ARG MESH_REPO="https://github.com/Jasen2201/MESH.git"
 ARG MESH_BRANCH="main"
 ARG RUST_VERSION="1.94.0"
 
-RUN if [ "${INSTALL_SMG}" = "1" ]; then \
-        echo "========== [4/5 SMG 1/3] Install Rust toolchain =========="; \
+RUN if [ "${INSTALL_MESH}" = "1" ]; then \
+        echo "========== [4/5 MESH 1/3] Install Rust toolchain =========="; \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
             | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal \
         && . "$HOME/.cargo/env" \
         && rustc --version && cargo --version; \
     fi
 
-RUN if [ "${INSTALL_SMG}" = "1" ]; then \
-        echo "========== [4/5 SMG 2/3] Clone and build smg (release) =========="; \
+RUN if [ "${INSTALL_MESH}" = "1" ]; then \
+        echo "========== [4/5 MESH 2/3] Clone and build mesh (release) =========="; \
         . "$HOME/.cargo/env" \
         && git clone --branch "${MESH_BRANCH}" --depth 1 "${MESH_REPO}" /app/mesh \
         && cd /app/mesh \
         && echo "mesh commit: $(git rev-parse HEAD)" \
         && cargo build --release \
-        && strip target/release/smg \
-        && cp target/release/smg /usr/local/bin/smg \
-        && echo "smg installed:" && smg --version-verbose; \
+        && strip target/release/mesh \
+        && cp target/release/mesh /usr/local/bin/mesh \
+        && echo "mesh installed:" && mesh --version-verbose; \
     fi
 
-RUN if [ "${INSTALL_SMG}" = "1" ]; then \
-        echo "========== [4/5 SMG 3/3] Clean up build artifacts =========="; \
+RUN if [ "${INSTALL_MESH}" = "1" ]; then \
+        echo "========== [4/5 MESH 3/3] Clean up build artifacts =========="; \
         rm -rf /app/mesh/target /app/mesh/.git \
         && rustup self uninstall -y 2>/dev/null || true \
         && rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" \
-        && echo "smg binary:" && ls -lh /usr/local/bin/smg \
-        && echo "smg dependencies:" && ldd /usr/local/bin/smg; \
+        && echo "mesh binary:" && ls -lh /usr/local/bin/mesh \
+        && echo "mesh dependencies:" && ldd /usr/local/bin/mesh; \
     fi
 
 # ========== [5/5] SGLang: install from source with sgl-kernel (ROCm) ==========

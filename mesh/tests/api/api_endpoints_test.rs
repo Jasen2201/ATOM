@@ -4,7 +4,7 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::{config::RouterConfig, routers::RouterFactory};
+use mesh::{config::RouterConfig, routers::RouterFactory};
 use tower::ServiceExt;
 
 use crate::common::{

@@ -108,7 +108,7 @@ docker run -d \
 
 在**所有相关节点**上执行：
 ```bash
-ssh <node_ip> "docker exec <container> bash -c 'pkill -f \"sglang.launch_server\" 2>/dev/null; pkill -f \"smg launch\" 2>/dev/null'"
+ssh <node_ip> "docker exec <container> bash -c 'pkill -f \"sglang.launch_server\" 2>/dev/null; pkill -f \"mesh launch\" 2>/dev/null'"
 ```
 等待 5 秒后确认进程已清理。
 
@@ -190,10 +190,10 @@ ssh <node_ip> "docker exec <container> curl -s http://127.0.0.1:<port>/v1/models
 
 ### Step 5: 启动 Proxy
 
-使用 `smg launch`，支持多个 `--prefill` 和 `--decode`：
+使用 `mesh launch`，支持多个 `--prefill` 和 `--decode`：
 ```bash
 docker exec -d <container> bash -c '
-/usr/local/bin/smg launch \
+/usr/local/bin/mesh launch \
     --host 0.0.0.0 \
     --port 8080 \
     --pd-disaggregation \

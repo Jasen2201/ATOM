@@ -15,7 +15,7 @@ from setproctitle import setproctitle
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils.network import is_port_available
 
-from sglang_router.launch_router import RouterArgs, launch_router
+from mesh_router.launch_router import RouterArgs, launch_router
 
 
 def setup_logger():
@@ -155,7 +155,7 @@ def main():
     mp.set_start_method("spawn")
 
     parser = argparse.ArgumentParser(
-        description="Launch SGLang router and server processes"
+        description="Launch ATOM Mesh router and server processes"
     )
 
     ServerArgs.add_cli_args(parser)

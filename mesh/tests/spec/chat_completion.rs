@@ -1,5 +1,5 @@
 use serde_json::json;
-use smg::protocols::{
+use mesh::protocols::{
     chat::{ChatCompletionRequest, ChatMessage, MessageContent},
     common::{
         Function, FunctionCall, FunctionChoice, StreamOptions, Tool, ToolChoice, ToolChoiceValue,

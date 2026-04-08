@@ -1,6 +1,6 @@
 # vLLM + Mooncake 1P1D Single-Node Demo
 
-Single-node Prefill-Decode disaggregation demo using vLLM (with Mooncake KV transfer) and sgl-model-gateway (smg) as the PD proxy.
+Single-node Prefill-Decode disaggregation demo using vLLM (with Mooncake KV transfer) and atom-mesh (mesh) as the PD proxy.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ Client (GSM8K eval)
        │
        ▼
 ┌──────────────┐
-│  SMG Proxy   │  :8080  (PD routing)
+│  MESH Proxy   │  :8080  (PD routing)
 │  (Script 3)  │
 └──────┬───────┘
        │
@@ -29,19 +29,19 @@ Client (GSM8K eval)
 - **vLLM**: `pip install vllm` (tested with v0.1.dev)
 - **Mooncake**: KV transfer library installed (`/opt/venv/lib/python3.12/site-packages/mooncake`)
 - **Model**: Qwen3-8B-FP8-dynamic (default: `/mnt/raid0/RedHatAI/Qwen3-8B-FP8-dynamic`)
-- **smg binary**: Built from the mesh project root
+- **mesh binary**: Built from the mesh project root
 
-### Build smg
+### Build mesh
 
 ```bash
 # From project root (/home/yajizhan/code/mesh)
 cargo build --release
 
 # Verify
-./target/release/smg --version
+./target/release/mesh --version
 ```
 
-The scripts auto-detect the binary at `<project_root>/target/release/smg`. Override with `SMG_BIN` env var if needed.
+The scripts auto-detect the binary at `<project_root>/target/release/mesh`. Override with `MESH_BIN` env var if needed.
 
 ## Usage
 
@@ -54,8 +54,8 @@ bash 1_start_prefill.sh
 # Terminal 2: Start decode server (GPU 1)
 bash 2_start_decode.sh
 
-# Terminal 3: Start SMG PD proxy (waits for both servers)
-bash 3_start_proxy_smg.sh
+# Terminal 3: Start MESH PD proxy (waits for both servers)
+bash 3_start_proxy_mesh.sh
 
 # Terminal 4: Run GSM8K evaluation
 bash 4_eval_gsm8k.sh
@@ -69,7 +69,7 @@ Scripts 3 and 4 will automatically wait for upstream services to be ready before
 |--------|-------------|:---:|
 | `1_start_prefill.sh` | vLLM prefill server (kv_producer, GPU 0) | 8010 |
 | `2_start_decode.sh` | vLLM decode server (kv_consumer, GPU 1) | 8020 |
-| `3_start_proxy_smg.sh` | SMG PD proxy, routes prefill→decode | 8080 |
+| `3_start_proxy_mesh.sh` | MESH PD proxy, routes prefill→decode | 8080 |
 | `4_eval_gsm8k.sh` | GSM8K 5-shot evaluation (50 questions) | — |
 | `eval_gsm8k.py` | Shared GSM8K evaluator (in `evaluation/common/`) | — |
 
@@ -99,7 +99,7 @@ bash 1_start_prefill.sh
 | `BOOTSTRAP_PORT` | `8998` | 1, 3 |
 | `PROXY_PORT` | `8080` | 3, 4 |
 | `POLICY` | `round_robin` | 3 |
-| `SMG_BIN` | `<project_root>/target/release/smg` | 3 |
+| `MESH_BIN` | `<project_root>/target/release/mesh` | 3 |
 | `GPU_MEM_UTIL` | `0.9` | 1, 2 |
 | `MAX_MODEL_LEN` | `4096` | 1, 2 |
 | `MOONCAKE_PROTOCOL` | `local` | 1, 2 |

@@ -150,7 +150,7 @@ if [[ "${SKIP_CLEANUP}" != "1" ]]; then
     echo "=== Step 1: Cleanup old processes ==="
     for node_ip in "${PREFILL_IP}" "${DECODE_IP}"; do
         echo "[cleanup] Killing old processes on ${node_ip}..."
-        ssh "${node_ip}" "docker exec ${CONTAINER} bash -c 'pkill -f \"sglang.launch_server\" 2>/dev/null; pkill -f \"smg launch\" 2>/dev/null'" || true
+        ssh "${node_ip}" "docker exec ${CONTAINER} bash -c 'pkill -f \"sglang.launch_server\" 2>/dev/null; pkill -f \"mesh launch\" 2>/dev/null'" || true
     done
     echo "[cleanup] Waiting 5s for processes to terminate..."
     sleep 5
@@ -297,8 +297,8 @@ fi
 echo "[proxy] Starting proxy on ${PREFILL_NODE}..."
 ssh "${PREFILL_IP}" "docker exec -d ${CONTAINER} bash -c '\
     ${PROXY_ENV} \
-    bash ${REMOTE_SCRIPT_DIR}/3_start_proxy_smg.sh \
-    > ${LOG_DIR}/proxy_smg.log 2>&1'"
+    bash ${REMOTE_SCRIPT_DIR}/3_start_proxy_mesh.sh \
+    > ${LOG_DIR}/proxy_mesh.log 2>&1'"
 
 # Wait for proxy
 sleep 5

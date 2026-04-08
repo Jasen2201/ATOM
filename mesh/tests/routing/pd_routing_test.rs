@@ -8,7 +8,7 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::RouterConfig;
+use mesh::config::RouterConfig;
 use tower::ServiceExt;
 
 use crate::common::{
@@ -152,7 +152,7 @@ mod pd_routing_tests {
     /// Test PD mode handles worker failures gracefully
     #[tokio::test]
     async fn test_pd_mode_with_failing_decode_worker() {
-        use smg::config::RetryConfig;
+        use mesh::config::RetryConfig;
 
         let config = RouterConfig::builder()
             .prefill_decode_mode(

@@ -220,7 +220,7 @@ impl<B> MakeSpan<B> for RequestSpan {
         // Don't try to extract request ID here - it won't be available yet
         // The RequestIdLayer runs after TraceLayer creates the span
         info_span!(
-            target: "smg::otel-trace",
+            target: "mesh::otel-trace",
             "http_request",
             method = %request.method(),
             uri = %request.uri(),
@@ -229,7 +229,7 @@ impl<B> MakeSpan<B> for RequestSpan {
             status_code = Empty,
             latency = Empty,
             error = Empty,
-            module = "smg"
+            module = "mesh"
         )
     }
 }
@@ -254,7 +254,7 @@ impl<B> OnRequest<B> for RequestLogger {
 
         // Log the request start
         info!(
-            target: "smg::request",
+            target: "mesh::request",
             "started processing request"
         );
     }
@@ -293,17 +293,17 @@ impl<B> OnResponse<B> for ResponseLogger {
         let _enter = span.enter();
         if status.is_server_error() {
             error!(
-                target: "smg::response",
+                target: "mesh::response",
                 "request failed with server error"
             );
         } else if status.is_client_error() {
             warn!(
-                target: "smg::response",
+                target: "mesh::response",
                 "request failed with client error"
             );
         } else {
             info!(
-                target: "smg::response",
+                target: "mesh::response",
                 "finished processing request"
             );
         }
@@ -561,13 +561,13 @@ pub async fn concurrency_limit_middleware(
 }
 
 // ============================================================================
-// HTTP Metrics Layer (Layer 1: SMG metrics)
+// HTTP Metrics Layer (Layer 1: Mesh metrics)
 // ============================================================================
 
 /// Global counter for active HTTP connections (handlers currently executing)
 static ACTIVE_HTTP_CONNECTIONS: AtomicU64 = AtomicU64::new(0);
 
-/// Tower Layer for HTTP metrics collection (SMG Layer 1 metrics)
+/// Tower Layer for HTTP metrics collection (Mesh Layer 1 metrics)
 #[derive(Clone)]
 pub struct HttpMetricsLayer {
     tracker: Arc<InFlightRequestTracker>,

@@ -1,4 +1,4 @@
-# Mesh — SGLang Model Gateway (Fork)
+# Mesh — ATOM Mesh (Fork)
 
 > Forked from [sgl-model-gateway v0.3.2](https://github.com/sgl-project/sglang/tree/main/sgl-model-gateway).
 
@@ -75,7 +75,7 @@ cargo build --release
 
 Compiled binaries are located at:
 - `target/release/sgl-model-gateway`
-- `target/release/smg` (alias)
+- `target/release/mesh` (alias)
 - `target/release/amg` (alias)
 
 #### Python Package
@@ -96,12 +96,12 @@ pip install --force-reinstall dist/*.whl
 
 ```bash
 # Rust binary
-./target/release/smg --version
-./target/release/smg --version-verbose
+./target/release/mesh --version
+./target/release/mesh --version-verbose
 
 # Python CLI (after pip install)
 amg --version
-python3 -m sglang_router --version
+python3 -m mesh_router --version
 ```
 
 ## Quick Start
@@ -115,7 +115,7 @@ python3 -m sglang_router --version
   `cargo run --release -- …` provides the same behavior during development.
 - **Python launcher**
   ```bash
-  python3 -m sglang_router.launch_router \
+  python3 -m mesh_router.launch_router \
     --worker-urls http://worker1:8000 http://worker2:8000 \
     --policy cache_aware
   ```
@@ -135,7 +135,7 @@ python3 -m sglang_router --version
   ```
 - **Python launcher**
   ```bash
-  python3 -m sglang_router.launch_router \
+  python3 -m mesh_router.launch_router \
     --pd-disaggregation \
     --prefill http://prefill1:30001 9001 \
     --prefill http://prefill2:30002 \
@@ -204,7 +204,7 @@ Add more workers with the same API; include optional `labels` (for per-model pol
   ```
 - **Python router**
   ```bash
-  python3 -m sglang_router.launch_router \
+  python3 -m mesh_router.launch_router \
     --worker-urls grpc://127.0.0.1:20000 \
     --model-path meta-llama/Llama-3.1-8B-Instruct \
     --host 0.0.0.0 \
@@ -218,12 +218,12 @@ Route requests to OpenAI or OpenAI-compatible endpoints:
 
 ```bash
 # Route to OpenAI API
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --backend openai \
   --worker-urls https://api.openai.com \
 
 # Route to custom OpenAI-compatible endpoint (Gemini, xAI, etc.)
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --backend openai \
   --worker-urls http://my-openai-compatible-service:8000 \
 ```
@@ -244,7 +244,7 @@ The SGL Model Gateway provides native Model Context Protocol (MCP) client integr
   --worker-urls http://worker1:8000
 
 # Python launcher
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --mcp-config-path /path/to/mcp-config.yaml \
   --worker-urls http://worker1:8000
 ```
@@ -352,11 +352,11 @@ Check Prometheus metrics for MCP activity (`mcp_*` metrics) and workflow job sta
 ### Python Launcher (Router + Workers)
 Launch router and SGLang worker processes together; `launch_server` spins up workers (HTTP or gRPC) and the router in one shot.
 ```bash
-python3 -m sglang_router.launch_server --host 0.0.0.0
+python3 -m mesh_router.launch_server --host 0.0.0.0
 ```
 Add flags as needed for production deployments:
 ```bash
-python3 -m sglang_router.launch_server \
+python3 -m mesh_router.launch_server \
   --host 0.0.0.0 \
   --port 8080 \
   --model meta-llama/Llama-3.1-8B-Instruct \
@@ -368,7 +368,7 @@ Omit `--grpc-mode` to start HTTP workers; the router automatically configures wo
 
 ### Mini Load Balancer (Debug)
 ```bash
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --mini-lb \
   --pd-disaggregation \
   --prefill http://localhost:30001 \
@@ -641,31 +641,31 @@ Store conversation and response data for tracking, debugging, or analytics.
 
 ```bash
 # Memory backend (default)
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --backend openai \
   --worker-urls https://api.openai.com \
   --history-backend memory
 
 # No storage for maximum performance
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --backend openai \
   --worker-urls https://api.openai.com \
   --history-backend none
 
 # Oracle ATP backend (see configuration below)
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --backend openai \
   --worker-urls https://api.openai.com \
   --history-backend oracle
 
 # PostgreSQL backend
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --backend openai \
   --worker-urls https://api.openai.com \
   --history-backend postgres
 
 # Redis backend
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --backend openai \
   --worker-urls https://api.openai.com \
   --history-backend redis
@@ -736,22 +736,22 @@ Enable with `--prometheus-host`/`--prometheus-port` (defaults to `0.0.0.0:29000`
 
 | Layer | Metric Prefix | Description |
 |-------|---------------|-------------|
-| HTTP | `smg_http_*` | Request counts, duration, active connections, rate limiting |
-| Router | `smg_router_*` | Requests by model/endpoint, latency, errors, upstream responses |
-| Inference | `smg_router_ttft/tpot/tokens_*` | Time to first token, time per output token, token counts (gRPC) |
-| Worker | `smg_worker_*` | Pool size, active connections, health checks, selection events |
-| Circuit Breaker | `smg_worker_cb_*` | State (closed/open/half-open), transitions, outcomes |
-| Retry | `smg_worker_retries_*` | Retry attempts, exhausted retries, backoff duration |
-| Discovery | `smg_discovery_*` | K8s registrations, sync duration, workers discovered |
-| MCP | `smg_mcp_*` | Tool calls, duration, active servers, iterations |
-| Database | `smg_db_*` | Operations, duration, connections, items stored |
+| HTTP | `mesh_http_*` | Request counts, duration, active connections, rate limiting |
+| Router | `mesh_router_*` | Requests by model/endpoint, latency, errors, upstream responses |
+| Inference | `mesh_router_ttft/tpot/tokens_*` | Time to first token, time per output token, token counts (gRPC) |
+| Worker | `mesh_worker_*` | Pool size, active connections, health checks, selection events |
+| Circuit Breaker | `mesh_worker_cb_*` | State (closed/open/half-open), transitions, outcomes |
+| Retry | `mesh_worker_retries_*` | Retry attempts, exhausted retries, backoff duration |
+| Discovery | `mesh_discovery_*` | K8s registrations, sync duration, workers discovered |
+| MCP | `mesh_mcp_*` | Tool calls, duration, active servers, iterations |
+| Database | `mesh_db_*` | Operations, duration, connections, items stored |
 
 **Key Metrics:**
-- `smg_router_ttft_seconds` - Time to first token histogram (gRPC mode)
-- `smg_router_tpot_seconds` - Time per output token histogram (gRPC mode)
-- `smg_router_tokens_total` - Total input/output tokens by model
-- `smg_router_generation_duration_seconds` - End-to-end generation time
-- `smg_worker_cb_state` - Circuit breaker state gauge (0=closed, 1=open, 2=half-open)
+- `mesh_router_ttft_seconds` - Time to first token histogram (gRPC mode)
+- `mesh_router_tpot_seconds` - Time per output token histogram (gRPC mode)
+- `mesh_router_tokens_total` - Total input/output tokens by model
+- `mesh_router_generation_duration_seconds` - End-to-end generation time
+- `mesh_worker_cb_state` - Circuit breaker state gauge (0=closed, 1=open, 2=half-open)
 
 **Duration Buckets:**
 1ms, 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s, 10s, 15s, 30s, 45s, 60s, 90s, 120s, 180s, 240s
@@ -760,7 +760,7 @@ Enable with `--prometheus-host`/`--prometheus-port` (defaults to `0.0.0.0:29000`
 Enable distributed tracing with OTLP export:
 
 ```bash
-python -m sglang_router.launch_router \
+python -m mesh_router.launch_router \
   --worker-urls http://worker1:8000 \
   --enable-trace \
   --otlp-traces-endpoint localhost:4317
@@ -796,7 +796,7 @@ Set `--cors-allowed-origins` for browser access.
 
 ```bash
 # Router and initial workers share the same key
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --api-key "shared-api-key" \
   --worker-urls http://worker1:8000 http://worker2:8000
 
@@ -813,7 +813,7 @@ curl -X POST "http://localhost:8080/add_worker?url=http://worker3:8000&api_key=w
 3. **Worker-only Authentication**: Router open to clients; each worker requires its own key. Supply keys when calling `/workers` or `/add_worker`.
 4. **Full Authentication**: Set router API key and provide per-worker keys. Example:
    ```bash
-   python3 -m sglang_router.launch_router --api-key "router-key"
+   python3 -m mesh_router.launch_router --api-key "router-key"
    curl -H "Authorization: Bearer router-key" \
      -X POST http://localhost:8080/add_worker?url=http://worker:8000&api_key=worker-key
    ```
@@ -828,7 +828,7 @@ curl -X POST "http://localhost:8080/add_worker?url=http://worker3:8000&api_key=w
 Enable TLS to serve the gateway over HTTPS:
 
 ```bash
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --worker-urls http://worker1:8000 \
   --tls-cert-path /path/to/server.crt \
   --tls-key-path /path/to/server.key
@@ -846,7 +846,7 @@ Both parameters must be provided together. The gateway uses rustls with the ring
 Enable mutual TLS (mTLS) for secure communication with workers in HTTP mode:
 
 ```bash
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --worker-urls https://worker1:8443 https://worker2:8443 \
   --client-cert-path /path/to/client.crt \
   --client-key-path /path/to/client.key \
@@ -868,7 +868,7 @@ python3 -m sglang_router.launch_router \
 
 **Full TLS Example (Gateway HTTPS + Worker mTLS):**
 ```bash
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --worker-urls https://worker1:8443 https://worker2:8443 \
   --tls-cert-path /etc/certs/server.crt \
   --tls-key-path /etc/certs/server.key \
@@ -903,7 +903,7 @@ Both methods can be used together. Requests are authenticated in order: API key 
 Static API keys for service accounts and automation:
 
 ```bash
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --worker-urls http://worker1:8000 \
   --control-plane-api-keys 'svc1:CI Pipeline:admin:secret-key-123' \
                            'svc2:Monitoring:user:readonly-key-456' \
@@ -927,7 +927,7 @@ curl -H "Authorization: Bearer secret-key-123" \
 Authenticate users via an external Identity Provider (Azure AD, Okta, Auth0, Keycloak, etc.):
 
 ```bash
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --worker-urls http://worker1:8000 \
   --jwt-issuer "https://login.microsoftonline.com/{tenant-id}/v2.0" \
   --jwt-audience "api://my-gateway-client-id" \
@@ -962,7 +962,7 @@ python3 -m sglang_router.launch_router \
 #   aud: api://your-client-id (or the client ID itself)
 #   roles: ["Gateway.Admins"] or groups: ["group-id"]
 
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --jwt-issuer "https://login.microsoftonline.com/your-tenant-id/v2.0" \
   --jwt-audience "api://your-client-id" \
   --jwt-role-mapping 'Gateway.Admins=admin' 'Gateway.Users=user'
@@ -982,7 +982,7 @@ Enable `--control-plane-audit-enabled` to log all control plane operations with:
 Use both API keys and JWT for different use cases:
 
 ```bash
-python3 -m sglang_router.launch_router \
+python3 -m mesh_router.launch_router \
   --worker-urls http://worker1:8000 \
   # API keys for service accounts
   --control-plane-api-keys 'ci:CI/CD Pipeline:admin:ci-secret' \

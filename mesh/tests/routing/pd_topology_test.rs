@@ -10,7 +10,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use serde_json::json;
-use smg::config::RouterConfig;
+use mesh::config::RouterConfig;
 use tower::ServiceExt;
 
 use crate::common::{AppTestContext, TestWorkerConfig};

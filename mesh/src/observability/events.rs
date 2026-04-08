@@ -9,7 +9,7 @@ use super::otel_trace::is_otel_enabled;
 /// Module path used by CustomOtelFilter to identify events for OTEL export.
 #[inline]
 pub const fn get_module_path() -> &'static str {
-    "smg::observability::events"
+    "mesh::observability::events"
 }
 
 pub trait Event {
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn test_get_module_path() {
-        assert_eq!(get_module_path(), "smg::observability::events");
+        assert_eq!(get_module_path(), "mesh::observability::events");
     }
 
     #[test]

@@ -14,7 +14,7 @@
 use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
-use smg_mesh::OptionalMeshSyncManager;
+use mesh_sync::OptionalMeshSyncManager;
 use uuid::Uuid;
 
 use crate::{

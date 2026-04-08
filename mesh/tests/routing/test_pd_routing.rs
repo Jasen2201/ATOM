@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod pd_routing_unit_tests {
     use serde_json::json;
-    use smg::{
+    use mesh::{
         app_context::AppContext,
         config::{PolicyConfig, RouterConfig, RoutingMode},
         core::{BasicWorkerBuilder, Worker, WorkerType},
@@ -39,7 +39,7 @@ mod pd_routing_unit_tests {
 
     #[test]
     fn test_worker_types() {
-        use smg::core::{BasicWorkerBuilder, Worker, WorkerType};
+        use mesh::core::{BasicWorkerBuilder, Worker, WorkerType};
 
         let prefill_worker: Box<dyn Worker> = Box::new(
             BasicWorkerBuilder::new("http://prefill:8080")
@@ -217,7 +217,7 @@ mod pd_routing_unit_tests {
                 use data_connector::{
                     MemoryConversationItemStorage, MemoryConversationStorage, MemoryResponseStorage,
                 };
-                use smg::{
+                use mesh::{
                     core::{LoadMonitor, WorkerRegistry},
                     middleware::TokenBucket,
                     policies::PolicyRegistry,
@@ -670,7 +670,7 @@ mod pd_routing_unit_tests {
 
     #[test]
     fn test_bootstrap_injection_with_benchmark_requests() {
-        use smg::core::{BasicWorkerBuilder, Worker, WorkerType};
+        use mesh::core::{BasicWorkerBuilder, Worker, WorkerType};
 
         let mut benchmark_request = json!({
             "input_ids": vec![vec![1, 2, 3, 4]; 16], // Batch size 16

@@ -19,7 +19,7 @@ use data_connector::{
 };
 use mock_worker::{MockWorker, MockWorkerConfig};
 use serde_json::json;
-use smg::{
+use mesh::{
     app_context::AppContext,
     config::{RouterConfig, RoutingMode},
     core::{
@@ -340,14 +340,14 @@ pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
 
     // Initialize JobQueue after AppContext is created
     let weak_context = Arc::downgrade(&app_context);
-    let job_queue = smg::core::JobQueue::new(smg::core::JobQueueConfig::default(), weak_context);
+    let job_queue = mesh::core::JobQueue::new(mesh::core::JobQueueConfig::default(), weak_context);
     app_context
         .worker_job_queue
         .set(job_queue)
         .expect("JobQueue should only be initialized once");
 
     // Initialize typed workflow engines
-    use smg::core::steps::WorkflowEngines;
+    use mesh::core::steps::WorkflowEngines;
     let engines = WorkflowEngines::new(&config);
     app_context
         .workflow_engines
@@ -426,14 +426,14 @@ pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppCo
 
     // Initialize JobQueue after AppContext is created
     let weak_context = Arc::downgrade(&app_context);
-    let job_queue = smg::core::JobQueue::new(smg::core::JobQueueConfig::default(), weak_context);
+    let job_queue = mesh::core::JobQueue::new(mesh::core::JobQueueConfig::default(), weak_context);
     app_context
         .worker_job_queue
         .set(job_queue)
         .expect("JobQueue should only be initialized once");
 
     // Initialize typed workflow engines
-    use smg::core::steps::WorkflowEngines;
+    use mesh::core::steps::WorkflowEngines;
     let engines = WorkflowEngines::new(&config);
     app_context
         .workflow_engines

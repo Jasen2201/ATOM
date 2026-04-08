@@ -1,5 +1,5 @@
 use serde_json::json;
-use smg::protocols::{
+use mesh::protocols::{
     common::{Function, StringOrArray, ToolChoice, ToolChoiceValue},
     responses::{
         IncludeField, ResponseInput, ResponseInputOutputItem, ResponseTool, ResponseToolType,
@@ -939,7 +939,7 @@ fn test_validate_input_items_structure() {
 /// Test tool_choice defaults to auto when tools are present
 #[test]
 fn test_normalize_tool_choice_auto() {
-    use smg::protocols::validated::Normalizable;
+    use mesh::protocols::validated::Normalizable;
 
     let mut request = ResponsesRequest {
         input: ResponseInput::Text("test".to_string()),
@@ -980,7 +980,7 @@ fn test_normalize_tool_choice_auto() {
 /// Test tool_choice defaults to none when tools array is empty
 #[test]
 fn test_normalize_tool_choice_none() {
-    use smg::protocols::validated::Normalizable;
+    use mesh::protocols::validated::Normalizable;
 
     let mut request = ResponsesRequest {
         input: ResponseInput::Text("test".to_string()),
@@ -1007,7 +1007,7 @@ fn test_normalize_tool_choice_none() {
 /// Test tool_choice is not overridden if already set
 #[test]
 fn test_normalize_tool_choice_no_override() {
-    use smg::protocols::validated::Normalizable;
+    use mesh::protocols::validated::Normalizable;
 
     let mut request = ResponsesRequest {
         input: ResponseInput::Text("test".to_string()),
@@ -1044,7 +1044,7 @@ fn test_normalize_tool_choice_no_override() {
 /// Test parallel_tool_calls defaults to true when tools are present
 #[test]
 fn test_normalize_parallel_tool_calls() {
-    use smg::protocols::validated::Normalizable;
+    use mesh::protocols::validated::Normalizable;
 
     let mut request = ResponsesRequest {
         input: ResponseInput::Text("test".to_string()),
@@ -1083,7 +1083,7 @@ fn test_normalize_parallel_tool_calls() {
 /// Test parallel_tool_calls is not set when tools are absent
 #[test]
 fn test_normalize_parallel_tool_calls_no_tools() {
-    use smg::protocols::validated::Normalizable;
+    use mesh::protocols::validated::Normalizable;
 
     let mut request = ResponsesRequest {
         input: ResponseInput::Text("test".to_string()),
@@ -1103,7 +1103,7 @@ fn test_normalize_parallel_tool_calls_no_tools() {
 /// Test parallel_tool_calls is not overridden if already set
 #[test]
 fn test_normalize_parallel_tool_calls_no_override() {
-    use smg::protocols::validated::Normalizable;
+    use mesh::protocols::validated::Normalizable;
 
     let mut request = ResponsesRequest {
         input: ResponseInput::Text("test".to_string()),
@@ -1138,7 +1138,7 @@ fn test_normalize_parallel_tool_calls_no_override() {
 /// Test store defaults to true
 #[test]
 fn test_normalize_store_default() {
-    use smg::protocols::validated::Normalizable;
+    use mesh::protocols::validated::Normalizable;
 
     let mut request = ResponsesRequest {
         input: ResponseInput::Text("test".to_string()),
@@ -1158,7 +1158,7 @@ fn test_normalize_store_default() {
 /// Test store is not overridden if already set
 #[test]
 fn test_normalize_store_no_override() {
-    use smg::protocols::validated::Normalizable;
+    use mesh::protocols::validated::Normalizable;
 
     let mut request = ResponsesRequest {
         input: ResponseInput::Text("test".to_string()),

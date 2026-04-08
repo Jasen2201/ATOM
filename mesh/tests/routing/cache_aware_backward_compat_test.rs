@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use smg::{
+use mesh::{
     core::{BasicWorkerBuilder, Worker, WorkerType},
     policies::{CacheAwareConfig, CacheAwarePolicy, LoadBalancingPolicy, SelectWorkerInfo},
 };

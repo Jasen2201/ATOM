@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Script 3: Start PD Proxy - SGLang 1P1D Single Node (sgl-model-gateway)
+# Script 3: Start PD Proxy - SGLang 1P1D Single Node (atom-mesh)
 # Routes requests through Prefill -> Decode on localhost
 # =============================================================================
 set -euo pipefail
@@ -21,28 +21,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "${LOG_DIR}"
 
-# sgl-model-gateway binary path
+# atom-mesh binary path
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-SMG_BIN="${SMG_BIN:-/usr/local/bin/smg}"
-if [[ ! -x "${SMG_BIN}" ]]; then
-    SMG_BIN="${PROJECT_ROOT}/target/release/smg"
+MESH_BIN="${MESH_BIN:-/usr/local/bin/mesh}"
+if [[ ! -x "${MESH_BIN}" ]]; then
+    MESH_BIN="${PROJECT_ROOT}/target/release/mesh"
 fi
 
 echo ""
 echo "============================================================"
-echo "  PD Proxy - SGLang 1P1D Single Node (sgl-model-gateway)"
+echo "  PD Proxy - SGLang 1P1D Single Node (atom-mesh)"
 echo "============================================================"
 echo " Prefill:  http://${PREFILL_HOST}:${PREFILL_PORT}"
 echo " Decode:   http://${DECODE_HOST}:${DECODE_PORT}"
 echo " Proxy:    0.0.0.0:${PROXY_PORT}"
 echo " Policy:   ${POLICY}"
 echo " Backend:  ${BACKEND}"
-echo " SMG bin:  ${SMG_BIN}"
+echo " MESH bin:  ${MESH_BIN}"
 echo "============================================================"
 
-# ---- Verify smg binary exists ----
-if [[ ! -x "${SMG_BIN}" ]]; then
-    echo "FATAL: smg binary not found at ${SMG_BIN}"
+# ---- Verify mesh binary exists ----
+if [[ ! -x "${MESH_BIN}" ]]; then
+    echo "FATAL: mesh binary not found at ${MESH_BIN}"
     exit 1
 fi
 
@@ -78,10 +78,10 @@ wait_for_server "${DECODE_HOST}" "${DECODE_PORT}" "Decode" || {
     exit 1
 }
 
-# ---- Launch sgl-model-gateway in PD mode ----
-echo "[launch] Starting sgl-model-gateway PD proxy on port ${PROXY_PORT}..."
+# ---- Launch atom-mesh in PD mode ----
+echo "[launch] Starting atom-mesh PD proxy on port ${PROXY_PORT}..."
 
-"${SMG_BIN}" launch \
+"${MESH_BIN}" launch \
     --host 0.0.0.0 \
     --port "${PROXY_PORT}" \
     --pd-disaggregation \

@@ -7,7 +7,7 @@ use axum::{
 };
 use reqwest::Client;
 use serde_json::json;
-use smg::{
+use mesh::{
     app_context::AppContext,
     config::{RouterConfig, RoutingMode},
     routers::{RouterFactory, RouterTrait},

@@ -1,6 +1,6 @@
 use once_cell::sync::OnceCell;
 use pyo3::prelude::*;
-use smg::*;
+use mesh::*;
 use std::collections::HashMap;
 
 // Define the enums with PyO3 bindings
@@ -782,7 +782,7 @@ fn get_available_tool_call_parsers() -> Vec<String> {
 }
 
 #[pymodule]
-fn sglang_router_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn mesh_router_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PolicyType>()?;
     m.add_class::<BackendType>()?;
     m.add_class::<PyRole>()?;

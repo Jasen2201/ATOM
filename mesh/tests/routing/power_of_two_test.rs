@@ -13,7 +13,7 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::RouterConfig;
+use mesh::config::RouterConfig;
 use tower::ServiceExt;
 
 use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};
@@ -125,7 +125,7 @@ mod power_of_two_tests {
     /// Test power of two with failing worker uses retry/CB to route to healthy worker
     #[tokio::test]
     async fn test_power_of_two_with_failing_worker() {
-        use smg::config::{CircuitBreakerConfig, RetryConfig};
+        use mesh::config::{CircuitBreakerConfig, RetryConfig};
 
         let retry_config = RetryConfig {
             max_retries: 3,

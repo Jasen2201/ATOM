@@ -26,7 +26,7 @@
 //!
 //! // Define at module level
 //! static BOUNDS: BucketBounds<10> = BucketBounds::new([1, 2, 3, 5, 7, 10, 20, 50, 100, 200]);
-//! static HISTOGRAM: GaugeHistogramVec<10> = GaugeHistogramVec::new("smg_request_dist", &BOUNDS);
+//! static HISTOGRAM: GaugeHistogramVec<10> = GaugeHistogramVec::new("mesh_request_dist", &BOUNDS);
 //!
 //! // At startup: register for each label combination
 //! let handle = HISTOGRAM.register(&[("router", "round_robin"), ("model", "llama")]);
@@ -303,7 +303,7 @@ impl<const N: usize> GaugeHistogramVec<N> {
 ///
 /// ```ignore
 /// static BOUNDS: BucketBounds<10> = BucketBounds::new([1, 2, 3, 5, 7, 10, 20, 50, 100, 200]);
-/// static HISTOGRAM: GaugeHistogramVec<10> = GaugeHistogramVec::new("smg_worker_dist", &BOUNDS);
+/// static HISTOGRAM: GaugeHistogramVec<10> = GaugeHistogramVec::new("mesh_worker_dist", &BOUNDS);
 ///
 /// // Create cached wrapper (do this once, store in your router state)
 /// let cached = CachedGaugeHistogram::new(&HISTOGRAM);

@@ -8,7 +8,7 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::RouterConfig;
+use mesh::config::RouterConfig;
 use tower::ServiceExt;
 
 use crate::common::{

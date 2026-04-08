@@ -1,4 +1,4 @@
-"""Gateway class for managing sgl-model-gateway router instances."""
+"""Gateway class for managing atom-mesh router instances."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class WorkerInfo:
 
 
 class Gateway:
-    """Manages a sgl-model-gateway router instance.
+    """Manages an atom-mesh router instance.
 
     Provides lifecycle management and API access for:
     - Starting/stopping the router
@@ -338,7 +338,7 @@ class Gateway:
         return [
             "python3",
             "-m",
-            "sglang_router.launch_router",
+            "mesh_router.launch_router",
             "--host",
             self.host,
             "--port",

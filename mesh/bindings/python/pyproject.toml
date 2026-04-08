@@ -3,9 +3,9 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "sglang-router"
+name = "mesh-router"
 version = "0.3.2"
-description = "High-performance Rust-based load balancer for SGLang with multiple routing algorithms and prefill-decode disaggregation support"
+description = "High-performance Rust-based load balancer for ATOM Mesh with multiple routing algorithms and prefill-decode disaggregation support"
 authors = [
     {name = "Simo Lin", email = "linsimo.mark@gmail.com"},
     {name = "Chang Su", email = "mckvtl@gmail.com"},
@@ -43,14 +43,13 @@ dev = [
 ]
 
 [project.scripts]
-smg = "sglang_router.cli:main"
-amg = "sglang_router.cli:main"
-sglang-router = "sglang_router.cli:main"
+mesh = "mesh_router.cli:main"
+mesh-router = "mesh_router.cli:main"
 
 
 [tool.maturin]
 python-source = "src"
-module-name = "sglang_router.sglang_router_rs"
+module-name = "mesh_router.mesh_router_rs"
 # Exclude bindings/python/README.md to use root README only
 exclude = ["README.md"]
 

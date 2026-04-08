@@ -6,7 +6,7 @@
 use std::{fmt::Debug, sync::Arc};
 
 use async_trait::async_trait;
-use smg_mesh::OptionalMeshSyncManager;
+use mesh_sync::OptionalMeshSyncManager;
 
 use crate::core::{HashRing, Worker};
 
@@ -142,8 +142,8 @@ pub struct SelectWorkerInfo<'a> {
     pub tokens: Option<&'a [u32]>,
     /// HTTP headers for header-based routing policies
     /// Policies can extract routing information from headers like:
-    /// - X-SMG-Target-Worker: Direct routing to a specific worker by index
-    /// - X-SMG-Routing-Key: Consistent hash routing for session affinity
+    /// - X-Mesh-Target-Worker: Direct routing to a specific worker by index
+    /// - X-Mesh-Routing-Key: Consistent hash routing for session affinity
     pub headers: Option<&'a http::HeaderMap>,
     /// Pre-computed hash ring for O(log n) consistent hashing
     /// Built and cached by WorkerRegistry, passed through to avoid per-request rebuilds

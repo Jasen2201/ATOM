@@ -1,5 +1,5 @@
 [package]
-name = "sgl-model-gateway"
+name = "atom-mesh"
 version = "0.3.2"
 edition = "2021"
 
@@ -12,19 +12,15 @@ grpc-server = []
 unused_qualifications = "warn"
 
 [lib]
-name = "smg"
+name = "mesh"
 crate-type = ["rlib"]
 
 [[bin]]
-name = "sgl-model-gateway"
+name = "atom-mesh"
 path = "src/main.rs"
 
 [[bin]]
-name = "smg"
-path = "src/main.rs"
-
-[[bin]]
-name = "amg"
+name = "mesh"
 path = "src/main.rs"
 
 [dependencies]
@@ -79,13 +75,13 @@ tool-parser = "=1.0.0"
 llm-tokenizer = "=1.0.0"
 wfaas = "=1.0.0"
 data-connector = "=1.0.0"
-smg-mesh = "=1.0.0"
+mesh_sync = { package = "smg-mesh", version = "=1.0.0" }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 openmetrics-parser = "0.4.4"
 arc-swap = "1.7.1"
 
 # gRPC and Protobuf dependencies
-smg-grpc-client = "=1.0.0"
+mesh_grpc = { package = "smg-grpc-client", version = "=1.0.0" }
 tonic = { version = "0.14.2", features = ["gzip", "transport"] }
 prost = "0.14.1"
 prost-types = "0.14.1"

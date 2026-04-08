@@ -1,7 +1,7 @@
 // Integration test for Responses API
 
 use axum::http::StatusCode;
-use smg::{
+use mesh::{
     config::RouterConfig,
     protocols::{
         common::{GenerationRequest, ToolChoice, ToolChoiceValue, UsageInfo},
@@ -192,7 +192,7 @@ fn test_usage_conversion() {
         completion_tokens: 25,
         total_tokens: 40,
         reasoning_tokens: Some(8),
-        prompt_tokens_details: Some(smg::protocols::common::PromptTokenUsageInfo {
+        prompt_tokens_details: Some(mesh::protocols::common::PromptTokenUsageInfo {
             cached_tokens: 3,
         }),
     };

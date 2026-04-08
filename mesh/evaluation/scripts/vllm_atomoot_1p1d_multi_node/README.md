@@ -1,8 +1,8 @@
 # vLLM + Mooncake 1P1D Multi-Node Demo
 
-Multi-node Prefill-Decode disaggregation demo using vLLM (with Mooncake RDMA KV transfer) and sgl-model-gateway (smg) as the PD proxy.
+Multi-node Prefill-Decode disaggregation demo using vLLM (with Mooncake RDMA KV transfer) and atom-mesh (mesh) as the PD proxy.
 
-Two physical nodes: one runs the prefill server (kv_producer), the other runs the decode server (kv_consumer). The smg proxy can run on either node.
+Two physical nodes: one runs the prefill server (kv_producer), the other runs the decode server (kv_consumer). The mesh proxy can run on either node.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ Two physical nodes: one runs the prefill server (kv_producer), the other runs th
                            |
                            v
                    +--------------+
-                   |  SMG Proxy   |  :8080  (PD routing)
+                   |  MESH Proxy   |  :8080  (PD routing)
                    |  (Script 3)  |
                    +------+-------+
                           |
@@ -37,7 +37,7 @@ Two physical nodes: one runs the prefill server (kv_producer), the other runs th
 - **vLLM**: Installed inside the container with Mooncake support
 - **Mooncake**: KV transfer library with RDMA support
 - **Model**: DeepSeek-R1-FP8-Dynamic (default: `/mnt/raid0/deepseek-r1-FP8-Dynamic`)
-- **smg binary**: Pre-installed at `/usr/local/bin/smg` in the container
+- **mesh binary**: Pre-installed at `/usr/local/bin/mesh` in the container
 - **Network**: RDMA-capable network between nodes
 
 ### Default Node Configuration
@@ -58,8 +58,8 @@ bash 1_start_prefill.sh
 # Node B (g52) - Terminal 2: Start decode server
 bash 2_start_decode.sh
 
-# Either node - Terminal 3: Start SMG PD proxy (waits for both servers)
-bash 3_start_proxy_smg.sh
+# Either node - Terminal 3: Start MESH PD proxy (waits for both servers)
+bash 3_start_proxy_mesh.sh
 
 # Either node - Terminal 4: Run GSM8K evaluation
 bash 4_eval_gsm8k.sh
@@ -80,7 +80,7 @@ bash 5_start_standalone.sh
 |--------|-------------|--------|:---:|
 | `1_start_prefill.sh` | vLLM prefill server (kv_producer, TP=8) | Node A (g38) | 8010 |
 | `2_start_decode.sh` | vLLM decode server (kv_consumer, TP=8) | Node B (g52) | 8020 |
-| `3_start_proxy_smg.sh` | SMG PD proxy, routes prefill -> decode | Either node | 8080 |
+| `3_start_proxy_mesh.sh` | MESH PD proxy, routes prefill -> decode | Either node | 8080 |
 | `4_eval_gsm8k.sh` | GSM8K 5-shot evaluation (50 questions) | Either node | -- |
 | `5_start_standalone.sh` | Standalone vLLM baseline (no PD) | Either node | 8000 |
 
@@ -97,7 +97,7 @@ SERVED_MODEL=my-model \
 PREFILL_PORT=9010 \
 DECODE_PORT=9020 \
 PROXY_PORT=9080 \
-bash 3_start_proxy_smg.sh
+bash 3_start_proxy_mesh.sh
 ```
 
 | Variable | Default | Used By |
@@ -117,7 +117,7 @@ bash 3_start_proxy_smg.sh
 | `MOONCAKE_PROTOCOL` | `rdma` | 1, 2 |
 | `POLICY` | `round_robin` | 3 |
 | `BACKEND` | `vllm` | 3 |
-| `SMG_BIN` | `/usr/local/bin/smg` | 3 |
+| `MESH_BIN` | `/usr/local/bin/mesh` | 3 |
 | `GPU_MEM_UTIL` | `0.9` | 1, 2, 5 |
 | `MAX_MODEL_LEN` | `4096` (PD) / `16384` (standalone) | 1, 2, 5 |
 | `GSM8K_QUESTIONS` | `50` | 4 |
@@ -146,7 +146,7 @@ Results are saved to `logs/gsm8k_results.json`.
 All logs are written to the `logs/` subdirectory:
 - `logs/prefill.log`
 - `logs/decode.log`
-- `logs/proxy_smg.log`
+- `logs/proxy_mesh.log`
 - `logs/gsm8k_eval.log`
 - `logs/gsm8k_results.json`
 - `logs/standalone.log`

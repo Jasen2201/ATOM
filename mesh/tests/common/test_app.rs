@@ -5,7 +5,7 @@ use data_connector::{
     MemoryConversationItemStorage, MemoryConversationStorage, MemoryResponseStorage,
 };
 use reqwest::Client;
-use smg::{
+use mesh::{
     app_context::AppContext,
     config::RouterConfig,
     core::{

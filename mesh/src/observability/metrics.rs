@@ -148,175 +148,175 @@ impl Default for PrometheusConfig {
 pub(crate) fn init_metrics() {
     // Layer 1: HTTP metrics
     describe_counter!(
-        "smg_http_requests_total",
+        "mesh_http_requests_total",
         "Total HTTP requests by method and path"
     );
     describe_histogram!(
-        "smg_http_request_duration_seconds",
+        "mesh_http_request_duration_seconds",
         "HTTP request duration by method and path"
     );
     describe_gauge!(
-        "smg_http_inflight_request_age_count",
+        "mesh_http_inflight_request_age_count",
         "In-flight HTTP requests per age bucket (gt < age <= le, non-cumulative)"
     );
     describe_counter!(
-        "smg_http_responses_total",
+        "mesh_http_responses_total",
         "Total HTTP responses by status_code and error_code"
     );
     describe_gauge!(
-        "smg_http_connections_active",
+        "mesh_http_connections_active",
         "Currently active HTTP connections"
     );
     describe_counter!(
-        "smg_http_rate_limit_total",
+        "mesh_http_rate_limit_total",
         "Rate limiting decisions by result (allowed/rejected)"
     );
 
     // Layer 2: Router metrics
     describe_counter!(
-        "smg_router_requests_total",
+        "mesh_router_requests_total",
         "Total routed requests by router_type, backend_type, connection_mode, model, endpoint, streaming"
     );
     describe_histogram!(
-        "smg_router_request_duration_seconds",
+        "mesh_router_request_duration_seconds",
         "Router request duration by router_type, backend_type, connection_mode, model, endpoint"
     );
     describe_counter!(
-        "smg_router_request_errors_total",
+        "mesh_router_request_errors_total",
         "Router errors by router_type, backend_type, connection_mode, model, endpoint, error_type"
     );
     describe_histogram!(
-        "smg_router_stage_duration_seconds",
+        "mesh_router_stage_duration_seconds",
         "Pipeline stage duration by router_type and stage (gRPC only)"
     );
     describe_counter!(
-        "smg_router_upstream_responses_total",
+        "mesh_router_upstream_responses_total",
         "Upstream backend HTTP responses by router_type, status_code, error_code"
     );
 
     // Layer 2: Router inference metrics (gRPC only)
     describe_histogram!(
-        "smg_router_ttft_seconds",
+        "mesh_router_ttft_seconds",
         "Time to first token by router_type, backend_type, model, endpoint (gRPC only)"
     );
     describe_histogram!(
-        "smg_router_tpot_seconds",
+        "mesh_router_tpot_seconds",
         "Time per output token by router_type, backend_type, model, endpoint (gRPC only)"
     );
     describe_counter!(
-        "smg_router_tokens_total",
+        "mesh_router_tokens_total",
         "Total tokens processed by router_type, backend_type, model, endpoint, token_type (gRPC only)"
     );
     describe_histogram!(
-        "smg_router_generation_duration_seconds",
+        "mesh_router_generation_duration_seconds",
         "Total generation time by router_type, backend_type, model, endpoint (gRPC only)"
     );
 
     // Layer 3: Worker metrics
     describe_gauge!(
-        "smg_worker_pool_size",
+        "mesh_worker_pool_size",
         "Current worker pool size by worker_type, connection_mode, model"
     );
     describe_gauge!(
-        "smg_worker_connections_active",
+        "mesh_worker_connections_active",
         "Active connections to workers by worker_type, connection_mode"
     );
     describe_gauge!(
-        "smg_worker_requests_active",
+        "mesh_worker_requests_active",
         "Currently running requests per worker"
     );
     describe_gauge!(
-        "smg_worker_health",
+        "mesh_worker_health",
         "Worker health status (1=healthy, 0=unhealthy)"
     );
     describe_counter!(
-        "smg_worker_health_checks_total",
+        "mesh_worker_health_checks_total",
         "Health check results by worker_type and result"
     );
     describe_counter!(
-        "smg_worker_selection_total",
+        "mesh_worker_selection_total",
         "Worker selection events by worker_type, connection_mode, model, policy"
     );
     describe_counter!(
-        "smg_worker_errors_total",
+        "mesh_worker_errors_total",
         "Worker-level errors by worker_type, connection_mode, error_type"
     );
     describe_gauge!(
-        "smg_manual_policy_cache_entries",
+        "mesh_manual_policy_cache_entries",
         "Number of routing entries in manual policy cache"
     );
 
     // Layer 3: Worker resilience metrics (circuit breaker)
     describe_gauge!(
-        "smg_worker_cb_state",
+        "mesh_worker_cb_state",
         "Circuit breaker state per worker (0=closed, 1=open, 2=half_open)"
     );
     describe_counter!(
-        "smg_worker_cb_transitions_total",
+        "mesh_worker_cb_transitions_total",
         "Circuit breaker state transitions by worker, from, to"
     );
     describe_counter!(
-        "smg_worker_cb_outcomes_total",
+        "mesh_worker_cb_outcomes_total",
         "Circuit breaker outcomes by worker and outcome (success/failure)"
     );
     describe_gauge!(
-        "smg_worker_cb_consecutive_failures",
+        "mesh_worker_cb_consecutive_failures",
         "Current consecutive failure count per worker"
     );
     describe_gauge!(
-        "smg_worker_cb_consecutive_successes",
+        "mesh_worker_cb_consecutive_successes",
         "Current consecutive success count per worker"
     );
 
     // Layer 3: Worker resilience metrics (retry)
     describe_counter!(
-        "smg_worker_retries_total",
+        "mesh_worker_retries_total",
         "Total retry attempts by worker_type and endpoint"
     );
     describe_counter!(
-        "smg_worker_retries_exhausted_total",
+        "mesh_worker_retries_exhausted_total",
         "Requests that exhausted all retries by worker_type and endpoint"
     );
     describe_histogram!(
-        "smg_worker_retry_backoff_seconds",
+        "mesh_worker_retry_backoff_seconds",
         "Retry backoff duration by attempt number"
     );
 
     // Layer 4: Discovery metrics
     describe_counter!(
-        "smg_discovery_registrations_total",
+        "mesh_discovery_registrations_total",
         "Worker registration attempts by source and result"
     );
     describe_counter!(
-        "smg_discovery_deregistrations_total",
+        "mesh_discovery_deregistrations_total",
         "Worker deregistration events by source and reason"
     );
     describe_histogram!(
-        "smg_discovery_sync_duration_seconds",
+        "mesh_discovery_sync_duration_seconds",
         "Discovery sync duration by source"
     );
     describe_gauge!(
-        "smg_discovery_workers_discovered",
+        "mesh_discovery_workers_discovered",
         "Workers known via discovery by source"
     );
 
     // Layer 5: Database metrics
     describe_counter!(
-        "smg_db_operations_total",
+        "mesh_db_operations_total",
         "Total database operations by storage_type, operation, result"
     );
     describe_histogram!(
-        "smg_db_operation_duration_seconds",
+        "mesh_db_operation_duration_seconds",
         "Database operation duration by storage_type, operation"
     );
     describe_gauge!(
-        "smg_db_connections_active",
+        "mesh_db_connections_active",
         "Active database connections by storage_type"
     );
-    describe_counter!("smg_db_items_stored", "Total items stored by storage_type");
+    describe_counter!("mesh_db_items_stored", "Total items stored by storage_type");
 
     // Initialize mesh metrics
-    smg_mesh::metrics::init_mesh_metrics();
+    mesh_sync::metrics::init_mesh_metrics();
 }
 
 pub fn start_prometheus(config: PrometheusConfig) {
@@ -431,7 +431,7 @@ pub mod metrics_labels {
     pub const ERROR_INTERNAL: &str = "internal_error";
 }
 
-/// SMG Metrics helper struct for the new layered metrics architecture.
+/// Mesh Metrics helper struct for the new layered metrics architecture.
 ///
 /// Design principles for low overhead:
 /// - Dynamic labels use string interning (single allocation per unique value)
@@ -465,7 +465,7 @@ impl Metrics {
     pub fn record_http_request(method: &'static str, path: &str) {
         let path_interned = intern_string(path);
         counter!(
-            "smg_http_requests_total",
+            "mesh_http_requests_total",
             "method" => method,
             "path" => path_interned,
         )
@@ -477,7 +477,7 @@ impl Metrics {
     pub fn record_http_duration(method: &'static str, path: &str, duration: Duration) {
         let path_interned = intern_string(path);
         histogram!(
-            "smg_http_request_duration_seconds",
+            "mesh_http_request_duration_seconds",
             "method" => method,
             "path" => path_interned
         )
@@ -486,7 +486,7 @@ impl Metrics {
 
     /// Set active HTTP connections count
     pub fn set_http_connections_active(count: usize) {
-        gauge!("smg_http_connections_active").set(count as f64);
+        gauge!("mesh_http_connections_active").set(count as f64);
     }
 
     /// Record HTTP response.
@@ -494,7 +494,7 @@ impl Metrics {
         let status_str: Cow<'static, str> = status_code_to_cow(status_code);
         let error_interned = intern_string(error_code);
         counter!(
-            "smg_http_responses_total",
+            "mesh_http_responses_total",
             "status_code" => status_str,
             "error_code" => error_interned
         )
@@ -504,7 +504,7 @@ impl Metrics {
     /// Record rate limit decision.
     pub fn record_http_rate_limit(result: &'static str) {
         counter!(
-            "smg_http_rate_limit_total",
+            "mesh_http_rate_limit_total",
             "result" => result
         )
         .increment(1);
@@ -530,7 +530,7 @@ impl Metrics {
     ) {
         let model = intern_string(model_id);
         counter!(
-            "smg_router_requests_total",
+            "mesh_router_requests_total",
             "router_type" => router_type,
             "backend_type" => backend_type,
             "connection_mode" => connection_mode,
@@ -553,7 +553,7 @@ impl Metrics {
     ) {
         let model = intern_string(model_id);
         histogram!(
-            "smg_router_request_duration_seconds",
+            "mesh_router_request_duration_seconds",
             "router_type" => router_type,
             "backend_type" => backend_type,
             "connection_mode" => connection_mode,
@@ -575,7 +575,7 @@ impl Metrics {
     ) {
         let model = intern_string(model_id);
         counter!(
-            "smg_router_request_errors_total",
+            "mesh_router_request_errors_total",
             "router_type" => router_type,
             "backend_type" => backend_type,
             "connection_mode" => connection_mode,
@@ -594,7 +594,7 @@ impl Metrics {
         duration: Duration,
     ) {
         histogram!(
-            "smg_router_stage_duration_seconds",
+            "mesh_router_stage_duration_seconds",
             "router_type" => router_type,
             "stage" => stage
         )
@@ -611,7 +611,7 @@ impl Metrics {
         let status_str: Cow<'static, str> = status_code_to_cow(status_code);
         let error_interned = intern_string(error_code);
         counter!(
-            "smg_router_upstream_responses_total",
+            "mesh_router_upstream_responses_total",
             "router_type" => router_type,
             "status_code" => status_str,
             "error_code" => error_interned
@@ -634,7 +634,7 @@ impl Metrics {
     ) {
         let model = intern_string(model_id);
         histogram!(
-            "smg_router_ttft_seconds",
+            "mesh_router_ttft_seconds",
             "router_type" => router_type,
             "backend_type" => backend_type,
             "model" => model,
@@ -653,7 +653,7 @@ impl Metrics {
     ) {
         let model = intern_string(model_id);
         histogram!(
-            "smg_router_tpot_seconds",
+            "mesh_router_tpot_seconds",
             "router_type" => router_type,
             "backend_type" => backend_type,
             "model" => model,
@@ -673,7 +673,7 @@ impl Metrics {
     ) {
         let model = intern_string(model_id);
         counter!(
-            "smg_router_tokens_total",
+            "mesh_router_tokens_total",
             "router_type" => router_type,
             "backend_type" => backend_type,
             "model" => model,
@@ -694,7 +694,7 @@ impl Metrics {
     ) {
         let model = intern_string(model_id);
         histogram!(
-            "smg_router_generation_duration_seconds",
+            "mesh_router_generation_duration_seconds",
             "router_type" => router_type,
             "backend_type" => backend_type,
             "model" => model,
@@ -725,7 +725,7 @@ impl Metrics {
         // TTFT and TPOT (only if we have a first token time)
         if let Some(ttft_duration) = ttft {
             histogram!(
-                "smg_router_ttft_seconds",
+                "mesh_router_ttft_seconds",
                 "router_type" => router_type,
                 "backend_type" => backend_type,
                 "model" => Arc::clone(&model),
@@ -738,7 +738,7 @@ impl Metrics {
                 let time_after_first = generation_duration.saturating_sub(ttft_duration);
                 let tpot = time_after_first / (output_tokens as u32 - 1);
                 histogram!(
-                    "smg_router_tpot_seconds",
+                    "mesh_router_tpot_seconds",
                     "router_type" => router_type,
                     "backend_type" => backend_type,
                     "model" => Arc::clone(&model),
@@ -750,7 +750,7 @@ impl Metrics {
 
         // Generation duration (always recorded)
         histogram!(
-            "smg_router_generation_duration_seconds",
+            "mesh_router_generation_duration_seconds",
             "router_type" => router_type,
             "backend_type" => backend_type,
             "model" => Arc::clone(&model),
@@ -761,7 +761,7 @@ impl Metrics {
         // Input tokens (if available)
         if let Some(input) = input_tokens {
             counter!(
-                "smg_router_tokens_total",
+                "mesh_router_tokens_total",
                 "router_type" => router_type,
                 "backend_type" => backend_type,
                 "model" => Arc::clone(&model),
@@ -773,7 +773,7 @@ impl Metrics {
 
         // Output tokens (always recorded - move model on final use)
         counter!(
-            "smg_router_tokens_total",
+            "mesh_router_tokens_total",
             "router_type" => router_type,
             "backend_type" => backend_type,
             "model" => model,
@@ -796,7 +796,7 @@ impl Metrics {
     ) {
         let model = intern_string(model_id);
         gauge!(
-            "smg_worker_pool_size",
+            "mesh_worker_pool_size",
             "worker_type" => worker_type,
             "connection_mode" => connection_mode,
             "model" => model
@@ -811,7 +811,7 @@ impl Metrics {
         count: usize,
     ) {
         gauge!(
-            "smg_worker_connections_active",
+            "mesh_worker_connections_active",
             "worker_type" => worker_type,
             "connection_mode" => connection_mode
         )
@@ -821,7 +821,7 @@ impl Metrics {
     /// Record health check result
     pub fn record_worker_health_check(worker_type: &'static str, result: &'static str) {
         counter!(
-            "smg_worker_health_checks_total",
+            "mesh_worker_health_checks_total",
             "worker_type" => worker_type,
             "result" => result
         )
@@ -837,7 +837,7 @@ impl Metrics {
     ) {
         let model = intern_string(model_id);
         counter!(
-            "smg_worker_selection_total",
+            "mesh_worker_selection_total",
             "worker_type" => worker_type,
             "connection_mode" => connection_mode,
             "model" => model,
@@ -853,7 +853,7 @@ impl Metrics {
         error_type: &'static str,
     ) {
         counter!(
-            "smg_worker_errors_total",
+            "mesh_worker_errors_total",
             "worker_type" => worker_type,
             "connection_mode" => connection_mode,
             "error_type" => error_type
@@ -864,7 +864,7 @@ impl Metrics {
     /// Record manual policy execution branch for routing decisions
     pub fn record_worker_manual_policy_branch(branch: &'static str) {
         counter!(
-            "smg_manual_policy_branch_total",
+            "mesh_manual_policy_branch_total",
             "branch" => branch
         )
         .increment(1);
@@ -872,13 +872,13 @@ impl Metrics {
 
     /// Set manual policy cache entries count
     pub fn set_manual_policy_cache_entries(count: usize) {
-        gauge!("smg_manual_policy_cache_entries").set(count as f64);
+        gauge!("mesh_manual_policy_cache_entries").set(count as f64);
     }
 
     /// Record consistent hashing policy execution branch for routing decisions
     pub fn record_worker_consistent_hashing_policy_branch(branch: &'static str) {
         counter!(
-            "smg_consistent_hashing_policy_branch_total",
+            "mesh_consistent_hashing_policy_branch_total",
             "branch" => branch
         )
         .increment(1);
@@ -887,7 +887,7 @@ impl Metrics {
     /// Record prefix hash policy execution branch for routing decisions
     pub fn record_worker_prefix_hash_policy_branch(branch: &'static str) {
         counter!(
-            "smg_prefix_hash_policy_branch_total",
+            "mesh_prefix_hash_policy_branch_total",
             "branch" => branch
         )
         .increment(1);
@@ -897,7 +897,7 @@ impl Metrics {
     pub fn set_worker_requests_active(worker: &str, count: usize) {
         let worker_interned = intern_string(worker);
         gauge!(
-            "smg_worker_requests_active",
+            "mesh_worker_requests_active",
             "worker" => worker_interned
         )
         .set(count as f64);
@@ -907,7 +907,7 @@ impl Metrics {
     pub fn set_worker_routing_keys_active(worker: &str, count: usize) {
         let worker_interned = intern_string(worker);
         gauge!(
-            "smg_worker_routing_keys_active",
+            "mesh_worker_routing_keys_active",
             "worker" => worker_interned
         )
         .set(count as f64);
@@ -917,7 +917,7 @@ impl Metrics {
     pub fn set_worker_health(worker_url: &str, healthy: bool) {
         let worker_interned = intern_string(worker_url);
         gauge!(
-            "smg_worker_health",
+            "mesh_worker_health",
             "worker" => worker_interned
         )
         .set(if healthy { 1.0 } else { 0.0 });
@@ -931,7 +931,7 @@ impl Metrics {
     pub fn set_worker_cb_state(worker: &str, state_code: u8) {
         let worker_interned = intern_string(worker);
         gauge!(
-            "smg_worker_cb_state",
+            "mesh_worker_cb_state",
             "worker" => worker_interned
         )
         .set(state_code as f64);
@@ -941,7 +941,7 @@ impl Metrics {
     pub fn record_worker_cb_transition(worker: &str, from: &'static str, to: &'static str) {
         let worker_interned = intern_string(worker);
         counter!(
-            "smg_worker_cb_transitions_total",
+            "mesh_worker_cb_transitions_total",
             "worker" => worker_interned,
             "from" => from,
             "to" => to
@@ -953,7 +953,7 @@ impl Metrics {
     pub fn record_worker_cb_outcome(worker: &str, outcome: &'static str) {
         let worker_interned = intern_string(worker);
         counter!(
-            "smg_worker_cb_outcomes_total",
+            "mesh_worker_cb_outcomes_total",
             "worker" => worker_interned,
             "outcome" => outcome
         )
@@ -964,7 +964,7 @@ impl Metrics {
     pub fn set_worker_cb_consecutive_failures(worker: &str, count: u32) {
         let worker_interned = intern_string(worker);
         gauge!(
-            "smg_worker_cb_consecutive_failures",
+            "mesh_worker_cb_consecutive_failures",
             "worker" => worker_interned
         )
         .set(count as f64);
@@ -974,7 +974,7 @@ impl Metrics {
     pub fn set_worker_cb_consecutive_successes(worker: &str, count: u32) {
         let worker_interned = intern_string(worker);
         gauge!(
-            "smg_worker_cb_consecutive_successes",
+            "mesh_worker_cb_consecutive_successes",
             "worker" => worker_interned
         )
         .set(count as f64);
@@ -987,7 +987,7 @@ impl Metrics {
     /// Record retry attempt
     pub fn record_worker_retry(worker_type: &'static str, endpoint: &'static str) {
         counter!(
-            "smg_worker_retries_total",
+            "mesh_worker_retries_total",
             "worker_type" => worker_type,
             "endpoint" => endpoint
         )
@@ -997,7 +997,7 @@ impl Metrics {
     /// Record retries exhausted
     pub fn record_worker_retries_exhausted(worker_type: &'static str, endpoint: &'static str) {
         counter!(
-            "smg_worker_retries_exhausted_total",
+            "mesh_worker_retries_exhausted_total",
             "worker_type" => worker_type,
             "endpoint" => endpoint
         )
@@ -1015,7 +1015,7 @@ impl Metrics {
             _ => Cow::Owned(attempt.to_string()),
         };
         histogram!(
-            "smg_worker_retry_backoff_seconds",
+            "mesh_worker_retry_backoff_seconds",
             "attempt" => attempt_str
         )
         .record(duration.as_secs_f64());
@@ -1028,7 +1028,7 @@ impl Metrics {
     /// Record worker registration attempt
     pub fn record_discovery_registration(source: &'static str, result: &'static str) {
         counter!(
-            "smg_discovery_registrations_total",
+            "mesh_discovery_registrations_total",
             "source" => source,
             "result" => result
         )
@@ -1038,7 +1038,7 @@ impl Metrics {
     /// Record worker deregistration
     pub fn record_discovery_deregistration(source: &'static str, reason: &'static str) {
         counter!(
-            "smg_discovery_deregistrations_total",
+            "mesh_discovery_deregistrations_total",
             "source" => source,
             "reason" => reason
         )
@@ -1048,7 +1048,7 @@ impl Metrics {
     /// Record discovery sync duration
     pub fn record_discovery_sync_duration(source: &'static str, duration: Duration) {
         histogram!(
-            "smg_discovery_sync_duration_seconds",
+            "mesh_discovery_sync_duration_seconds",
             "source" => source
         )
         .record(duration.as_secs_f64());
@@ -1057,7 +1057,7 @@ impl Metrics {
     /// Set workers discovered count
     pub fn set_discovery_workers_discovered(source: &'static str, count: usize) {
         gauge!(
-            "smg_discovery_workers_discovered",
+            "mesh_discovery_workers_discovered",
             "source" => source
         )
         .set(count as f64);
@@ -1075,7 +1075,7 @@ impl Metrics {
         result: &'static str,
     ) {
         counter!(
-            "smg_db_operations_total",
+            "mesh_db_operations_total",
             "storage_type" => storage_type,
             "operation" => operation,
             "result" => result
@@ -1090,7 +1090,7 @@ impl Metrics {
         duration: Duration,
     ) {
         histogram!(
-            "smg_db_operation_duration_seconds",
+            "mesh_db_operation_duration_seconds",
             "storage_type" => storage_type,
             "operation" => operation
         )
@@ -1100,7 +1100,7 @@ impl Metrics {
     /// Set active database connections
     pub fn set_db_connections_active(storage_type: &'static str, count: usize) {
         gauge!(
-            "smg_db_connections_active",
+            "mesh_db_connections_active",
             "storage_type" => storage_type
         )
         .set(count as f64);
@@ -1109,7 +1109,7 @@ impl Metrics {
     /// Record item stored
     pub fn increment_db_items_stored(storage_type: &'static str) {
         counter!(
-            "smg_db_items_stored",
+            "mesh_db_items_stored",
             "storage_type" => storage_type
         )
         .increment(1);
@@ -1123,14 +1123,14 @@ impl Metrics {
         // Intern once, clone (cheap) for each metric
         let worker = intern_string(worker_url);
 
-        gauge!("smg_worker_cb_consecutive_failures", "worker" => Arc::clone(&worker)).set(0.0);
-        gauge!("smg_worker_cb_consecutive_successes", "worker" => Arc::clone(&worker)).set(0.0);
-        gauge!("smg_worker_requests_active", "worker" => Arc::clone(&worker)).set(0.0);
+        gauge!("mesh_worker_cb_consecutive_failures", "worker" => Arc::clone(&worker)).set(0.0);
+        gauge!("mesh_worker_cb_consecutive_successes", "worker" => Arc::clone(&worker)).set(0.0);
+        gauge!("mesh_worker_requests_active", "worker" => Arc::clone(&worker)).set(0.0);
 
         // Zero for these metrics have special valid meaning, thus we set to -1 temporarily
         // (and will remove them completely after https://github.com/metrics-rs/metrics/issues/653)
-        gauge!("smg_worker_cb_state", "worker" => Arc::clone(&worker)).set(-1.0);
-        gauge!("smg_worker_health", "worker" => worker).set(-1.0);
+        gauge!("mesh_worker_cb_state", "worker" => Arc::clone(&worker)).set(-1.0);
+        gauge!("mesh_worker_health", "worker" => worker).set(-1.0);
     }
 }
 
@@ -1291,7 +1291,7 @@ mod tests {
         let _matching_metrics = [
             "request_duration_seconds",
             "response_duration_seconds",
-            "smg_request_duration_seconds",
+            "mesh_request_duration_seconds",
         ];
 
         let _non_matching_metrics = ["duration_total", "duration_seconds_total", "other_metric"];

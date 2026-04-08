@@ -55,7 +55,7 @@
 
 **代码位置**: `src/routers/http/router.rs`，`src/routers/http/pd_router.rs`，`src/routers/http/pd_types.rs`
 
-**详细说明**: 基于 HTTP/HTTPS 的请求转发。使用 `reqwest` 客户端向后端 worker 发送 HTTP 请求。支持流式响应（SSE）的透传，通过 `UnboundedReceiverStream` 转发 chunk 数据。HTTP PD Router 实现了完整的 prefill→decode 两阶段请求流：先向 prefill worker POST 请求，再将 decode worker 的流式响应返回客户端。支持自定义 HTTP header 转发（如 `X-SMG-Routing-Key`、`X-SMG-Target-Worker`）。
+**详细说明**: 基于 HTTP/HTTPS 的请求转发。使用 `reqwest` 客户端向后端 worker 发送 HTTP 请求。支持流式响应（SSE）的透传，通过 `UnboundedReceiverStream` 转发 chunk 数据。HTTP PD Router 实现了完整的 prefill→decode 两阶段请求流：先向 prefill worker POST 请求，再将 decode worker 的流式响应返回客户端。支持自定义 HTTP header 转发（如 `X-Mesh-Routing-Key`、`X-Mesh-Target-Worker`）。
 
 ---
 
@@ -66,7 +66,7 @@
 
 **代码位置**: `src/routers/grpc/`（整个目录），`src/routers/grpc/client.rs`，`src/routers/grpc/pipeline.rs`
 
-**详细说明**: 基于 gRPC（tonic）的请求转发。通过 `smg-grpc-client` crate 封装 SGLang 调度器的 gRPC proto。实现了 `RequestPipeline` 作为统一的请求处理流水线，包含以下阶段：
+**详细说明**: 基于 gRPC（tonic）的请求转发。通过 `mesh-grpc` crate 封装 SGLang 调度器的 gRPC proto。实现了 `RequestPipeline` 作为统一的请求处理流水线，包含以下阶段：
 - **client_acquisition**: 获取 gRPC 客户端连接
 - **worker_selection**: 基于策略选择目标 worker
 - **request_execution**: 执行 gRPC 调用
@@ -183,7 +183,7 @@
 
 **代码位置**: `src/policies/manual.rs`
 
-**详细说明**: 手动路由/粘性会话策略。通过 HTTP header `X-SMG-Routing-Key` 实现会话亲和性。使用 DashMap 缓存路由键到 worker 的映射。当遇到新的路由键时，支持三种分配模式（`assignment_mode`）：
+**详细说明**: 手动路由/粘性会话策略。通过 HTTP header `X-Mesh-Routing-Key` 实现会话亲和性。使用 DashMap 缓存路由键到 worker 的映射。当遇到新的路由键时，支持三种分配模式（`assignment_mode`）：
 - `random`: 随机分配
 - `min_load`: 分配给负载最小的 worker
 - `min_group`: 分配给活跃路由键最少的 worker
@@ -202,8 +202,8 @@
 **代码位置**: `src/policies/consistent_hashing.rs`
 
 **详细说明**: 一致性哈希策略。使用哈希环实现会话亲和性。支持两种路由方式：
-- `X-SMG-Target-Worker`: 直接指定目标 worker URL
-- `X-SMG-Routing-Key`: 基于一致性哈希选择 worker
+- `X-Mesh-Target-Worker`: 直接指定目标 worker URL
+- `X-Mesh-Routing-Key`: 基于一致性哈希选择 worker
 
 O(log n) 查找复杂度。拓扑变化时只有约 1/N 的键需要重新分配。哈希环由 `WorkerRegistry` 构建和缓存，通过 `SelectWorkerInfo::hash_ring` 传递到策略层，避免每次请求重建。
 
@@ -459,11 +459,11 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ### 5.1 Mesh Server (Gossip 协议集群)
 - [ ] 保留 - [ ] 删除 - [x] 待讨论
 
-> **建议待讨论理由**: 短期打榜不需要，但长期分布式方案可能需要多 router 实例的状态同步。这是最大的复杂度来源之一（smg-mesh crate、Gossip、CRDT、redis）。**建议短期删除、代码先 fork 保存，长期路线图中再评估是否需要。**
+> **建议待讨论理由**: 短期打榜不需要，但长期分布式方案可能需要多 router 实例的状态同步。这是最大的复杂度来源之一（mesh-sync crate、Gossip、CRDT、redis）。**建议短期删除、代码先 fork 保存，长期路线图中再评估是否需要。**
 >
 > **Claude 意见**: **倾向短期删除**。Mesh/Gossip/CRDT 是整个项目中复杂度最高的部分。打榜阶段单 router 实例完全够用。长期分布式方案可以后续用更轻量的方案（如 K8s ConfigMap/etcd 做状态同步）替代 Gossip。fork 保存代码即可。
 
-**代码位置**: `src/server.rs:742-796`（启动代码），外部 crate `smg-mesh`
+**代码位置**: `src/server.rs:742-796`（启动代码），外部 crate `mesh-sync`
 
 **详细说明**: 基于 Gossip 协议的分布式集群功能。多个 router 实例通过 mesh 网络组成高可用集群。使用 CRDT（Conflict-free Replicated Data Types）实现无冲突的状态同步。核心组件：
 - `MeshServerHandler`: 处理 mesh 协议消息
@@ -507,7 +507,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 >
 > **Claude 意见**: 同意待讨论，随 5.1 Mesh 的决策走。注意这个全局速率限制和 9.3 的单节点并发限制不同——9.3 是本地的，可以独立保留。
 
-**代码位置**: `src/server.rs:762-766`，`smg-mesh` crate 的 `RateLimitWindow`
+**代码位置**: `src/server.rs:762-766`，`mesh-sync` crate 的 `RateLimitWindow`
 
 **详细说明**: 跨 mesh 节点的全局速率限制。使用哈希环将速率限制计数分布到不同节点。`RateLimitWindow` 定期重置计数器（默认每秒一次）。通过 `/ha/rate-limit` API 动态配置。
 
@@ -752,7 +752,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 > **Claude 意见**: 同意删除。内部 GPU 集群不需要 API key 认证。
 
-**代码位置**: `src/middleware.rs`（`auth_middleware`），外部 crate `smg-auth`
+**代码位置**: `src/middleware.rs`（`auth_middleware`），外部 crate `mesh-auth`
 
 **详细说明**: API Key 认证中间件。通过 `Authorization: Bearer <key>` header 验证请求。使用 `subtle::ConstantTimeEq` 进行常量时间比较防止时序攻击。可通过 `--api-key` 设置 API key。不设置时不启用认证。
 
@@ -763,7 +763,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 > **Claude 意见**: 同意删除。JWT/OIDC 是企业级多租户需求，AMD 内部不需要。
 
-**代码位置**: `src/main.rs:525-577`，外部 crate `smg-auth`
+**代码位置**: `src/main.rs:525-577`，外部 crate `mesh-auth`
 
 **详细说明**: 控制面（管理 API）的高级认证系统。支持两种认证方式：
 - **JWT/OIDC**: 通过 `--jwt-issuer`、`--jwt-audience` 配置，支持 JWKS 自动发现，支持角色映射（admin/user）
@@ -858,7 +858,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 > **Claude 意见**: 同意删除。MCP 是 agent/tool calling 场景，与 PD 分离性能优化无关。
 
-**代码位置**: `src/server.rs:893-912`，外部 crate `smg-mcp`，`src/routers/mcp_utils.rs`
+**代码位置**: `src/server.rs:893-912`，外部 crate `mesh-mcp`，`src/routers/mcp_utils.rs`
 
 **详细说明**: 支持 MCP（Model Context Protocol）服务器集成，允许模型调用外部工具。通过 `--mcp-config-path` 加载 MCP 配置文件。使用 `rmcp` crate 支持多种 MCP 传输方式：
 - SSE（Server-Sent Events）
@@ -991,7 +991,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 **代码位置**: `bindings/python/`
 
-**详细说明**: Python SDK 绑定。提供 `sglang_router` Python 包，可通过 `pip install` 安装。包含：
+**详细说明**: Python SDK 绑定。提供 `mesh_router` Python 包，可通过 `pip install` 安装。包含：
 - `Router`: Rust 实现的高性能路由器的 Python 封装
 - `MiniLoadBalancer`: 纯 Python 实现的简易负载均衡器（用于调试）
 - `RouterArgs`: 路由器参数配置类
@@ -1149,15 +1149,15 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ### 20.1 Header-based Routing
 - [ ] 保留 - [x] 删除 - [ ] 待讨论
 
-> **建议删除理由**: `X-SMG-Target-Worker`、`X-SMG-Routing-Key` 等特殊 header 主要服务于 Manual/ConsistentHashing 等高级策略。最小化 PD 使用 RoundRobin/Random 不需要 header 路由。保留基本的认证 header 转发即可（几行代码）。
+> **建议删除理由**: `X-Mesh-Target-Worker`、`X-Mesh-Routing-Key` 等特殊 header 主要服务于 Manual/ConsistentHashing 等高级策略。最小化 PD 使用 RoundRobin/Random 不需要 header 路由。保留基本的认证 header 转发即可（几行代码）。
 >
 > **Claude 意见**: 同意删除。Manual 和 ConsistentHashing 都删了，这个也不需要了。
 
 **代码位置**: `src/routers/header_utils.rs`
 
 **详细说明**: 基于 HTTP Header 的路由辅助功能。支持的特殊 header：
-- `X-SMG-Target-Worker`: 直接指定目标 worker URL
-- `X-SMG-Routing-Key`: 用于粘性会话/一致性哈希的路由键
+- `X-Mesh-Target-Worker`: 直接指定目标 worker URL
+- `X-Mesh-Routing-Key`: 用于粘性会话/一致性哈希的路由键
 - 认证 header 提取和传递
 - Provider 特定 header 的应用
 
@@ -1306,9 +1306,9 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 删除以上功能后，可以移除以下 **Cargo 依赖**：
 - `openai-harmony` — Harmony 协议
-- `smg-mcp`, `rmcp` — MCP 支持
-- `smg-wasm`, `wasmtime`, `sha2` — WASM 支持
-- `smg-auth`, `jsonwebtoken`, `subtle` — 认证
+- `mesh-mcp`, `rmcp` — MCP 支持
+- `mesh-wasm`, `wasmtime`, `sha2` — WASM 支持
+- `mesh-auth`, `jsonwebtoken`, `subtle` — 认证
 - `data-connector` — 数据持久化（简化为纯内存 stub）
 - `crdts`, `redis` — Mesh/CRDT（如果 Mesh 最终删除）
 - `serde_yaml` — YAML 配置（MCP config）
@@ -1329,5 +1329,5 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 - `kube`, `k8s-openapi` — K8s Service Discovery
 - `dashmap`, `blake3`, `xxhash-rust` — 高性能数据结构
 - `llm-tokenizer` — Tokenizer（CacheAware 依赖）
-- `smg-grpc-client` — gRPC 客户端
+- `mesh-grpc` — gRPC 客户端
 - `wfaas` — Workflow engine

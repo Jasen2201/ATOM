@@ -15,7 +15,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use smg_mesh::{
+use mesh_sync::{
     rate_limit_window::RateLimitWindow, MeshServerConfig, MeshServerHandler, MeshSyncManager,
 };
 use tokio::{signal, spawn};
@@ -630,7 +630,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
                 json_format: config.json_log,
                 log_dir: config.log_dir.clone(),
                 colorize: true,
-                log_file_name: "smg".to_string(),
+                log_file_name: "mesh".to_string(),
                 log_targets: None,
             },
             config.router_config.trace_config.clone(),
@@ -647,7 +647,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         &config.mesh_server_config
     {
         // Create HA sync manager with stores first
-        use smg_mesh::{partition::PartitionDetector, stores::StateStores, sync::MeshSyncManager};
+        use mesh_sync::{partition::PartitionDetector, stores::StateStores, sync::MeshSyncManager};
         let stores = Arc::new(StateStores::with_self_name(
             mesh_server_config.self_name.clone(),
         ));
@@ -669,7 +669,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         });
 
         // Create mesh server builder and build with stores
-        use smg_mesh::service::MeshServerBuilder;
+        use mesh_sync::service::MeshServerBuilder;
         let builder = MeshServerBuilder::new(
             mesh_server_config.self_name.clone(),
             mesh_server_config.self_addr,

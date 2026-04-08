@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use serde_json::{from_str, to_string, to_value, to_vec};
-use smg::{
+use mesh::{
     core::{BasicWorker, BasicWorkerBuilder, Worker, WorkerType},
     protocols::{
         chat::{ChatCompletionRequest, ChatMessage, MessageContent},
@@ -577,7 +577,7 @@ fn bench_full_round_trip(c: &mut Criterion) {
 fn benchmark_summary(c: &mut Criterion) {
     let group = c.benchmark_group("benchmark_summary");
 
-    println!("\nSGLang Model Gateway Performance Benchmark Suite");
+    println!("\nATOM Mesh Performance Benchmark Suite");
     println!("=================================================");
 
     // Quick performance overview

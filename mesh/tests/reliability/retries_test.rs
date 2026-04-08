@@ -8,7 +8,7 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use serde_json::json;
-use smg::config::{RetryConfig, RouterConfig};
+use mesh::config::{RetryConfig, RouterConfig};
 use tower::ServiceExt;
 
 use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};

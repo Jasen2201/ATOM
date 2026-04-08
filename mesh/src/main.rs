@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use rand::{distr::Alphanumeric, Rng};
-use smg::{
+use mesh::{
     config::{
         CircuitBreakerConfig, ConfigResult, DiscoveryConfig, HealthCheckConfig,
         MetricsConfig, PolicyConfig,
@@ -18,7 +18,7 @@ use smg::{
     service_discovery::ServiceDiscoveryConfig,
     version,
 };
-use smg_mesh::service::MeshServerConfig;
+use mesh_sync::service::MeshServerConfig;
 fn parse_prefill_args() -> Vec<(String, Option<u16>)> {
     let args: Vec<String> = std::env::args().collect();
     let mut prefill_entries = Vec::new();
@@ -72,23 +72,22 @@ impl std::fmt::Display for Backend {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "sglang-router", alias = "smg", alias = "amg")]
-#[command(about = "SGLang Model Gateway - High-performance inference gateway")]
+#[command(name = "mesh")]
+#[command(about = "ATOM Mesh - High-performance inference gateway")]
 #[command(args_conflicts_with_subcommands = true)]
 #[command(long_about = r#"
-SGLang Model Gateway - Rust-based inference gateway
+ATOM Mesh - Rust-based inference gateway
 
 Usage:
-  smg launch [OPTIONS]     Launch router (short command)
-  amg launch [OPTIONS]     Launch router (alternative)
-  sglang-router [OPTIONS]  Launch router (full name)
+  mesh launch [OPTIONS]       Launch router (short command)
+  atom-mesh launch [OPTIONS]  Launch router (full name)
 
 Examples:
   # Regular mode
-  smg launch --worker-urls http://worker1:8000 http://worker2:8000
+  mesh launch --worker-urls http://worker1:8000 http://worker2:8000
 
   # PD disaggregated mode
-  smg launch --pd-disaggregation \
+  mesh launch --pd-disaggregation \
     --prefill http://127.0.0.1:30001 9001 \
     --prefill http://127.0.0.2:30002 9002 \
     --decode http://127.0.0.3:30003 \
@@ -96,7 +95,7 @@ Examples:
     --policy cache_aware
 
   # With different policies
-  smg launch --pd-disaggregation \
+  mesh launch --pd-disaggregation \
     --prefill http://127.0.0.1:30001 9001 \
     --prefill http://127.0.0.2:30002 \
     --decode http://127.0.0.3:30003 \

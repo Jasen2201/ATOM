@@ -43,8 +43,8 @@ static ALLOWED_TARGETS: OnceLock<[&'static str; 3]> = OnceLock::new();
 fn get_allowed_targets() -> &'static [&'static str; 3] {
     ALLOWED_TARGETS.get_or_init(|| {
         [
-            "smg::otel-trace",
-            "smg::observability::otel_trace",
+            "mesh::otel-trace",
+            "mesh::observability::otel_trace",
             events_module_path(),
         ]
     })
@@ -123,7 +123,7 @@ pub fn otel_tracing_init(enable: bool, otlp_endpoint: Option<&str>) -> Result<()
         .build();
 
     let resource =
-        Resource::default().merge(&Resource::new(vec![KeyValue::new("service.name", "smg")]));
+        Resource::default().merge(&Resource::new(vec![KeyValue::new("service.name", "mesh")]));
 
     let provider = TracerProvider::builder()
         .with_span_processor(span_processor)
@@ -134,7 +134,7 @@ pub fn otel_tracing_init(enable: bool, otlp_endpoint: Option<&str>) -> Result<()
         .set(provider.clone())
         .map_err(|_| anyhow::anyhow!("Provider already initialized"))?;
 
-    let tracer = provider.tracer("smg");
+    let tracer = provider.tracer("mesh");
 
     TRACER
         .set(tracer)
@@ -261,14 +261,14 @@ pub fn inject_trace_context_grpc(metadata: &mut MetadataMap) {
     });
 }
 
-/// OpenTelemetry trace injector implementing the `smg_grpc_client::TraceInjector` trait.
+/// OpenTelemetry trace injector implementing the `mesh_grpc::TraceInjector` trait.
 ///
-/// This bridges sglang's OTel integration with the `smg-grpc-client` crate's
+/// This bridges sglang's OTel integration with the `mesh-grpc` crate's
 /// trace injection interface, enabling distributed tracing across gRPC calls.
 #[derive(Clone, Default)]
 pub struct OtelTraceInjector;
 
-impl smg_grpc_client::TraceInjector for OtelTraceInjector {
+impl mesh_grpc::TraceInjector for OtelTraceInjector {
     fn inject(
         &self,
         metadata: &mut MetadataMap,

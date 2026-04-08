@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-SGLang Model Gateway CLI
+ATOM Mesh CLI
 
 Provides convenient command-line interface for launching the router and server.
 
 Usage:
-    smg launch [args]          # Launch router only
-    smg server [args]          # Launch router + server
-    smg --help                 # Show help
+    mesh launch [args]          # Launch router only
+    mesh server [args]          # Launch router + server
+    mesh --help                 # Show help
 """
 
 import argparse
@@ -15,7 +15,7 @@ import os
 import sys
 from typing import List, Optional
 
-from sglang_router.sglang_router_rs import (
+from mesh_router.mesh_router_rs import (
     get_verbose_version_string,
     get_version_string,
 )
@@ -23,10 +23,10 @@ from sglang_router.sglang_router_rs import (
 
 def create_parser() -> argparse.ArgumentParser:
     """Create the main CLI parser with subcommands."""
-    prog_name = os.path.basename(sys.argv[0]) if sys.argv else "smg"
+    prog_name = os.path.basename(sys.argv[0]) if sys.argv else "mesh"
     parser = argparse.ArgumentParser(
         prog=prog_name,
-        description="SGLang Model Gateway - High-performance inference router",
+        description="ATOM Mesh - High-performance inference router",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -36,7 +36,7 @@ def create_parser() -> argparse.ArgumentParser:
     launch_parser = subparsers.add_parser(
         "launch",
         help="Launch router only (requires existing worker URLs)",
-        description="Launch the SGLang router with existing worker instances",
+        description="Launch the ATOM Mesh router with existing worker instances",
         add_help=False,  # Let router handle --help
     )
 
@@ -44,7 +44,7 @@ def create_parser() -> argparse.ArgumentParser:
     server_parser = subparsers.add_parser(
         "server",
         help="Launch router and server processes together",
-        description="Launch both SGLang router and server processes",
+        description="Launch both ATOM Mesh router and server processes",
         add_help=False,  # Let server handle --help
     )
 
@@ -75,7 +75,7 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     if args.command == "launch":
         # Import and call launch_router functions directly
-        from sglang_router.launch_router import launch_router, parse_router_args
+        from mesh_router.launch_router import launch_router, parse_router_args
 
         # All router args are in unknown
         router_args = parse_router_args(unknown)
@@ -85,13 +85,13 @@ def main(argv: Optional[List[str]] = None) -> None:
         # Import and call launch_server main with proper argv
         # Note: launch_server.main() uses argparse internally which reads sys.argv
         # We need to temporarily set sys.argv for compatibility
-        import sglang_router.launch_server as launch_server_module
+        import mesh_router.launch_server as launch_server_module
 
         # Preserve original sys.argv
         original_argv = sys.argv
         try:
             # All server args are in unknown
-            prog_name = os.path.basename(sys.argv[0]) if sys.argv else "smg"
+            prog_name = os.path.basename(sys.argv[0]) if sys.argv else "mesh"
             sys.argv = [f"{prog_name} server"] + unknown
             launch_server_module.main()
         finally:
