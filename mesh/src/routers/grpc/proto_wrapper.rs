@@ -15,7 +15,6 @@ use mesh_grpc::{
 #[derive(Clone)]
 pub enum ProtoRequest {
     Generate(ProtoGenerateRequest),
-    Embed(ProtoEmbedRequest),
 }
 
 impl ProtoRequest {
@@ -23,7 +22,6 @@ impl ProtoRequest {
     pub fn request_id(&self) -> &str {
         match self {
             Self::Generate(req) => req.request_id(),
-            Self::Embed(req) => req.request_id(),
         }
     }
 }

@@ -55,13 +55,6 @@ pub(crate) async fn collect_responses(
 
             decode_responses
         }
-        ExecutionResult::Embedding { .. } => {
-            // Embeddings do not support this path (no generate complete response)
-            return Err(error::internal_error(
-                "invalid_execution_mode",
-                "Embedding result encountered in response collection",
-            ));
-        }
     };
 
     if all_responses.is_empty() {

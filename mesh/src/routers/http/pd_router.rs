@@ -31,7 +31,6 @@ use crate::{
     protocols::{
         chat::{ChatCompletionRequest, ChatMessage, MessageContent},
         common::InputIds,
-        embedding::EmbeddingRequest,
         generate::GenerateRequest,
     },
     routers::{
@@ -1301,20 +1300,6 @@ impl RouterTrait for PDRouter {
         };
 
         self.execute_dual_dispatch(headers, body, context).await
-    }
-
-    async fn route_embeddings(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &EmbeddingRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        let _ = (headers, body, model_id);
-        warn!("PD mode does not support /v1/embeddings; returning bad request");
-        error::bad_request(
-            "pd_unsupported_embeddings",
-            "PD mode does not support /v1/embeddings",
-        )
     }
 
     fn router_type(&self) -> &'static str {

@@ -40,7 +40,6 @@ use crate::{
     },
     protocols::{
         chat::ChatCompletionRequest,
-        embedding::EmbeddingRequest,
         generate::GenerateRequest,
         parser::{ParseFunctionCallRequest, SeparateReasoningRequest},
         responses::{ResponsesGetParams, ResponsesRequest},
@@ -190,17 +189,6 @@ async fn v1_responses(
     state
         .router
         .route_responses(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_embeddings(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    Json(body): Json<EmbeddingRequest>,
-) -> Response {
-    state
-        .router
-        .route_embeddings(Some(&headers), &body, Some(&body.model))
         .await
 }
 
@@ -497,7 +485,6 @@ pub fn build_app(
         .route("/generate", post(generate))
         .route("/v1/chat/completions", post(v1_chat_completions))
         .route("/v1/responses", post(v1_responses))
-        .route("/v1/embeddings", post(v1_embeddings))
         .route("/v1/responses/{response_id}", get(v1_responses_get))
         .route(
             "/v1/responses/{response_id}/cancel",

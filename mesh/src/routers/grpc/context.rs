@@ -10,14 +10,12 @@ use axum::http::HeaderMap;
 
 use super::{
     client::GrpcClient,
-    proto_wrapper::{ProtoEmbedComplete, ProtoRequest, ProtoStream},
+    proto_wrapper::{ProtoRequest, ProtoStream},
 };
 use crate::{
     core::{Worker, WorkerLoadGuard},
     protocols::{
         chat::{ChatCompletionRequest, ChatCompletionResponse},
-        classify::{ClassifyRequest, ClassifyResponse},
-        embedding::{EmbeddingRequest, EmbeddingResponse},
         generate::{GenerateRequest, GenerateResponse},
         responses::ResponsesRequest,
     },
@@ -50,8 +48,6 @@ pub(crate) enum RequestType {
     Chat(Arc<ChatCompletionRequest>),
     Generate(Arc<GenerateRequest>),
     Responses(Arc<ResponsesRequest>),
-    Embedding(Arc<EmbeddingRequest>),
-    Classify(Arc<ClassifyRequest>),
 }
 
 /// Shared components (injected once at creation)
@@ -237,42 +233,6 @@ impl RequestContext {
         }
     }
 
-    /// Create context for embedding request
-    pub fn for_embedding(
-        request: Arc<EmbeddingRequest>,
-        headers: Option<HeaderMap>,
-        model_id: Option<String>,
-        components: Arc<SharedComponents>,
-    ) -> Self {
-        Self {
-            input: RequestInput {
-                request_type: RequestType::Embedding(request),
-                headers,
-                model_id,
-            },
-            components,
-            state: ProcessingState::default(),
-        }
-    }
-
-    /// Create context for classify request
-    pub fn for_classify(
-        request: Arc<ClassifyRequest>,
-        headers: Option<HeaderMap>,
-        model_id: Option<String>,
-        components: Arc<SharedComponents>,
-    ) -> Self {
-        Self {
-            input: RequestInput {
-                request_type: RequestType::Classify(request),
-                headers,
-                model_id,
-            },
-            components,
-            state: ProcessingState::default(),
-        }
-    }
-
     /// Get chat request (panics if not chat)
     pub fn chat_request(&self) -> &ChatCompletionRequest {
         match &self.input.request_type {
@@ -319,8 +279,6 @@ impl RequestContext {
             RequestType::Chat(req) => req.stream,
             RequestType::Generate(req) => req.stream,
             RequestType::Responses(req) => req.stream.unwrap_or(false),
-            RequestType::Embedding(_) => false, // Embeddings are never streaming
-            RequestType::Classify(_) => false,  // Classification is never streaming
         }
     }
 
@@ -452,10 +410,6 @@ pub(crate) enum ExecutionResult {
         prefill: ProtoStream,
         decode: Box<ProtoStream>,
     },
-    /// Embedding requests return a single response, not a stream
-    Embedding {
-        response: ProtoEmbedComplete,
-    },
 }
 
 /// Final processed response
@@ -464,8 +418,4 @@ pub(crate) enum FinalResponse {
     Chat(ChatCompletionResponse),
     /// Generate response is a Vec of GenerateResponse (n=1 returns single item, n>1 returns multiple)
     Generate(Vec<GenerateResponse>),
-    /// Embedding response
-    Embedding(EmbeddingResponse),
-    /// Classification response
-    Classify(ClassifyResponse),
 }

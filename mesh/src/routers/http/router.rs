@@ -27,7 +27,6 @@ use crate::{
     protocols::{
         chat::ChatCompletionRequest,
         common::GenerationRequest,
-        embedding::EmbeddingRequest,
         generate::GenerateRequest,
         responses::{ResponsesGetParams, ResponsesRequest},
     },
@@ -753,16 +752,6 @@ impl RouterTrait for Router {
     async fn cancel_response(&self, headers: Option<&HeaderMap>, response_id: &str) -> Response {
         let endpoint = format!("v1/responses/{}/cancel", response_id);
         self.route_post_empty_request(headers, &endpoint).await
-    }
-
-    async fn route_embeddings(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &EmbeddingRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        self.route_typed_request(headers, body, "/v1/embeddings", model_id)
-            .await
     }
 
     fn router_type(&self) -> &'static str {

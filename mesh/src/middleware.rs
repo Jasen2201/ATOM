@@ -470,12 +470,6 @@ pub async fn concurrency_limit_middleware(
         }
     };
 
-    // Static counter for embeddings queue size
-    static EMBEDDINGS_QUEUE_SIZE: AtomicU64 = AtomicU64::new(0);
-
-    // Identify if this is an embeddings request based on path
-    let is_embeddings = request.uri().path().contains("/v1/embeddings");
-
     // Try to acquire token immediately
     if token_bucket.try_acquire(1.0).await.is_ok() {
         debug!("Acquired token immediately");
@@ -504,20 +498,11 @@ pub async fn concurrency_limit_middleware(
             // Try to send to queue
             match queue_tx.try_send(queued) {
                 Ok(_) => {
-                    // On successful enqueue, update embeddings queue counter if applicable
-                    if is_embeddings {
-                        EMBEDDINGS_QUEUE_SIZE.fetch_add(1, Ordering::Relaxed);
-                    }
-
                     // Wait for token from queue processor
                     match permit_rx.await {
                         Ok(Ok(())) => {
                             debug!("Acquired token from queue");
                             Metrics::record_http_rate_limit(metrics_labels::RATE_LIMIT_ALLOWED);
-                            // Dequeue for embeddings
-                            if is_embeddings {
-                                EMBEDDINGS_QUEUE_SIZE.fetch_sub(1, Ordering::Relaxed);
-                            }
 
                             let response = next.run(request).await;
 
@@ -529,19 +514,11 @@ pub async fn concurrency_limit_middleware(
                         Ok(Err(status)) => {
                             warn!("Queue returned error status: {}", status);
                             Metrics::record_http_rate_limit(metrics_labels::RATE_LIMIT_REJECTED);
-                            // Dequeue for embeddings on error
-                            if is_embeddings {
-                                EMBEDDINGS_QUEUE_SIZE.fetch_sub(1, Ordering::Relaxed);
-                            }
                             status.into_response()
                         }
                         Err(_) => {
                             error!("Queue response channel closed");
                             Metrics::record_http_rate_limit(metrics_labels::RATE_LIMIT_REJECTED);
-                            // Dequeue for embeddings on channel error
-                            if is_embeddings {
-                                EMBEDDINGS_QUEUE_SIZE.fetch_sub(1, Ordering::Relaxed);
-                            }
                             StatusCode::INTERNAL_SERVER_ERROR.into_response()
                         }
                     }

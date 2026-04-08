@@ -4,10 +4,7 @@ use async_trait::async_trait;
 use axum::response::Response;
 use tracing::error;
 
-use super::{
-    chat::ChatRequestBuildingStage, embedding::request_building::EmbeddingRequestBuildingStage,
-    generate::GenerateRequestBuildingStage,
-};
+use super::{chat::ChatRequestBuildingStage, generate::GenerateRequestBuildingStage};
 use crate::routers::{
     error as grpc_error,
     grpc::{
@@ -20,7 +17,6 @@ use crate::routers::{
 pub(crate) struct RequestBuildingStage {
     chat_stage: ChatRequestBuildingStage,
     generate_stage: GenerateRequestBuildingStage,
-    embedding_stage: EmbeddingRequestBuildingStage,
 }
 
 impl RequestBuildingStage {
@@ -28,7 +24,6 @@ impl RequestBuildingStage {
         Self {
             chat_stage: ChatRequestBuildingStage::new(inject_pd_metadata),
             generate_stage: GenerateRequestBuildingStage::new(inject_pd_metadata),
-            embedding_stage: EmbeddingRequestBuildingStage::new(),
         }
     }
 }
@@ -39,8 +34,6 @@ impl PipelineStage for RequestBuildingStage {
         match &ctx.input.request_type {
             RequestType::Chat(_) => self.chat_stage.execute(ctx).await,
             RequestType::Generate(_) => self.generate_stage.execute(ctx).await,
-            RequestType::Embedding(_) => self.embedding_stage.execute(ctx).await,
-            RequestType::Classify(_) => self.embedding_stage.execute(ctx).await,
             RequestType::Responses(_request) => {
                 error!(
                     function = "RequestBuildingStage::execute",
