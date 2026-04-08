@@ -841,4 +841,130 @@ mod tests {
         let worker = router.worker_registry.get_by_url(&url).unwrap();
         assert!(worker.is_healthy());
     }
+
+    #[test]
+    fn test_select_first_worker_all_unhealthy() {
+        let router = create_test_regular_router();
+        for w in router.worker_registry.get_all() {
+            w.set_healthy(false);
+        }
+        // All workers are unhealthy -> should return Err
+        let result = router.select_first_worker();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No workers"));
+    }
+
+    #[test]
+    fn test_select_first_worker_empty_registry() {
+        let worker_registry = Arc::new(WorkerRegistry::new());
+        let policy_registry = Arc::new(PolicyRegistry::new(
+            crate::config::types::PolicyConfig::RoundRobin,
+        ));
+        let router = Router {
+            worker_registry,
+            policy_registry,
+            dp_aware: false,
+            client: Client::new(),
+            retry_config: RetryConfig::default(),
+        };
+        let result = router.select_first_worker();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_dp_rank_valid() {
+        let (url, rank) = Router::extract_dp_rank("http://worker:8000@2").unwrap();
+        assert_eq!(url, "http://worker:8000");
+        assert_eq!(rank, 2);
+    }
+
+    #[test]
+    fn test_extract_dp_rank_zero() {
+        let (url, rank) = Router::extract_dp_rank("http://worker:8000@0").unwrap();
+        assert_eq!(url, "http://worker:8000");
+        assert_eq!(rank, 0);
+    }
+
+    #[test]
+    fn test_extract_dp_rank_no_at() {
+        let result = Router::extract_dp_rank("http://worker:8000");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_dp_rank_invalid_number() {
+        let result = Router::extract_dp_rank("http://worker:8000@abc");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_dp_rank_multiple_at() {
+        let result = Router::extract_dp_rank("http://worker@8000@2");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_worker_base_url() {
+        let router = create_test_regular_router();
+        assert_eq!(
+            router.worker_base_url("http://worker:8000"),
+            "http://worker:8000"
+        );
+    }
+
+    #[test]
+    fn test_worker_base_url_dp_aware() {
+        let worker_registry = Arc::new(WorkerRegistry::new());
+        let policy_registry = Arc::new(PolicyRegistry::new(
+            crate::config::types::PolicyConfig::RoundRobin,
+        ));
+        let router = Router {
+            worker_registry,
+            policy_registry,
+            dp_aware: true,
+            client: Client::new(),
+            retry_config: RetryConfig::default(),
+        };
+        // With dp_aware, should extract base URL before @
+        assert_eq!(
+            router.worker_base_url("http://worker:8000@2"),
+            "http://worker:8000"
+        );
+    }
+
+    #[test]
+    fn test_router_type() {
+        let router = create_test_regular_router();
+        assert_eq!(router.router_type(), "regular");
+    }
+
+    #[tokio::test]
+    async fn test_select_worker_for_model_round_robin() {
+        let router = create_test_regular_router();
+
+        let w1 = router
+            .select_worker_for_model(None, None, None)
+            .await
+            .unwrap();
+        let w2 = router
+            .select_worker_for_model(None, None, None)
+            .await
+            .unwrap();
+
+        // Round robin should alternate between workers
+        assert_ne!(w1.url(), w2.url());
+    }
+
+    #[test]
+    fn test_convert_reqwest_error() {
+        // Build a reqwest error via an invalid URL
+        let err = reqwest::Client::new()
+            .get("http://[invalid]")
+            .build()
+            .unwrap_err();
+        let response = convert_reqwest_error(err);
+        // Should produce an error response
+        let status = response.status();
+        assert!(status.is_client_error() || status.is_server_error());
+    }
 }
