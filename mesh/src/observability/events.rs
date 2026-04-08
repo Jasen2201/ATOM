@@ -87,4 +87,64 @@ mod tests {
         assert_eq!(size_of::<RequestSentEvent>(), 16);
         assert_eq!(size_of::<RequestPDSentEvent>(), 32);
     }
+
+    #[test]
+    fn test_get_module_path() {
+        assert_eq!(get_module_path(), "smg::observability::events");
+    }
+
+    #[test]
+    fn test_request_pd_sent_event_debug() {
+        let event = RequestPDSentEvent {
+            prefill_url: "http://p:8000",
+            decode_url: "http://d:8000",
+        };
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("http://p:8000"));
+        assert!(debug.contains("http://d:8000"));
+    }
+
+    #[test]
+    fn test_request_sent_event_debug() {
+        let event = RequestSentEvent {
+            url: "http://worker:8000",
+        };
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("http://worker:8000"));
+    }
+
+    #[test]
+    fn test_request_received_event_debug() {
+        let event = RequestReceivedEvent;
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("RequestReceivedEvent"));
+    }
+
+    #[test]
+    fn test_event_emit_does_not_panic() {
+        // Just verify emit() doesn't panic with OTEL disabled (default)
+        RequestPDSentEvent {
+            prefill_url: "http://p:8000",
+            decode_url: "http://d:8000",
+        }
+        .emit();
+
+        RequestSentEvent {
+            url: "http://w:8000",
+        }
+        .emit();
+
+        RequestReceivedEvent.emit();
+    }
+
+    #[test]
+    fn test_request_pd_sent_event_clone() {
+        let event = RequestPDSentEvent {
+            prefill_url: "http://p:8000",
+            decode_url: "http://d:8000",
+        };
+        let cloned = event;
+        assert_eq!(cloned.prefill_url, "http://p:8000");
+        assert_eq!(cloned.decode_url, "http://d:8000");
+    }
 }
