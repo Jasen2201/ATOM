@@ -364,3 +364,273 @@ impl WorkerService {
         Ok(UpdateWorkerResult { worker_id, url })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use axum::response::IntoResponse;
+    use http::StatusCode;
+
+    use super::*;
+    use crate::core::{BasicWorkerBuilder, WorkerType};
+
+    /// Helper to create a WorkerService with real WorkerRegistry and no job queue
+    fn make_service() -> (WorkerService, Arc<WorkerRegistry>) {
+        let registry = Arc::new(WorkerRegistry::new());
+        let job_queue = Arc::new(std::sync::OnceLock::new());
+        let config = RouterConfig::default();
+        let service = WorkerService::new(registry.clone(), job_queue, config);
+        (service, registry)
+    }
+
+    /// Helper to create and register a worker, returning its ID
+    fn register_worker(registry: &WorkerRegistry, url: &str) -> WorkerId {
+        let mut labels = HashMap::new();
+        labels.insert("model_id".to_string(), "test-model".to_string());
+        let worker = Arc::new(
+            BasicWorkerBuilder::new(url)
+                .worker_type(WorkerType::Regular)
+                .labels(labels)
+                .build(),
+        );
+        registry.register(worker)
+    }
+
+    // --- parse_worker_id tests ---
+
+    #[test]
+    fn test_parse_valid_uuid() {
+        let (service, _) = make_service();
+        let uuid_str = uuid::Uuid::new_v4().to_string();
+        let result = service.parse_worker_id(&uuid_str);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_str(), uuid_str);
+    }
+
+    #[test]
+    fn test_parse_invalid_uuid() {
+        let (service, _) = make_service();
+        let result = service.parse_worker_id("not-a-uuid");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            WorkerServiceError::InvalidId { raw, .. } => assert_eq!(raw, "not-a-uuid"),
+            other => panic!("Expected InvalidId, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_string() {
+        let (service, _) = make_service();
+        let result = service.parse_worker_id("");
+        assert!(result.is_err());
+    }
+
+    // --- Error type tests ---
+
+    #[test]
+    fn test_error_not_found_status() {
+        let err = WorkerServiceError::NotFound {
+            worker_id: "abc".to_string(),
+        };
+        assert_eq!(err.status_code(), StatusCode::NOT_FOUND);
+        assert_eq!(err.error_code(), "WORKER_NOT_FOUND");
+        assert!(err.to_string().contains("abc"));
+    }
+
+    #[test]
+    fn test_error_invalid_id_status() {
+        let err = WorkerServiceError::InvalidId {
+            raw: "bad".to_string(),
+            message: "parse error".to_string(),
+        };
+        assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.error_code(), "BAD_REQUEST");
+    }
+
+    #[test]
+    fn test_error_queue_not_initialized() {
+        let err = WorkerServiceError::QueueNotInitialized;
+        assert_eq!(err.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.error_code(), "INTERNAL_SERVER_ERROR");
+    }
+
+    #[test]
+    fn test_error_queue_submit_failed() {
+        let err = WorkerServiceError::QueueSubmitFailed {
+            message: "channel closed".to_string(),
+        };
+        assert_eq!(err.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(err.to_string().contains("channel closed"));
+    }
+
+    #[test]
+    fn test_error_into_response() {
+        let err = WorkerServiceError::NotFound {
+            worker_id: "xyz".to_string(),
+        };
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    // --- list_workers tests ---
+
+    #[test]
+    fn test_list_workers_empty() {
+        let (service, _) = make_service();
+        let result = service.list_workers();
+        assert_eq!(result.total, 0);
+        assert_eq!(result.prefill_count, 0);
+        assert_eq!(result.decode_count, 0);
+        assert_eq!(result.regular_count, 0);
+        assert!(result.workers.is_empty());
+    }
+
+    #[test]
+    fn test_list_workers_with_workers() {
+        let (service, registry) = make_service();
+
+        register_worker(&registry, "http://w1:8000");
+        register_worker(&registry, "http://w2:8000");
+
+        let result = service.list_workers();
+        assert_eq!(result.total, 2);
+        assert_eq!(result.regular_count, 2);
+        assert_eq!(result.workers.len(), 2);
+
+        let urls: Vec<&str> = result.workers.iter().map(|w| w.url.as_str()).collect();
+        assert!(urls.contains(&"http://w1:8000"));
+        assert!(urls.contains(&"http://w2:8000"));
+    }
+
+    #[test]
+    fn test_list_workers_pd_stats() {
+        let (service, registry) = make_service();
+
+        let prefill = Arc::new(
+            BasicWorkerBuilder::new("http://p1:8000")
+                .worker_type(WorkerType::Prefill {
+                    bootstrap_port: None,
+                })
+                .build(),
+        );
+        let decode = Arc::new(
+            BasicWorkerBuilder::new("http://d1:8000")
+                .worker_type(WorkerType::Decode)
+                .build(),
+        );
+        registry.register(prefill);
+        registry.register(decode);
+
+        let result = service.list_workers();
+        assert_eq!(result.total, 2);
+        assert_eq!(result.prefill_count, 1);
+        assert_eq!(result.decode_count, 1);
+        assert_eq!(result.regular_count, 0);
+    }
+
+    // --- get_worker tests ---
+
+    #[test]
+    fn test_get_worker_not_found() {
+        let (service, _) = make_service();
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let result = service.get_worker(&uuid);
+        match result {
+            Err(WorkerServiceError::NotFound { .. }) => {}
+            Err(WorkerServiceError::QueueNotInitialized) => {} // no queue set
+            other => panic!("Expected error, got {:?}", other.err()),
+        }
+    }
+
+    #[test]
+    fn test_get_worker_invalid_id() {
+        let (service, _) = make_service();
+        let result = service.get_worker("not-a-uuid");
+        match result {
+            Err(WorkerServiceError::InvalidId { .. }) => {}
+            other => panic!("Expected InvalidId, got {:?}", other.err()),
+        }
+    }
+
+    // --- delete_worker / create_worker without queue ---
+
+    #[tokio::test]
+    async fn test_delete_worker_queue_not_initialized() {
+        let (service, registry) = make_service();
+        let id = register_worker(&registry, "http://w1:8000");
+        let result = service.delete_worker(id.as_str()).await;
+        match result {
+            Err(WorkerServiceError::QueueNotInitialized) => {}
+            other => panic!("Expected QueueNotInitialized, got {:?}", other.err()),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_worker_not_found() {
+        let (service, _) = make_service();
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let result = service.delete_worker(&uuid).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_create_worker_queue_not_initialized() {
+        let (service, _) = make_service();
+        let config = serde_json::from_str::<WorkerConfigRequest>(
+            r#"{"url": "http://new:8000"}"#,
+        )
+        .unwrap();
+        let result = service.create_worker(config).await;
+        match result {
+            Err(WorkerServiceError::QueueNotInitialized) => {}
+            other => panic!("Expected QueueNotInitialized, got {:?}", other.err()),
+        }
+    }
+
+    // --- Response type tests ---
+
+    #[test]
+    fn test_list_workers_result_into_response() {
+        let result = ListWorkersResult {
+            workers: vec![],
+            total: 0,
+            prefill_count: 0,
+            decode_count: 0,
+            regular_count: 0,
+        };
+        let response = result.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn test_create_worker_result_into_response() {
+        let result = CreateWorkerResult {
+            worker_id: WorkerId::from_string("test-id".to_string()),
+            url: "http://w1:8000".to_string(),
+            location: "/workers/test-id".to_string(),
+        };
+        let response = result.into_response();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    #[test]
+    fn test_delete_worker_result_into_response() {
+        let result = DeleteWorkerResult {
+            worker_id: WorkerId::from_string("test-id".to_string()),
+            url: "http://w1:8000".to_string(),
+        };
+        let response = result.into_response();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    #[test]
+    fn test_update_worker_result_into_response() {
+        let result = UpdateWorkerResult {
+            worker_id: WorkerId::from_string("test-id".to_string()),
+            url: "http://w1:8000".to_string(),
+        };
+        let response = result.into_response();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+}
