@@ -36,7 +36,7 @@ use crate::{
 };
 
 // ============================================================================
-// Non-MCP Streaming Path
+// Streaming Path
 // ============================================================================
 
 /// Convert chat streaming response to responses streaming format
@@ -214,7 +214,7 @@ async fn process_and_transform_sse_stream(
     Ok(())
 }
 
-/// Response accumulator for streaming responses (non-MCP path)
+/// Response accumulator for streaming responses
 struct StreamingResponseAccumulator {
     // Response metadata
     response_id: String,

@@ -344,7 +344,7 @@ fn build_required_array_schema(tools: &[Tool]) -> Result<String, String> {
 /// Filter tools based on tool_choice (generic helper)
 ///
 /// Returns filtered tools if filtering is needed, otherwise returns None.
-/// Used by both Chat API and Responses API (Harmony) for constraint generation.
+/// Used by both Chat API and Responses API for constraint generation.
 pub(crate) fn filter_tools_by_tool_choice(
     tools: &[Tool],
     tool_choice: &Option<ToolChoice>,

@@ -1,4 +1,4 @@
-//! Shared code for both regular and harmony routers
+//! Shared code for gRPC routers
 
 pub(crate) mod response_collection;
 pub(crate) mod response_formatting;

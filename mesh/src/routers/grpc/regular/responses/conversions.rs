@@ -138,8 +138,7 @@ pub(crate) fn responses_to_chat(req: &ResponsesRequest) -> Result<ChatCompletion
                         call_id, output, ..
                     } => {
                         // Function call output - add as tool message
-                        // Note: The function name is looked up from prev_outputs in Harmony path
-                        // For Chat path, we just use the call_id
+                        // Function call output - use call_id for tool message
                         messages.push(ChatMessage::Tool {
                             content: MessageContent::Text(output.clone()),
                             tool_call_id: call_id.clone(),
@@ -156,9 +155,7 @@ pub(crate) fn responses_to_chat(req: &ResponsesRequest) -> Result<ChatCompletion
     }
 
     // 3. Extract function tools from ResponseTools
-    // Only function tools are extracted here (include_mcp: false).
-    // MCP tools are merged later by the tool loop (see tool_loop.rs:prepare_chat_tools_and_choice)
-    // before the chat pipeline, where tool_choice constraints are applied to ALL tools combined.
+    // Extract function tools from ResponseTools
     let function_tools = extract_tools_from_response_tools(req.tools.as_deref(), false);
     let tools = if function_tools.is_empty() {
         None
@@ -240,7 +237,7 @@ fn role_to_chat_message(role: &str, text: String) -> ChatMessage {
 /// Map TextConfig from Responses API to ResponseFormat for Chat API
 ///
 /// Converts the structured output configuration from the Responses API format
-/// to the Chat API format for non-Harmony models.
+/// to the Chat API format.
 fn map_text_to_response_format(text: &Option<TextConfig>) -> Option<ResponseFormat> {
     let text_config = text.as_ref()?;
     let format = text_config.format.as_ref()?;

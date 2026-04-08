@@ -62,7 +62,7 @@ impl Job {
         }
     }
 
-    /// Get worker URL, MCP server name, or tokenizer identifier for logging and status tracking
+    /// Get worker URL or tokenizer identifier for logging and status tracking
     pub fn worker_url(&self) -> &str {
         match self {
             Job::AddWorker { config } => &config.url,

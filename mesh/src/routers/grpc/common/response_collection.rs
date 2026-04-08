@@ -1,7 +1,7 @@
 //! Shared response collection logic
 //!
 //! This module contains common logic for collecting responses from execution results.
-//! Both regular and harmony processors use these functions to avoid duplication.
+//! Processors use these functions to avoid duplication.
 
 use axum::response::Response;
 

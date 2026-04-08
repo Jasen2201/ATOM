@@ -1,6 +1,6 @@
 //! Regular gRPC Router `/v1/responses` endpoint implementation
 //!
-//! This module handles all responses-specific logic for the regular (non-Harmony) pipeline.
+//! This module handles all responses-specific logic for the regular pipeline.
 //!
 //! ## Architecture
 //!

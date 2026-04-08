@@ -1,4 +1,4 @@
-//! Regular (non-harmony) model processing
+//! Regular model processing
 //!
 //! This module contains all code specific to regular tokenizer-based models,
 //! including pipeline stages, response processing, and streaming.

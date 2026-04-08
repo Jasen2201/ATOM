@@ -1,6 +1,4 @@
-//! Shared response handlers for both regular and harmony implementations
-//!
-//! These handlers are used by both pipelines for retrieving and cancelling responses.
+//! Shared response handlers for retrieving and cancelling responses.
 
 use axum::response::{IntoResponse, Response};
 use data_connector::ResponseId;
@@ -11,7 +9,6 @@ use crate::routers::error;
 /// Implementation for GET /v1/responses/{response_id}
 ///
 /// Retrieves a stored response from the database.
-/// Used by both regular and harmony implementations.
 pub(crate) async fn get_response_impl(ctx: &ResponsesContext, response_id: &str) -> Response {
     let resp_id = ResponseId::from(response_id);
 
