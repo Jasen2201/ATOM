@@ -550,4 +550,209 @@ mod tests {
             Some(&"grpc".to_string())
         );
     }
+
+    #[test]
+    fn test_basic_worker_new_with_type() {
+        let worker = BasicWorkerBuilder::new_with_type(
+            "http://w:8000",
+            WorkerType::Prefill {
+                bootstrap_port: Some(9000),
+            },
+        )
+        .build();
+
+        assert_eq!(worker.url(), "http://w:8000");
+        assert_eq!(
+            worker.worker_type(),
+            &WorkerType::Prefill {
+                bootstrap_port: Some(9000)
+            }
+        );
+    }
+
+    #[test]
+    fn test_basic_worker_api_key() {
+        let worker = BasicWorkerBuilder::new("http://w:8000")
+            .api_key("secret-key-123")
+            .build();
+
+        assert_eq!(worker.metadata().api_key.as_deref(), Some("secret-key-123"));
+    }
+
+    #[test]
+    fn test_basic_worker_runtime_type() {
+        let worker = BasicWorkerBuilder::new("http://w:8000")
+            .runtime_type(RuntimeType::Vllm)
+            .build();
+
+        assert_eq!(worker.metadata().runtime_type, RuntimeType::Vllm);
+    }
+
+    #[test]
+    fn test_basic_worker_runtime_type_external() {
+        let worker = BasicWorkerBuilder::new("http://w:8000")
+            .runtime_type(RuntimeType::External)
+            .build();
+
+        assert_eq!(worker.metadata().runtime_type, RuntimeType::External);
+    }
+
+    #[test]
+    fn test_basic_worker_default_runtime_is_sglang() {
+        let worker = BasicWorkerBuilder::new("http://w:8000").build();
+        assert_eq!(worker.metadata().runtime_type, RuntimeType::Sglang);
+    }
+
+    #[test]
+    fn test_basic_worker_model() {
+        let worker = BasicWorkerBuilder::new("http://w:8000")
+            .model(ModelCard::new("llama-3-8b"))
+            .model(ModelCard::new("mistral-7b"))
+            .build();
+
+        assert_eq!(worker.metadata().models.len(), 2);
+        assert_eq!(worker.metadata().models[0].id, "llama-3-8b");
+        assert_eq!(worker.metadata().models[1].id, "mistral-7b");
+    }
+
+    #[test]
+    fn test_basic_worker_models_vec() {
+        let models = vec![
+            ModelCard::new("model-a"),
+            ModelCard::new("model-b"),
+        ];
+        let worker = BasicWorkerBuilder::new("http://w:8000")
+            .models(models)
+            .build();
+
+        assert_eq!(worker.metadata().models.len(), 2);
+        assert_eq!(worker.metadata().models[0].id, "model-a");
+    }
+
+    #[test]
+    fn test_basic_worker_empty_models_default() {
+        let worker = BasicWorkerBuilder::new("http://w:8000").build();
+        assert!(worker.metadata().models.is_empty());
+    }
+
+    #[test]
+    fn test_basic_worker_prefill_bootstrap_port_extracted() {
+        let worker = BasicWorkerBuilder::new("http://w:8000")
+            .worker_type(WorkerType::Prefill {
+                bootstrap_port: Some(9999),
+            })
+            .build();
+
+        assert_eq!(worker.metadata().bootstrap_port, Some(9999));
+    }
+
+    #[test]
+    fn test_basic_worker_non_prefill_no_bootstrap_port() {
+        let worker = BasicWorkerBuilder::new("http://w:8000")
+            .worker_type(WorkerType::Regular)
+            .build();
+        assert_eq!(worker.metadata().bootstrap_port, None);
+
+        let worker = BasicWorkerBuilder::new("http://w:8000")
+            .worker_type(WorkerType::Decode)
+            .build();
+        assert_eq!(worker.metadata().bootstrap_port, None);
+    }
+
+    #[test]
+    fn test_basic_worker_bootstrap_host_parsed_from_url() {
+        let worker = BasicWorkerBuilder::new("http://my-host.example.com:8000").build();
+        assert_eq!(worker.metadata().bootstrap_host, "my-host.example.com");
+    }
+
+    #[test]
+    fn test_basic_worker_bootstrap_host_no_scheme_fallback() {
+        // "bare-host:8000" is parsed as scheme "bare-host" by url::Url,
+        // triggering the !contains("://") fallback which prepends http://
+        let worker = BasicWorkerBuilder::new("192.168.1.1:8000").build();
+        assert_eq!(worker.metadata().bootstrap_host, "192.168.1.1");
+    }
+
+    #[test]
+    fn test_basic_worker_starts_healthy() {
+        let worker = BasicWorkerBuilder::new("http://w:8000").build();
+        assert!(worker.is_healthy());
+    }
+
+    #[test]
+    fn test_basic_worker_initial_counters() {
+        let worker = BasicWorkerBuilder::new("http://w:8000").build();
+        assert_eq!(worker.load(), 0);
+        assert_eq!(worker.processed_requests(), 0);
+    }
+
+    #[test]
+    fn test_dp_aware_worker_new_with_type() {
+        let worker = DPAwareWorkerBuilder::new_with_type(
+            "http://w:8000",
+            0,
+            4,
+            WorkerType::Decode,
+        )
+        .build();
+
+        assert_eq!(worker.url(), "http://w:8000@0");
+        assert_eq!(worker.dp_rank(), Some(0));
+        assert_eq!(worker.dp_size(), Some(4));
+        assert_eq!(worker.worker_type(), &WorkerType::Decode);
+    }
+
+    #[test]
+    fn test_dp_aware_worker_api_key() {
+        let worker = DPAwareWorkerBuilder::new("http://w:8000", 0, 2)
+            .api_key("dp-key")
+            .build();
+
+        assert_eq!(worker.metadata().api_key.as_deref(), Some("dp-key"));
+    }
+
+    #[test]
+    fn test_dp_aware_worker_runtime_type() {
+        let worker = DPAwareWorkerBuilder::new("http://w:8000", 0, 2)
+            .runtime_type(RuntimeType::Vllm)
+            .build();
+
+        assert_eq!(worker.metadata().runtime_type, RuntimeType::Vllm);
+    }
+
+    #[test]
+    fn test_dp_aware_worker_models() {
+        let worker = DPAwareWorkerBuilder::new("http://w:8000", 0, 2)
+            .model(ModelCard::new("my-model"))
+            .build();
+
+        assert_eq!(worker.metadata().models.len(), 1);
+        assert_eq!(worker.metadata().models[0].id, "my-model");
+    }
+
+    #[test]
+    fn test_dp_aware_worker_url_format() {
+        // Verify URL format is base_url@dp_rank
+        for rank in 0..4 {
+            let worker = DPAwareWorkerBuilder::new("http://host:8000", rank, 4).build();
+            assert_eq!(worker.url(), format!("http://host:8000@{}", rank));
+        }
+    }
+
+    #[test]
+    fn test_dp_aware_worker_label() {
+        let worker = DPAwareWorkerBuilder::new("http://w:8000", 0, 2)
+            .label("zone", "us-west")
+            .label("tier", "premium")
+            .build();
+
+        assert_eq!(
+            worker.metadata().labels.get("zone"),
+            Some(&"us-west".to_string())
+        );
+        assert_eq!(
+            worker.metadata().labels.get("tier"),
+            Some(&"premium".to_string())
+        );
+    }
 }
