@@ -832,4 +832,332 @@ mod tests {
         assert_eq!(llama_workers_after.len(), 1);
         assert_eq!(llama_workers_after[0].url(), "http://worker2:8080");
     }
+
+    /// Helper to create a worker Arc with given url, type, and model_id
+    fn make_worker(url: &str, wtype: WorkerType, model_id: &str) -> Arc<dyn Worker> {
+        let mut labels = HashMap::new();
+        labels.insert("model_id".to_string(), model_id.to_string());
+        Arc::new(
+            BasicWorkerBuilder::new(url)
+                .worker_type(wtype)
+                .labels(labels)
+                .circuit_breaker_config(CircuitBreakerConfig::default())
+                .build(),
+        )
+    }
+
+    #[test]
+    fn test_hash_ring_basic() {
+        let workers: Vec<Arc<dyn Worker>> = vec![
+            make_worker("http://w1:8000", WorkerType::Regular, "m"),
+            make_worker("http://w2:8000", WorkerType::Regular, "m"),
+            make_worker("http://w3:8000", WorkerType::Regular, "m"),
+        ];
+        let ring = HashRing::new(&workers);
+
+        assert!(!ring.is_empty());
+        assert_eq!(ring.worker_count(), 3);
+        // 3 workers * 150 virtual nodes = 450 entries
+        assert_eq!(ring.len(), 3 * VIRTUAL_NODES_PER_WORKER);
+    }
+
+    #[test]
+    fn test_hash_ring_empty() {
+        let ring = HashRing::new(&[]);
+        assert!(ring.is_empty());
+        assert_eq!(ring.worker_count(), 0);
+        assert_eq!(ring.find_healthy_url("key", |_| true), None);
+    }
+
+    #[test]
+    fn test_hash_ring_find_healthy() {
+        let workers: Vec<Arc<dyn Worker>> = vec![
+            make_worker("http://w1:8000", WorkerType::Regular, "m"),
+            make_worker("http://w2:8000", WorkerType::Regular, "m"),
+        ];
+        let ring = HashRing::new(&workers);
+
+        // All healthy -> should find something
+        let result = ring.find_healthy_url("test-key", |_| true);
+        assert!(result.is_some());
+
+        // None healthy -> should return None
+        let result = ring.find_healthy_url("test-key", |_| false);
+        assert!(result.is_none());
+
+        // Only w2 healthy -> should always return w2
+        let result = ring.find_healthy_url("test-key", |url| url == "http://w2:8000");
+        assert_eq!(result, Some("http://w2:8000"));
+    }
+
+    #[test]
+    fn test_hash_ring_deterministic() {
+        let workers: Vec<Arc<dyn Worker>> = vec![
+            make_worker("http://w1:8000", WorkerType::Regular, "m"),
+            make_worker("http://w2:8000", WorkerType::Regular, "m"),
+            make_worker("http://w3:8000", WorkerType::Regular, "m"),
+        ];
+        let ring = HashRing::new(&workers);
+
+        // Same key should always map to same worker
+        let result1 = ring.find_healthy_url("consistent-key", |_| true);
+        let result2 = ring.find_healthy_url("consistent-key", |_| true);
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_hash_ring_distribution() {
+        let workers: Vec<Arc<dyn Worker>> = vec![
+            make_worker("http://w1:8000", WorkerType::Regular, "m"),
+            make_worker("http://w2:8000", WorkerType::Regular, "m"),
+            make_worker("http://w3:8000", WorkerType::Regular, "m"),
+        ];
+        let ring = HashRing::new(&workers);
+
+        // Different keys should distribute across workers
+        let mut counts = HashMap::new();
+        for i in 0..300 {
+            let key = format!("key-{}", i);
+            if let Some(url) = ring.find_healthy_url(&key, |_| true) {
+                *counts.entry(url.to_string()).or_insert(0) += 1;
+            }
+        }
+        // All three workers should receive some keys
+        assert_eq!(counts.len(), 3);
+        assert!(counts.values().all(|&c| c > 20)); // Reasonable distribution
+    }
+
+    #[test]
+    fn test_registry_pd_workers() {
+        let registry = WorkerRegistry::new();
+
+        let prefill = make_worker(
+            "http://p1:8000",
+            WorkerType::Prefill {
+                bootstrap_port: Some(9000),
+            },
+            "llama",
+        );
+        let decode = make_worker("http://d1:8000", WorkerType::Decode, "llama");
+        let regular = make_worker("http://r1:8000", WorkerType::Regular, "llama");
+
+        registry.register(prefill);
+        registry.register(decode);
+        registry.register(regular);
+
+        let prefill_workers = registry.get_prefill_workers();
+        assert_eq!(prefill_workers.len(), 1);
+        assert_eq!(prefill_workers[0].url(), "http://p1:8000");
+
+        let decode_workers = registry.get_decode_workers();
+        assert_eq!(decode_workers.len(), 1);
+        assert_eq!(decode_workers[0].url(), "http://d1:8000");
+
+        let stats = registry.stats();
+        assert_eq!(stats.prefill_workers, 1);
+        assert_eq!(stats.decode_workers, 1);
+        assert_eq!(stats.regular_workers, 1);
+        assert_eq!(stats.total_workers, 3);
+    }
+
+    #[test]
+    fn test_registry_get_workers_filtered() {
+        let registry = WorkerRegistry::new();
+
+        let w1 = make_worker("http://p1:8000", WorkerType::Prefill { bootstrap_port: None }, "llama");
+        let w2 = make_worker("http://d1:8000", WorkerType::Decode, "llama");
+        let w3 = make_worker("http://r1:8000", WorkerType::Regular, "gpt-4");
+
+        registry.register(w1);
+        registry.register(w2);
+        registry.register(w3);
+
+        // Filter by model
+        let llama = registry.get_workers_filtered(Some("llama"), None, None, None, false);
+        assert_eq!(llama.len(), 2);
+
+        // Filter by type
+        let prefill = registry.get_workers_filtered(
+            None,
+            Some(WorkerType::Prefill { bootstrap_port: None }),
+            None,
+            None,
+            false,
+        );
+        assert_eq!(prefill.len(), 1);
+
+        // Filter healthy only
+        registry.get_by_url("http://p1:8000").unwrap().set_healthy(false);
+        let healthy = registry.get_workers_filtered(None, None, None, None, true);
+        assert_eq!(healthy.len(), 2); // p1 is unhealthy
+
+        // Filter by connection mode
+        let http_workers =
+            registry.get_workers_filtered(None, None, Some(ConnectionMode::Http), None, false);
+        assert_eq!(http_workers.len(), 3);
+    }
+
+    #[test]
+    fn test_registry_worker_distribution() {
+        let registry = WorkerRegistry::new();
+
+        registry.register(make_worker("http://r1:8000", WorkerType::Regular, "m"));
+        registry.register(make_worker("http://r2:8000", WorkerType::Regular, "m"));
+        registry.register(make_worker("http://p1:8000", WorkerType::Prefill { bootstrap_port: None }, "m"));
+
+        let (regular, pd) = registry.get_worker_distribution();
+        assert_eq!(regular, 2);
+        assert_eq!(pd, 1);
+    }
+
+    #[test]
+    fn test_registry_reserve_id_for_url() {
+        let registry = WorkerRegistry::new();
+
+        let id1 = registry.reserve_id_for_url("http://w1:8000");
+        let id2 = registry.reserve_id_for_url("http://w1:8000");
+
+        // Same URL should get same ID
+        assert_eq!(id1.as_str(), id2.as_str());
+
+        // Different URL should get different ID
+        let id3 = registry.reserve_id_for_url("http://w2:8000");
+        assert_ne!(id1.as_str(), id3.as_str());
+    }
+
+    #[test]
+    fn test_registry_get_url_by_id() {
+        let registry = WorkerRegistry::new();
+
+        let worker = make_worker("http://w1:8000", WorkerType::Regular, "m");
+        let id = registry.register(worker);
+
+        assert_eq!(
+            registry.get_url_by_id(&id),
+            Some("http://w1:8000".to_string())
+        );
+
+        // Unknown ID
+        let unknown = WorkerId::from_string("nonexistent".to_string());
+        assert_eq!(registry.get_url_by_id(&unknown), None);
+    }
+
+    #[test]
+    fn test_registry_remove_by_url() {
+        let registry = WorkerRegistry::new();
+
+        let worker = make_worker("http://w1:8000", WorkerType::Regular, "m");
+        registry.register(worker);
+
+        assert_eq!(registry.len(), 1);
+        let removed = registry.remove_by_url("http://w1:8000");
+        assert!(removed.is_some());
+        assert_eq!(registry.len(), 0);
+
+        // Remove non-existent
+        let removed = registry.remove_by_url("http://nonexistent:8000");
+        assert!(removed.is_none());
+    }
+
+    #[test]
+    fn test_registry_stats_health_tracking() {
+        let registry = WorkerRegistry::new();
+
+        let w1 = make_worker("http://w1:8000", WorkerType::Regular, "m");
+        let w2 = make_worker("http://w2:8000", WorkerType::Regular, "m");
+        registry.register(w1);
+        registry.register(w2);
+
+        let stats = registry.stats();
+        assert_eq!(stats.healthy_workers, 2);
+        assert_eq!(stats.unhealthy_workers, 0);
+
+        // Mark one unhealthy
+        registry.get_by_url("http://w1:8000").unwrap().set_healthy(false);
+        let stats = registry.stats();
+        assert_eq!(stats.healthy_workers, 1);
+        assert_eq!(stats.unhealthy_workers, 1);
+    }
+
+    #[test]
+    fn test_registry_hash_ring_rebuilt_on_change() {
+        let registry = WorkerRegistry::new();
+
+        let w1 = make_worker("http://w1:8000", WorkerType::Regular, "llama");
+        registry.register(w1);
+
+        let ring1 = registry.get_hash_ring("llama");
+        assert!(ring1.is_some());
+        assert_eq!(ring1.unwrap().worker_count(), 1);
+
+        let w2 = make_worker("http://w2:8000", WorkerType::Regular, "llama");
+        registry.register(w2);
+
+        let ring2 = registry.get_hash_ring("llama");
+        assert_eq!(ring2.unwrap().worker_count(), 2);
+
+        // Remove a worker -> ring should shrink
+        registry.remove_by_url("http://w1:8000");
+        let ring3 = registry.get_hash_ring("llama");
+        assert_eq!(ring3.unwrap().worker_count(), 1);
+    }
+
+    #[test]
+    fn test_registry_get_all_urls() {
+        let registry = WorkerRegistry::new();
+
+        registry.register(make_worker("http://w1:8000", WorkerType::Regular, "m"));
+        registry.register(make_worker("http://w2:8000", WorkerType::Regular, "m"));
+
+        let urls = registry.get_all_urls();
+        assert_eq!(urls.len(), 2);
+        assert!(urls.contains(&"http://w1:8000".to_string()));
+        assert!(urls.contains(&"http://w2:8000".to_string()));
+    }
+
+    #[test]
+    fn test_registry_get_models() {
+        let registry = WorkerRegistry::new();
+
+        registry.register(make_worker("http://w1:8000", WorkerType::Regular, "llama"));
+        registry.register(make_worker("http://w2:8000", WorkerType::Regular, "gpt-4"));
+        registry.register(make_worker("http://w3:8000", WorkerType::Regular, "llama"));
+
+        let models = registry.get_models();
+        assert_eq!(models.len(), 2);
+        assert!(models.contains(&"llama".to_string()));
+        assert!(models.contains(&"gpt-4".to_string()));
+    }
+
+    #[test]
+    fn test_registry_empty() {
+        let registry = WorkerRegistry::new();
+        assert!(registry.is_empty());
+        assert_eq!(registry.len(), 0);
+
+        let stats = registry.stats();
+        assert_eq!(stats.total_workers, 0);
+        assert_eq!(stats.total_models, 0);
+
+        assert!(registry.get_all().is_empty());
+        assert!(registry.get_all_urls().is_empty());
+        assert!(registry.get_models().is_empty());
+        assert!(registry.get_prefill_workers().is_empty());
+        assert!(registry.get_decode_workers().is_empty());
+    }
+
+    #[test]
+    fn test_registry_reregister_same_url() {
+        let registry = WorkerRegistry::new();
+
+        let w1 = make_worker("http://w1:8000", WorkerType::Regular, "m");
+        let id1 = registry.register(w1);
+
+        // Re-register same URL -> should reuse ID
+        let w1_again = make_worker("http://w1:8000", WorkerType::Regular, "m");
+        let id2 = registry.register(w1_again);
+
+        assert_eq!(id1.as_str(), id2.as_str());
+        assert_eq!(registry.len(), 1);
+    }
 }
