@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.model("deepseek-7b")
 @pytest.mark.gateway(
-    extra_args=["--reasoning-parser", "deepseek_r1", "--history-backend", "memory"]
+    extra_args=["--reasoning-parser", "deepseek_r1"]
 )
 @pytest.mark.parametrize("setup_backend", ["grpc"], indirect=True)
 class TestReasoningContentAPI:

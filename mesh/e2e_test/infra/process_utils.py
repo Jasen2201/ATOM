@@ -127,26 +127,43 @@ def wait_for_workers_ready(
 
 
 def detect_ib_device() -> str | None:
-    """Detect first active InfiniBand device (e.g., mlx5_0).
+    """Detect first active InfiniBand/RDMA device.
+
+    Checks both NVIDIA (mlx5_N) and AMD (rdmaN) device naming conventions.
 
     Returns:
-        Device name if found (e.g., "mlx5_0"), None otherwise.
+        Device name if found (e.g., "mlx5_0" or "rdma0"), None otherwise.
     """
     try:
-        subprocess.run(
+        res = subprocess.run(
             ["ibv_devinfo", "-l"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=1,
+            capture_output=True,
+            text=True,
+            timeout=2,
         )
+        if res.returncode != 0:
+            return None
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
 
-    for i in range(12):
-        dev = f"mlx5_{i}"
+    # Parse device list from ibv_devinfo -l output
+    devices: list[str] = []
+    for line in res.stdout.splitlines():
+        line = line.strip()
+        if line and not line.startswith("HCA") and not line.startswith("---"):
+            devices.append(line)
+
+    # Fallback: probe common device name patterns if parsing found nothing
+    if not devices:
+        for prefix in ("mlx5_", "rdma"):
+            for i in range(12):
+                devices.append(f"{prefix}{i}")
+
+    # Check each device for PORT_ACTIVE state
+    for dev in devices:
         try:
             res = subprocess.run(
-                ["ibv_devinfo", dev],
+                ["ibv_devinfo", "-d", dev],
                 capture_output=True,
                 text=True,
                 timeout=2,

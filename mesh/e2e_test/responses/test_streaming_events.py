@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 @pytest.mark.e2e
 @pytest.mark.model("qwen-14b")
 @pytest.mark.gateway(
-    extra_args=["--tool-call-parser", "qwen", "--history-backend", "memory"]
+    extra_args=["--tool-call-parser", "qwen"]
 )
 @pytest.mark.parametrize("setup_backend", ["grpc"], indirect=True)
 class TestStreamingEventsLocal:

@@ -40,7 +40,7 @@ def get_tokenizer(model_path: str):
 
 
 @pytest.mark.model("llama-8b")
-@pytest.mark.gateway(extra_args=["--history-backend", "memory"])
+@pytest.mark.gateway()
 @pytest.mark.parametrize("setup_backend", ["grpc"], indirect=True)
 class TestIgnoreEOS:
     """Tests for ignore_eos feature."""
@@ -112,7 +112,7 @@ class TestIgnoreEOS:
 
 
 @pytest.mark.model("llama-8b")
-@pytest.mark.gateway(extra_args=["--history-backend", "memory"])
+@pytest.mark.gateway()
 @pytest.mark.parametrize("setup_backend", ["grpc"], indirect=True)
 class TestLargeMaxNewTokens:
     """Tests for handling large max_new_tokens with concurrent requests."""

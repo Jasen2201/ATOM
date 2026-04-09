@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.mark.model("llama-8b")
-@pytest.mark.gateway(extra_args=["--history-backend", "memory"])
+@pytest.mark.gateway()
 @pytest.mark.parametrize("setup_backend", ["grpc"], indirect=True)
 class TestChatCompletion:
     """Tests for OpenAI-compatible chat completions API."""

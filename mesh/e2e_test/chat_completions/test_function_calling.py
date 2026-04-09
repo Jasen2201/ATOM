@@ -100,7 +100,7 @@ PYTHONIC_MESSAGES = [
 
 @pytest.mark.model("llama-1b")
 @pytest.mark.gateway(
-    extra_args=["--tool-call-parser", "llama", "--history-backend", "memory"]
+    extra_args=["--tool-call-parser", "llama"]
 )
 @pytest.mark.parametrize("setup_backend", ["grpc"], indirect=True)
 class TestOpenAIServerFunctionCalling:
@@ -728,7 +728,7 @@ class TestOpenAIServerFunctionCalling:
 
 @pytest.mark.model("llama-8b")
 @pytest.mark.gateway(
-    extra_args=["--tool-call-parser", "pythonic", "--history-backend", "memory"]
+    extra_args=["--tool-call-parser", "pythonic"]
 )
 @pytest.mark.parametrize("setup_backend", ["grpc"], indirect=True)
 class TestOpenAIPythonicFunctionCalling:
@@ -1474,7 +1474,7 @@ class _TestToolChoiceBase:
 
 @pytest.mark.model("llama-1b")
 @pytest.mark.gateway(
-    extra_args=["--tool-call-parser", "llama", "--history-backend", "memory"]
+    extra_args=["--tool-call-parser", "llama"]
 )
 @pytest.mark.parametrize("setup_backend", ["grpc"], indirect=True)
 class TestToolChoiceLlama(_TestToolChoiceBase):
@@ -1494,7 +1494,7 @@ class TestToolChoiceLlama(_TestToolChoiceBase):
 
 @pytest.mark.model("qwen-7b")
 @pytest.mark.gateway(
-    extra_args=["--tool-call-parser", "qwen", "--history-backend", "memory"]
+    extra_args=["--tool-call-parser", "qwen"]
 )
 @pytest.mark.parametrize("setup_backend", ["grpc"], indirect=True)
 class TestToolChoiceQwen(_TestToolChoiceBase):
@@ -1511,7 +1511,7 @@ class TestToolChoiceQwen(_TestToolChoiceBase):
 
 @pytest.mark.model("mistral-7b")
 @pytest.mark.gateway(
-    extra_args=["--tool-call-parser", "mistral", "--history-backend", "memory"]
+    extra_args=["--tool-call-parser", "mistral"]
 )
 @pytest.mark.parametrize("setup_backend", ["grpc"], indirect=True)
 class TestToolChoiceMistral(_TestToolChoiceBase):
