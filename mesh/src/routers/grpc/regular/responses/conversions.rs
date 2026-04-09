@@ -329,7 +329,7 @@ pub(crate) fn chat_to_responses(
     // Determine response status based on finish_reason
     let status = match choice.finish_reason.as_deref() {
         Some("stop") | Some("length") => ResponseStatus::Completed,
-        Some("tool_calls") => ResponseStatus::InProgress, // Waiting for tool execution
+        Some("tool_calls") => ResponseStatus::Completed, // Model finished; tool execution is caller's responsibility
         Some("failed") | Some("error") => ResponseStatus::Failed,
         _ => ResponseStatus::Completed, // Default to completed
     };

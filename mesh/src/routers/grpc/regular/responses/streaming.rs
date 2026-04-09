@@ -357,7 +357,7 @@ impl StreamingResponseAccumulator {
         // Determine final status
         let status = match self.finish_reason.as_deref() {
             Some("stop") | Some("length") => ResponseStatus::Completed,
-            Some("tool_calls") => ResponseStatus::InProgress,
+            Some("tool_calls") => ResponseStatus::Completed,
             Some("failed") | Some("error") => ResponseStatus::Failed,
             _ => ResponseStatus::Completed,
         };

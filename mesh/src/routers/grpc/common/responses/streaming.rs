@@ -71,6 +71,8 @@ pub(crate) struct ResponseStreamEventEmitter {
     current_message_output_index: Option<usize>, // Tracks output_index of current message
     current_item_id: Option<String>,             // Tracks item_id of current item
     original_request: Option<ResponsesRequest>,
+    // Tool call tracking: maps tool_call delta index → (output_index, item_id, accumulated_args)
+    tool_call_items: Vec<(usize, String, String, String)>, // (output_index, item_id, name, accumulated_args)
 }
 
 impl ResponseStreamEventEmitter {
@@ -93,6 +95,7 @@ impl ResponseStreamEventEmitter {
             current_message_output_index: None,
             current_item_id: None,
             original_request: None,
+            tool_call_items: Vec::new(),
         }
     }
 
@@ -551,8 +554,91 @@ impl ResponseStreamEventEmitter {
                 }
             }
 
+            // Process tool call deltas
+            if let Some(tool_call_deltas) = &choice.delta.tool_calls {
+                for delta in tool_call_deltas {
+                    let tc_index = delta.index as usize;
+
+                    // Ensure we have a tracked item for this tool call index
+                    while self.tool_call_items.len() <= tc_index {
+                        let (output_index, item_id) =
+                            self.allocate_output_index(OutputItemType::FunctionCall);
+                        self.tool_call_items
+                            .push((output_index, item_id, String::new(), String::new()));
+                    }
+
+                    // Accumulate name from first delta
+                    if let Some(function) = &delta.function {
+                        if let Some(name) = &function.name {
+                            self.tool_call_items[tc_index].2.push_str(name);
+                        }
+                    }
+
+                    // First delta for this tool call: emit output_item.added
+                    if let Some(delta_id) = &delta.id {
+                        let output_index = self.tool_call_items[tc_index].0;
+                        let item_id = self.tool_call_items[tc_index].1.clone();
+                        let tc_name = self.tool_call_items[tc_index].2.clone();
+                        let item = json!({
+                            "id": item_id,
+                            "type": "function_call",
+                            "call_id": delta_id,
+                            "name": tc_name,
+                            "arguments": "",
+                            "status": "in_progress"
+                        });
+                        let event = self.emit_output_item_added(output_index, &item);
+                        self.send_event(&event, tx)?;
+                    }
+
+                    // Emit arguments delta
+                    if let Some(function) = &delta.function {
+                        if let Some(args) = &function.arguments {
+                            if !args.is_empty() {
+                                self.tool_call_items[tc_index].3.push_str(args);
+                                let output_index = self.tool_call_items[tc_index].0;
+                                let item_id = self.tool_call_items[tc_index].1.clone();
+                                let event = self.emit_function_call_arguments_delta(
+                                    output_index,
+                                    &item_id,
+                                    args,
+                                );
+                                self.send_event(&event, tx)?;
+                            }
+                        }
+                    }
+                }
+            }
+
             // Check for finish_reason to emit completion events
             if let Some(reason) = &choice.finish_reason {
+                if reason == "tool_calls" {
+                    // Emit done events for all tracked tool calls
+                    let tool_calls: Vec<_> = self.tool_call_items.clone();
+                    for (output_index, item_id, tc_name, accumulated_args) in &tool_calls {
+                        // Emit function_call_arguments.done
+                        let event = self.emit_function_call_arguments_done(
+                            *output_index,
+                            item_id,
+                            accumulated_args,
+                        );
+                        self.send_event(&event, tx)?;
+
+                        // Emit output_item.done with complete function call item
+                        let item = json!({
+                            "id": item_id,
+                            "type": "function_call",
+                            "call_id": item_id,
+                            "name": tc_name,
+                            "arguments": accumulated_args,
+                            "status": "completed"
+                        });
+                        let event = self.emit_output_item_done(*output_index, &item);
+                        self.send_event(&event, tx)?;
+                        self.complete_output_item(*output_index);
+                    }
+                }
+
                 if reason == "stop" || reason == "length" {
                     let output_index = self.current_message_output_index.unwrap();
                     let item_id = self.current_item_id.clone().unwrap(); // Clone to avoid borrow checker issues
