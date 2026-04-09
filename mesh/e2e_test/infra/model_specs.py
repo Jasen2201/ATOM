@@ -77,27 +77,13 @@ MODEL_SPECS: dict[str, dict] = {
         "tp": 1,
         "features": ["chat", "streaming", "function_calling"],
     },
-    # Embedding model
-    "embedding": {
-        "model": _resolve_model_path("intfloat/e5-mistral-7b-instruct"),
-        "memory_gb": 14,
-        "tp": 1,
-        "features": ["embedding"],
-    },
-    # GPT-OSS model (Harmony)
-    "gpt-oss": {
-        "model": _resolve_model_path("openai/gpt-oss-20b"),
-        "memory_gb": 40,
-        "tp": 2,
-        "features": ["chat", "streaming", "reasoning", "harmony"],
-    },
     # DeepSeek-R1 (full, DeepseekV3ForCausalLM - supported by ATOM plugin)
     "deepseek-r1": {
         "model": _resolve_model_path("deepseek-ai/DeepSeek-R1"),
         "memory_gb": 256,
         "tp": 8,
         "features": ["chat", "streaming", "reasoning"],
-        "worker_args": ["--kv-cache-dtype", "fp8_e4m3"],
+        "worker_args": ["--kv-cache-dtype", "fp8_e4m3", "--disable-cuda-graph"],
     },
 }
 
@@ -122,7 +108,6 @@ def get_model_spec(model_id: str) -> dict:
 
 # Convenience groupings for test parametrization
 CHAT_MODELS = get_models_with_feature("chat")
-EMBEDDING_MODELS = get_models_with_feature("embedding")
 REASONING_MODELS = get_models_with_feature("reasoning")
 FUNCTION_CALLING_MODELS = get_models_with_feature("function_calling")
 
@@ -137,23 +122,3 @@ DEFAULT_REASONING_MODEL_PATH = MODEL_SPECS["deepseek-7b"]["model"]
 DEFAULT_ENABLE_THINKING_MODEL_PATH = MODEL_SPECS["qwen-30b"]["model"]
 DEFAULT_QWEN_FUNCTION_CALLING_MODEL_PATH = MODEL_SPECS["qwen-7b"]["model"]
 DEFAULT_MISTRAL_FUNCTION_CALLING_MODEL_PATH = MODEL_SPECS["mistral-7b"]["model"]
-DEFAULT_GPT_OSS_MODEL_PATH = MODEL_SPECS["gpt-oss"]["model"]
-DEFAULT_EMBEDDING_MODEL_PATH = MODEL_SPECS["embedding"]["model"]
-
-
-# =============================================================================
-# Third-party model configurations (cloud APIs)
-# =============================================================================
-
-THIRD_PARTY_MODELS: dict[str, dict] = {
-    "openai": {
-        "description": "OpenAI API",
-        "model": "gpt-5-nano",
-        "api_key_env": "OPENAI_API_KEY",
-    },
-    "xai": {
-        "description": "xAI API",
-        "model": "grok-4-fast",
-        "api_key_env": "XAI_API_KEY",
-    },
-}

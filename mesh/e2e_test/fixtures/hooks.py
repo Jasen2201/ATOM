@@ -387,7 +387,7 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
-        "backend(name): mark test to use a specific backend (grpc, http, openai, etc.)",
+        "backend(name): mark test to use a specific backend (grpc, http)",
     )
     config.addinivalue_line(
         "markers",
@@ -411,11 +411,6 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "thread_unsafe: mark test as incompatible with parallel thread execution",
-    )
-    config.addinivalue_line(
-        "markers",
-        "storage(backend): mark test to use a specific history storage backend "
-        "(memory, oracle). Default is memory.",
     )
 
 

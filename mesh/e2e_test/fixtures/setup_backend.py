@@ -30,7 +30,6 @@ def setup_backend(request: pytest.FixtureRequest, model_pool: "ModelPool"):
     Backend types:
     - "http", "grpc": Gets existing worker from model_pool, launches router
     - "pd": Launches prefill/decode workers via model_pool, launches PD router
-    - "openai", "xai", etc.: Launches cloud router (no local workers)
 
     Configuration via markers:
     - @pytest.mark.model("model-id"): Override default model
@@ -52,7 +51,6 @@ def setup_backend(request: pytest.FixtureRequest, model_pool: "ModelPool"):
         DEFAULT_ROUTER_TIMEOUT,
         ENV_MODEL,
         ENV_SKIP_BACKEND_SETUP,
-        LOCAL_MODES,
         ConnectionMode,
     )
 
@@ -90,32 +88,21 @@ def setup_backend(request: pytest.FixtureRequest, model_pool: "ModelPool"):
         )
         return
 
-    # Check if this is a local backend (grpc, http)
+    # Local backends: use worker from pool + launch gateway
     try:
         connection_mode = ConnectionMode(backend_name)
-        is_local = connection_mode in LOCAL_MODES
     except ValueError:
-        is_local = False
-        connection_mode = None
+        pytest.fail(f"Unknown backend: {backend_name}")
 
-    # Local backends: use worker from pool + launch gateway
-    if is_local:
-        yield from _setup_local_backend(
-            request,
-            model_pool,
-            backend_name,
-            model_id,
-            connection_mode,
-            workers_config,
-            gateway_config,
-        )
-        return
-
-    # Get storage backend from marker (default: memory)
-    storage_backend = get_marker_value(request, "storage", default="memory")
-
-    # Cloud backends: launch cloud router
-    yield from _setup_cloud_backend(backend_name, storage_backend, gateway_config)
+    yield from _setup_local_backend(
+        request,
+        model_pool,
+        backend_name,
+        model_id,
+        connection_mode,
+        workers_config,
+        gateway_config,
+    )
 
 
 def _setup_pd_backend(
@@ -354,54 +341,6 @@ def _setup_local_backend(
         # Release references to allow eviction
         for inst in instances:
             inst.release()
-
-
-def _setup_cloud_backend(
-    backend_name: str,
-    storage_backend: str = "memory",
-    gateway_config: dict | None = None,
-):
-    """Setup cloud backend (openai, xai, etc.).
-
-    Args:
-        backend_name: Cloud backend name (openai, xai).
-        storage_backend: History storage backend (memory, oracle).
-        gateway_config: Gateway configuration from marker.
-    """
-    import openai
-    from infra import THIRD_PARTY_MODELS, launch_cloud_gateway
-
-    if backend_name not in THIRD_PARTY_MODELS:
-        pytest.fail(f"Unknown cloud runtime: {backend_name}")
-
-    cfg = THIRD_PARTY_MODELS[backend_name]
-    api_key_env = cfg.get("api_key_env")
-
-    if api_key_env and not os.environ.get(api_key_env):
-        pytest.skip(f"{api_key_env} not set, skipping {backend_name} tests")
-
-    extra_args = gateway_config.get("extra_args") if gateway_config else None
-
-    logger.info(
-        "Launching cloud backend: %s with storage=%s", backend_name, storage_backend
-    )
-    gateway = launch_cloud_gateway(
-        backend_name,
-        history_backend=storage_backend,
-        extra_args=extra_args,
-    )
-
-    api_key = os.environ.get(api_key_env) if api_key_env else "not-used"
-    client = openai.OpenAI(
-        base_url=f"{gateway.base_url}/v1",
-        api_key=api_key,
-    )
-
-    try:
-        yield backend_name, cfg["model"], client, gateway
-    finally:
-        logger.info("Tearing down cloud backend: %s", backend_name)
-        gateway.shutdown()
 
 
 @pytest.fixture
