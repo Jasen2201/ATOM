@@ -40,7 +40,7 @@ echo "============================================================"
 
 # ---- Environment ----
 export AITER_QUICK_REDUCE_QUANTIZATION="${QUICK_REDUCE_QUANT}"
-export SGLANG_EXTERNAL_MODEL_PACKAGE=atom.plugin.sglang.model_wrapper
+export SGLANG_EXTERNAL_MODEL_PACKAGE=atom.plugin.sglang.models
 export PYTHONFAULTHANDLER=1
 export TORCHINDUCTOR_COMPILE_THREADS=128
 export AMD_SERIALIZE_KERNEL=1

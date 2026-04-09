@@ -767,6 +767,7 @@ mod pd_routing_unit_tests {
             ("/get_model_info", "GET", true),
             ("/generate", "POST", true),
             ("/v1/chat/completions", "POST", true),
+            ("/v1/completions", "POST", true),
             ("/flush_cache", "POST", true),
             ("/get_loads", "GET", true),
             ("/register", "POST", false), // NOT IMPLEMENTED - needs dynamic worker management
@@ -778,9 +779,9 @@ mod pd_routing_unit_tests {
             .count();
         let total_count = implemented_endpoints.len();
 
-        // We've implemented 9 out of 10 endpoints (register is not needed for Phase 1/2)
-        assert_eq!(implemented_count, 9);
-        assert_eq!(total_count, 10);
+        // We've implemented 10 out of 11 endpoints (register is not needed for Phase 1/2)
+        assert_eq!(implemented_count, 10);
+        assert_eq!(total_count, 11);
 
         let missing: Vec<_> = implemented_endpoints
             .iter()

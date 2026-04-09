@@ -84,6 +84,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_v1_completions_streaming() {
+        let ctx = WorkerTestContext::new(vec![MockWorkerConfig {
+            port: 20003,
+            worker_type: WorkerType::Regular,
+            health_status: HealthStatus::Healthy,
+            response_delay_ms: 10,
+            fail_rate: 0.0,
+        }])
+        .await;
+
+        let payload = json!({
+            "model": "test-model",
+            "prompt": "Once upon a time",
+            "stream": true,
+            "max_tokens": 15
+        });
+
+        let result = ctx.make_streaming_request("/v1/completions", payload).await;
+        assert!(result.is_ok());
+
+        let events = result.unwrap();
+        assert!(events.len() >= 2);
+
+        ctx.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn test_streaming_with_error() {
         let ctx = WorkerTestContext::new(vec![MockWorkerConfig {
             port: 20004,

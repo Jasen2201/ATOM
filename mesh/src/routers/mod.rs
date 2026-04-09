@@ -12,6 +12,7 @@ use axum::{
 
 use crate::protocols::{
     chat::ChatCompletionRequest,
+    completion::CompletionRequest,
     generate::GenerateRequest,
     responses::{ResponsesGetParams, ResponsesRequest},
 };
@@ -89,6 +90,20 @@ pub trait RouterTrait: Send + Sync + Debug {
         body: &ChatCompletionRequest,
         model_id: Option<&str>,
     ) -> Response;
+
+    /// Route a completion request
+    async fn route_completion(
+        &self,
+        _headers: Option<&HeaderMap>,
+        _body: &CompletionRequest,
+        _model_id: Option<&str>,
+    ) -> Response {
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            "Completion endpoint not implemented",
+        )
+            .into_response()
+    }
 
     /// Route a responses request
     async fn route_responses(

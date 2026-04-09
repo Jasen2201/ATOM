@@ -27,6 +27,7 @@ use crate::{
     protocols::{
         chat::ChatCompletionRequest,
         common::GenerationRequest,
+        completion::CompletionRequest,
         generate::GenerateRequest,
         responses::{ResponsesGetParams, ResponsesRequest},
     },
@@ -726,6 +727,16 @@ impl RouterTrait for Router {
         model_id: Option<&str>,
     ) -> Response {
         self.route_typed_request(headers, body, "/v1/chat/completions", model_id)
+            .await
+    }
+
+    async fn route_completion(
+        &self,
+        headers: Option<&HeaderMap>,
+        body: &CompletionRequest,
+        model_id: Option<&str>,
+    ) -> Response {
+        self.route_typed_request(headers, body, "/v1/completions", model_id)
             .await
     }
 

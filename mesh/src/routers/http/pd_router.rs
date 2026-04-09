@@ -30,7 +30,8 @@ use crate::{
     policies::{LoadBalancingPolicy, PolicyRegistry, SelectWorkerInfo},
     protocols::{
         chat::{ChatCompletionRequest, ChatMessage, MessageContent},
-        common::InputIds,
+        common::{InputIds, StringOrArray},
+        completion::CompletionRequest,
         generate::GenerateRequest,
     },
     routers::{
@@ -189,6 +190,15 @@ impl PDRouter {
         if let Some(n) = req.n {
             if n > 1 {
                 return Some(n as usize);
+            }
+        }
+        None
+    }
+
+    fn get_completion_batch_size(req: &CompletionRequest) -> Option<usize> {
+        if let StringOrArray::Array(arr) = &req.prompt {
+            if !arr.is_empty() {
+                return Some(arr.len());
             }
         }
         None
@@ -1291,6 +1301,39 @@ impl RouterTrait for PDRouter {
 
         let context = PDRequestContext {
             route: "/v1/chat/completions",
+            batch_size,
+            is_stream,
+            return_logprob,
+            request_text,
+            model_id,
+            headers: headers.cloned(),
+        };
+
+        self.execute_dual_dispatch(headers, body, context).await
+    }
+
+    async fn route_completion(
+        &self,
+        headers: Option<&HeaderMap>,
+        body: &CompletionRequest,
+        model_id: Option<&str>,
+    ) -> Response {
+        let is_stream = body.stream;
+        let return_logprob = body.logprobs.is_some();
+
+        let request_text = if self.policies_need_request_text() {
+            match &body.prompt {
+                StringOrArray::String(s) => Some(s.clone()),
+                StringOrArray::Array(v) => v.first().map(|s| s.to_string()),
+            }
+        } else {
+            None
+        };
+
+        let batch_size = Self::get_completion_batch_size(body);
+
+        let context = PDRequestContext {
+            route: "/v1/completions",
             batch_size,
             is_stream,
             return_logprob,
