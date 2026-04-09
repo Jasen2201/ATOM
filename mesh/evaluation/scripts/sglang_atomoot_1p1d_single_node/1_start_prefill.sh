@@ -45,15 +45,21 @@ export SGLANG_EXTERNAL_MODEL_PACKAGE=atom.plugin.sglang.models
 export PYTHONFAULTHANDLER=1
 export TORCHINDUCTOR_COMPILE_THREADS=128
 export AMD_SERIALIZE_KERNEL=1
-export MOONCAKE_CONFIG_PATH="${SCRIPT_DIR}/mooncake_local.json"
+export SGLANG_HOST_IP="${PREFILL_IP}"
+
+# ---- LD_LIBRARY_PATH for mooncake ----
+MOONCAKE_LIB="${MOONCAKE_LIB:-/opt/venv/lib/python3.12/site-packages/mooncake}"
+export LD_LIBRARY_PATH="${MOONCAKE_LIB}:/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
 
 # ---- Generate Mooncake config for local protocol ----
+export MOONCAKE_CONFIG_PATH="${SCRIPT_DIR}/mooncake_local.json"
 cat > "${MOONCAKE_CONFIG_PATH}" <<MCEOF
 {
     "prefill_url": "${PREFILL_IP}:${PREFILL_PORT}",
     "protocol": "${MOONCAKE_PROTOCOL}"
 }
 MCEOF
+echo "[config] Mooncake config written to ${MOONCAKE_CONFIG_PATH}"
 
 echo "[launch] Starting Prefill server..."
 python3 -m sglang.launch_server \

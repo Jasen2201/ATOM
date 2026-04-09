@@ -46,6 +46,11 @@ export SGLANG_EXTERNAL_MODEL_PACKAGE=atom.plugin.sglang.models
 export PYTHONFAULTHANDLER=1
 export TORCHINDUCTOR_COMPILE_THREADS=128
 export AMD_SERIALIZE_KERNEL=1
+export SGLANG_HOST_IP="${DECODE_IP}"
+
+# ---- LD_LIBRARY_PATH for mooncake ----
+MOONCAKE_LIB="${MOONCAKE_LIB:-/opt/venv/lib/python3.12/site-packages/mooncake}"
+export LD_LIBRARY_PATH="${MOONCAKE_LIB}:/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
 
 echo "[launch] Starting Decode server..."
 python3 -m sglang.launch_server \
