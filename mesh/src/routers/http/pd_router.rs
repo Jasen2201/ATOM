@@ -25,7 +25,6 @@ use crate::{
     observability::{
         events::{self, Event},
         metrics::{bool_to_static_str, metrics_labels, Metrics},
-        otel_trace::inject_trace_context_http,
     },
     policies::{LoadBalancingPolicy, PolicyRegistry, SelectWorkerInfo},
     protocols::{
@@ -540,10 +539,6 @@ impl PDRouter {
             (!context.is_stream).then(|| WorkerLoadGuard::new(prefill.clone(), headers));
         let _decode_guard =
             (!context.is_stream).then(|| WorkerLoadGuard::new(decode.clone(), headers));
-
-        let mut headers_with_trace = headers.cloned().unwrap_or_default();
-        inject_trace_context_http(&mut headers_with_trace);
-        let headers = Some(&headers_with_trace);
 
         // Build both requests
         let prefill_request = self.build_post_with_headers(

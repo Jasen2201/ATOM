@@ -12,9 +12,6 @@ use tracing_subscriber::{
     fmt::time::ChronoUtc, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
 };
 
-use super::otel_trace::get_otel_layer;
-use crate::config::TraceConfig;
-
 const TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 const DEFAULT_LOG_TARGET: &str = "mesh";
 
@@ -79,7 +76,7 @@ fn build_filter_string(targets: &[String], level_filter: &str) -> String {
     filter_string
 }
 
-pub fn init_logging(config: LoggingConfig, otel_layer_config: Option<TraceConfig>) -> LogGuard {
+pub fn init_logging(config: LoggingConfig) -> LogGuard {
     let _ = LogTracer::init();
 
     let level_filter = level_to_str(config.level);
@@ -148,19 +145,6 @@ pub fn init_logging(config: LoggingConfig, otel_layer_config: Option<TraceConfig
         };
 
         layers.push(file_layer);
-    }
-
-    if let Some(otel_layer_config) = &otel_layer_config {
-        if otel_layer_config.enable_trace {
-            match get_otel_layer() {
-                Ok(otel_layer) => {
-                    layers.push(otel_layer);
-                }
-                Err(e) => {
-                    eprintln!("Failed to initialize OpenTelemetry: {}", e);
-                }
-            }
-        }
     }
 
     let _ = tracing_subscriber::registry()

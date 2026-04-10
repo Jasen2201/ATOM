@@ -179,46 +179,6 @@ class TestRouterInitialization:
 
             # Function returns None; ensure start was invoked
 
-    def test_router_initialization_with_service_discovery(self):
-        """Test router initialization with service discovery."""
-        args = RouterArgs(
-            service_discovery=True,
-            selector={"app": "worker", "env": "prod"},
-            service_discovery_port=8080,
-            service_discovery_namespace="default",
-        )
-
-        with patch("mesh_router.launch_router.Router") as router_mod:
-            captured_args = {}
-            mock_router_instance = MagicMock()
-
-            def fake_from_args(router_args):
-                captured_args.update(
-                    dict(
-                        service_discovery=router_args.service_discovery,
-                        selector=router_args.selector,
-                        service_discovery_port=router_args.service_discovery_port,
-                        service_discovery_namespace=router_args.service_discovery_namespace,
-                    )
-                )
-                return mock_router_instance
-
-            router_mod.from_args = MagicMock(side_effect=fake_from_args)
-
-            result = launch_router(args)
-
-            # Verify Router.from_args was called with service discovery parameters
-            router_mod.from_args.assert_called_once()
-            assert captured_args["service_discovery"] is True
-            assert captured_args["selector"] == {"app": "worker", "env": "prod"}
-            assert captured_args["service_discovery_port"] == 8080
-            assert captured_args["service_discovery_namespace"] == "default"
-
-            # Verify router.start() was called
-            mock_router_instance.start.assert_called_once()
-
-            # Function returns None; ensure start was invoked
-
     def test_router_initialization_with_retry_config(self):
         """Test router initialization with retry configuration."""
         args = RouterArgs(
@@ -470,7 +430,6 @@ class TestStartupValidation:
             pd_disaggregation=True,
             prefill_urls=[],
             decode_urls=[],
-            service_discovery=False,
         )
 
         # Should not raise validation error - URLs are now optional
@@ -480,26 +439,6 @@ class TestStartupValidation:
 
             # This should succeed without raising an error
             launch_router(args)
-            router_mod.from_args.assert_called_once()
-
-    def test_pd_mode_with_service_discovery_validation(self):
-        """Test PD mode with service discovery validation during startup."""
-        args = RouterArgs(
-            pd_disaggregation=True,
-            prefill_urls=[],
-            decode_urls=[],
-            service_discovery=True,
-        )
-
-        # Should not raise validation error
-        with patch("mesh_router.launch_router.Router") as router_mod:
-            mock_router_instance = MagicMock()
-
-            router_mod.from_args = MagicMock(return_value=mock_router_instance)
-
-            result = launch_router(args)
-
-            # Should create router instance
             router_mod.from_args.assert_called_once()
 
     def test_policy_warning_during_startup(self):
@@ -733,18 +672,12 @@ def test_router_defaults_and_start(monkeypatch):
     args = _RouterArgs(
         worker_urls=["http://w1:8000"],
         policy="round_robin",
-        selector=None,
-        prefill_selector=None,
-        decode_selector=None,
         cors_allowed_origins=None,
     )
 
     r = Router.from_args(args)
 
     # Defaults preserved/normalized by Router.from_args
-    assert captured["selector"] is None
-    assert captured["prefill_selector"] is None
-    assert captured["decode_selector"] is None
     assert captured["cors_allowed_origins"] is None
     assert captured["worker_urls"] == ["http://w1:8000"]
     from mesh_router.mesh_router_rs import PolicyType
@@ -858,7 +791,6 @@ def test_launch_server_process_and_cleanup(monkeypatch):
             pd_disaggregation=True,
             prefill_urls=[],
             decode_urls=[],
-            service_discovery=False,
         )
 
         with patch("mesh_router.launch_router.logger") as mock_logger:
@@ -932,10 +864,6 @@ class TestStartupFlow:
             port=30001,
             worker_urls=["http://worker1:8000"],
             policy="round_robin",
-            service_discovery=True,
-            selector={"app": "worker"},
-            service_discovery_port=8080,
-            service_discovery_namespace="default",
             dp_aware=True,
             api_key="test-key",
             log_dir="/tmp/logs",
@@ -976,10 +904,6 @@ class TestStartupFlow:
                         port=router_args.port,
                         worker_urls=router_args.worker_urls,
                         policy=policy_from_str(router_args.policy),
-                        service_discovery=router_args.service_discovery,
-                        selector=router_args.selector,
-                        service_discovery_port=router_args.service_discovery_port,
-                        service_discovery_namespace=router_args.service_discovery_namespace,
                         dp_aware=router_args.dp_aware,
                         api_key=router_args.api_key,
                         log_dir=router_args.log_dir,
@@ -1024,10 +948,6 @@ class TestStartupFlow:
             assert captured_args["port"] == 30001
             assert captured_args["worker_urls"] == ["http://worker1:8000"]
             assert captured_args["policy"] == PolicyType.RoundRobin
-            assert captured_args["service_discovery"] is True
-            assert captured_args["selector"] == {"app": "worker"}
-            assert captured_args["service_discovery_port"] == 8080
-            assert captured_args["service_discovery_namespace"] == "default"
             assert captured_args["dp_aware"] is True
             assert captured_args["api_key"] == "test-key"
             assert captured_args["log_dir"] == "/tmp/logs"

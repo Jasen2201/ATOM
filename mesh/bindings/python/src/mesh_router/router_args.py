@@ -45,15 +45,6 @@ class RouterArgs:
     log_dir: Optional[str] = None
     log_level: Optional[str] = None
     json_log: bool = False
-    # Service discovery configuration
-    service_discovery: bool = False
-    selector: Dict[str, str] = dataclasses.field(default_factory=dict)
-    service_discovery_port: int = 80
-    service_discovery_namespace: Optional[str] = None
-    # PD service discovery configuration
-    prefill_selector: Dict[str, str] = dataclasses.field(default_factory=dict)
-    decode_selector: Dict[str, str] = dataclasses.field(default_factory=dict)
-    bootstrap_port_annotation: str = "sglang.ai/bootstrap-port"
     # Prometheus configuration
     prometheus_port: Optional[int] = None
     prometheus_host: Optional[str] = None
@@ -116,8 +107,6 @@ class RouterArgs:
     server_cert_path: Optional[str] = None
     server_key_path: Optional[str] = None
     # Trace
-    enable_trace: bool = False
-    otlp_traces_endpoint: str = "localhost:4317"
     # Control plane authentication
     # API keys for control plane auth (list of tuples: id, name, key, role)
     control_plane_api_keys: List[tuple] = dataclasses.field(default_factory=list)
@@ -154,9 +143,6 @@ class RouterArgs:
         pd_group = parser.add_argument_group(
             "PD Disaggregation", "Prefill-Decode disaggregated mode settings"
         )
-        k8s_group = parser.add_argument_group(
-            "Service Discovery (Kubernetes)", "Kubernetes-based worker discovery"
-        )
         logging_group = parser.add_argument_group("Logging", "Log output configuration")
         prometheus_group = parser.add_argument_group(
             "Prometheus Metrics", "Metrics export configuration"
@@ -187,9 +173,6 @@ class RouterArgs:
         )
         tls_group = parser.add_argument_group(
             "TLS/mTLS Security", "TLS certificates for server and worker communication"
-        )
-        trace_group = parser.add_argument_group(
-            "Tracing (OpenTelemetry)", "Distributed tracing configuration"
         )
         auth_group = parser.add_argument_group(
             "Control Plane Authentication", "API key and JWT/OIDC authentication"
@@ -389,44 +372,6 @@ class RouterArgs:
             help="Enable structured JSON log output instead of plain text.",
         )
 
-        # Service discovery configuration
-        k8s_group.add_argument(
-            f"--{prefix}service-discovery",
-            action="store_true",
-            help="Enable Kubernetes service discovery",
-        )
-        k8s_group.add_argument(
-            f"--{prefix}selector",
-            type=str,
-            nargs="+",
-            default={},
-            help="Label selector for Kubernetes service discovery (format: key1=value1 key2=value2)",
-        )
-        k8s_group.add_argument(
-            f"--{prefix}service-discovery-port",
-            type=int,
-            default=RouterArgs.service_discovery_port,
-            help="Port to use for discovered worker pods",
-        )
-        k8s_group.add_argument(
-            f"--{prefix}service-discovery-namespace",
-            type=str,
-            help="Kubernetes namespace to watch for pods. If not provided, watches all namespaces (requires cluster-wide permissions)",
-        )
-        k8s_group.add_argument(
-            f"--{prefix}prefill-selector",
-            type=str,
-            nargs="+",
-            default={},
-            help="Label selector for prefill server pods in PD mode (format: key1=value1 key2=value2)",
-        )
-        k8s_group.add_argument(
-            f"--{prefix}decode-selector",
-            type=str,
-            nargs="+",
-            default={},
-            help="Label selector for decode server pods in PD mode (format: key1=value1 key2=value2)",
-        )
         # Prometheus configuration
         prometheus_group.add_argument(
             f"--{prefix}prometheus-port",
@@ -710,19 +655,6 @@ class RouterArgs:
             type=str,
             default=None,
             help="Path to server TLS private key (PEM format)",
-        )
-
-        # Tracing configuration
-        trace_group.add_argument(
-            f"--{prefix}enable-trace",
-            action="store_true",
-            help="Enable opentelemetry trace",
-        )
-        trace_group.add_argument(
-            f"--{prefix}otlp-traces-endpoint",
-            type=str,
-            default="localhost:4317",
-            help="Config opentelemetry collector endpoint if --enable-trace is set. format: <ip>:<port>",
         )
 
         # Control plane authentication

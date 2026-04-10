@@ -33,45 +33,11 @@ class TestRouterArgs:
         assert args.prefill_policy is None
         assert args.decode_policy is None
 
-        # Test service discovery defaults
-        assert args.service_discovery is False
-        assert args.selector == {}
-        assert args.service_discovery_port == 80
-        assert args.service_discovery_namespace is None
-
         # Test retry and circuit breaker defaults
         assert args.retry_max_retries == 5
         assert args.cb_failure_threshold == 10
         assert args.disable_retries is False
         assert args.disable_circuit_breaker is False
-
-    def test_parse_selector_valid(self):
-        """Test parsing valid selector arguments."""
-        # Test single key-value pair
-        result = RouterArgs._parse_selector(["app=worker"])
-        assert result == {"app": "worker"}
-
-        # Test multiple key-value pairs
-        result = RouterArgs._parse_selector(["app=worker", "env=prod", "version=v1"])
-        assert result == {"app": "worker", "env": "prod", "version": "v1"}
-
-        # Test empty list
-        result = RouterArgs._parse_selector([])
-        assert result == {}
-
-        # Test None
-        result = RouterArgs._parse_selector(None)
-        assert result == {}
-
-    def test_parse_selector_invalid(self):
-        """Test parsing invalid selector arguments."""
-        # Test malformed selector (no equals sign)
-        result = RouterArgs._parse_selector(["app"])
-        assert result == {}
-
-        # Test multiple equals signs (should use first one)
-        result = RouterArgs._parse_selector(["app=worker=extra"])
-        assert result == {"app": "worker=extra"}
 
     def test_parse_prefill_urls_valid(self):
         """Test parsing valid prefill URL arguments."""
@@ -161,12 +127,6 @@ class TestRouterArgs:
             router_api_key="test-key",
             router_log_dir="/tmp/logs",
             router_log_level="debug",
-            router_service_discovery=True,
-            router_selector=["app=worker", "env=test"],
-            router_service_discovery_port=8080,
-            router_service_discovery_namespace="default",
-            router_prefill_selector=["app=prefill"],
-            router_decode_selector=["app=decode"],
             router_prometheus_port=29000,
             router_prometheus_host="0.0.0.0",
             router_request_id_headers=["x-request-id", "x-trace-id"],
@@ -206,14 +166,6 @@ class TestRouterArgs:
         assert router_args.pd_disaggregation is False
         assert router_args.prefill_urls == []
         assert router_args.decode_urls == []
-
-        # Test service discovery
-        assert router_args.service_discovery is True
-        assert router_args.selector == {"app": "worker", "env": "test"}
-        assert router_args.service_discovery_port == 8080
-        assert router_args.service_discovery_namespace == "default"
-        assert router_args.prefill_selector == {"app": "prefill"}
-        assert router_args.decode_selector == {"app": "decode"}
 
         # Test other configurations
         assert router_args.dp_aware is True
@@ -288,12 +240,6 @@ class TestRouterArgs:
             router_api_key=None,
             router_log_dir=None,
             router_log_level=None,
-            router_service_discovery=False,
-            router_selector=None,
-            router_service_discovery_port=80,
-            router_service_discovery_namespace=None,
-            router_prefill_selector=None,
-            router_decode_selector=None,
             router_prometheus_port=None,
             router_prometheus_host=None,
             router_request_id_headers=None,
@@ -358,12 +304,6 @@ class TestRouterArgs:
             api_key=None,
             log_dir=None,
             log_level=None,
-            service_discovery=False,
-            selector=None,
-            service_discovery_port=80,
-            service_discovery_namespace=None,
-            prefill_selector=None,
-            decode_selector=None,
             prometheus_port=None,
             prometheus_host=None,
             request_id_headers=None,
@@ -474,37 +414,6 @@ class TestParseRouterArgs:
         assert router_args.decode_urls == ["http://decode1:8001", "http://decode2:8001"]
         assert router_args.prefill_policy == "power_of_two"
         assert router_args.decode_policy == "round_robin"
-
-    def test_parse_service_discovery_args(self):
-        """Test parsing service discovery arguments."""
-        args_a = [
-            "--service-discovery",
-            "--selector",
-            "app=worker",
-            "env=prod",
-            "--service-discovery-port",
-            "8080",
-            "--service-discovery-namespace",
-            "default",
-        ]
-        args_b = [
-            "--service-discovery",
-            "--selector",
-            # OME has this style
-            "app=worker env=prod",
-            "--service-discovery-port",
-            "8080",
-            "--service-discovery-namespace",
-            "default",
-        ]
-
-        for args in [args_a, args_b]:
-            router_args = parse_router_args(args)
-
-            assert router_args.service_discovery is True
-            assert router_args.selector == {"app": "worker", "env": "prod"}
-            assert router_args.service_discovery_port == 8080
-            assert router_args.service_discovery_namespace == "default"
 
     def test_parse_retry_and_circuit_breaker_args(self):
         """Test parsing retry and circuit breaker arguments."""

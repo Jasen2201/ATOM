@@ -85,9 +85,7 @@ impl PipelineStage for RequestExecutionStage {
             .map(|d| d.model.as_str())
             .unwrap_or("unknown");
 
-        // Create OTEL span for gRPC request execution
         let span = info_span!(
-            target: "mesh::otel-trace",
             "grpc_generate",
             request_id = %request_id,
             model = %model,

@@ -9,16 +9,8 @@ impl ConfigValidator {
         Self::validate_policy(&config.policy)?;
         Self::validate_server_settings(config)?;
 
-        if let Some(discovery) = &config.discovery {
-            Self::validate_discovery(discovery, &config.mode)?;
-        }
-
         if let Some(metrics) = &config.metrics {
             Self::validate_metrics(metrics)?;
-        }
-
-        if let Some(trace_config) = &config.trace_config {
-            Self::validate_trace(trace_config)?;
         }
 
         Self::validate_compatibility(config)?;
@@ -221,48 +213,6 @@ impl ConfigValidator {
         Ok(())
     }
 
-    fn validate_discovery(discovery: &DiscoveryConfig, mode: &RoutingMode) -> ConfigResult<()> {
-        if !discovery.enabled {
-            return Ok(());
-        }
-
-        if discovery.port == 0 {
-            return Err(ConfigError::InvalidValue {
-                field: "discovery.port".to_string(),
-                value: discovery.port.to_string(),
-                reason: "Port must be > 0".to_string(),
-            });
-        }
-
-        if discovery.check_interval_secs == 0 {
-            return Err(ConfigError::InvalidValue {
-                field: "discovery.check_interval_secs".to_string(),
-                value: discovery.check_interval_secs.to_string(),
-                reason: "Must be > 0".to_string(),
-            });
-        }
-
-        match mode {
-            RoutingMode::Regular { .. } => {
-                if discovery.selector.is_empty() {
-                    return Err(ConfigError::ValidationFailed {
-                        reason: "Regular mode with service discovery requires a non-empty selector"
-                            .to_string(),
-                    });
-                }
-            }
-            RoutingMode::PrefillDecode { .. } => {
-                if discovery.prefill_selector.is_empty() && discovery.decode_selector.is_empty() {
-                    return Err(ConfigError::ValidationFailed {
-                        reason: "PD mode with service discovery requires at least one non-empty selector (prefill or decode)".to_string(),
-                    });
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     fn validate_metrics(metrics: &MetricsConfig) -> ConfigResult<()> {
         if metrics.port == 0 {
             return Err(ConfigError::InvalidValue {
@@ -279,46 +229,6 @@ impl ConfigValidator {
                 reason: "Host cannot be empty".to_string(),
             });
         }
-
-        Ok(())
-    }
-
-    fn validate_trace(trace_config: &TraceConfig) -> ConfigResult<()> {
-        if !trace_config.enable_trace {
-            return Ok(());
-        }
-
-        let endpoint = &trace_config.otlp_traces_endpoint;
-
-        let Some((host, port_str)) = endpoint.rsplit_once(':') else {
-            return Err(ConfigError::InvalidValue {
-                field: "trace_config.otlp_traces_endpoint".to_string(),
-                value: endpoint.clone(),
-                reason:
-                    "expected format <host>:<port>, e.g., otel-collector:4317 or 127.0.0.1:4317"
-                        .to_string(),
-            });
-        };
-
-        if host.is_empty() {
-            return Err(ConfigError::InvalidValue {
-                field: "trace_config.otlp_traces_endpoint".to_string(),
-                value: endpoint.clone(),
-                reason: "host part cannot be empty".to_string(),
-            });
-        }
-
-        // check port: must be 1~65535
-        match port_str.parse::<u16>() {
-            Ok(p) if p > 0 => (), // valid port
-            _ => {
-                return Err(ConfigError::InvalidValue {
-                    field: "trace_config.otlp_traces_endpoint".to_string(),
-                    value: endpoint.clone(),
-                    reason: "port must be a number between 1 and 65535".to_string(),
-                });
-            }
-        };
 
         Ok(())
     }
@@ -415,9 +325,7 @@ impl ConfigValidator {
     }
 
     fn validate_compatibility(config: &RouterConfig) -> ConfigResult<()> {
-        let has_service_discovery = config.discovery.as_ref().is_some_and(|d| d.enabled);
-
-        if !has_service_discovery {
+        {
             if let PolicyConfig::PowerOfTwo { .. } = &config.policy {
                 let worker_count = config.mode.worker_count();
                 if worker_count < 2 {
@@ -529,28 +437,6 @@ mod tests {
         );
 
         // Empty worker URLs are now allowed to match legacy behavior
-        assert!(ConfigValidator::validate(&config).is_ok());
-    }
-
-    #[test]
-    fn test_validate_empty_worker_urls_with_service_discovery() {
-        let mut config = RouterConfig::new(
-            RoutingMode::Regular {
-                worker_urls: vec![],
-            },
-            PolicyConfig::Random,
-        );
-
-        // Enable service discovery
-        config.discovery = Some(DiscoveryConfig {
-            enabled: true,
-            selector: vec![("app".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            ..Default::default()
-        });
-
-        // Should pass validation since service discovery is enabled
         assert!(ConfigValidator::validate(&config).is_ok());
     }
 
@@ -735,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_empty_urls_allowed_without_service_discovery() {
+    fn test_validate_empty_urls_allowed() {
         // Test that empty URLs are now allowed in PD mode
         let config = RouterConfig::new(
             RoutingMode::PrefillDecode {

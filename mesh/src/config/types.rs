@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 
 use super::ConfigResult;
@@ -20,9 +18,7 @@ pub struct RouterConfig {
     pub worker_startup_check_interval_secs: u64,
     pub dp_aware: bool,
     pub api_key: Option<String>,
-    pub discovery: Option<DiscoveryConfig>,
     pub metrics: Option<MetricsConfig>,
-    pub trace_config: Option<TraceConfig>,
     pub log_dir: Option<String>,
     pub log_level: Option<String>,
     pub request_id_headers: Option<Vec<String>>,
@@ -224,50 +220,6 @@ impl PolicyConfig {
     }
 }
 
-/// Service discovery configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiscoveryConfig {
-    pub enabled: bool,
-    /// None = all namespaces
-    pub namespace: Option<String>,
-    pub port: u16,
-    pub check_interval_secs: u64,
-    /// Regular mode
-    pub selector: HashMap<String, String>,
-    /// PD mode prefill
-    pub prefill_selector: HashMap<String, String>,
-    /// PD mode decode
-    pub decode_selector: HashMap<String, String>,
-    pub bootstrap_port_annotation: String,
-    /// Router node discovery for HA (Kubernetes label selector)
-    #[serde(default)]
-    pub router_selector: HashMap<String, String>,
-    /// Annotation key to read mesh port from Router Pods
-    #[serde(default = "default_router_mesh_port_annotation")]
-    pub router_mesh_port_annotation: String,
-}
-
-fn default_router_mesh_port_annotation() -> String {
-    "sglang.ai/mesh-port".to_string()
-}
-
-impl Default for DiscoveryConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            namespace: None,
-            port: 8000,
-            check_interval_secs: 120,
-            selector: HashMap::new(),
-            prefill_selector: HashMap::new(),
-            decode_selector: HashMap::new(),
-            bootstrap_port_annotation: "sglang.ai/bootstrap-port".to_string(),
-            router_selector: HashMap::new(),
-            router_mesh_port_annotation: default_router_mesh_port_annotation(),
-        }
-    }
-}
-
 /// Retry configuration for request handling
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryConfig {
@@ -356,21 +308,6 @@ impl Default for MetricsConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TraceConfig {
-    pub enable_trace: bool,
-    pub otlp_traces_endpoint: String,
-}
-
-impl Default for TraceConfig {
-    fn default() -> Self {
-        Self {
-            enable_trace: false,
-            otlp_traces_endpoint: "localhost:4317".to_string(),
-        }
-    }
-}
-
 impl Default for RouterConfig {
     fn default() -> Self {
         Self {
@@ -386,9 +323,7 @@ impl Default for RouterConfig {
             worker_startup_check_interval_secs: 30,
             dp_aware: false,
             api_key: None,
-            discovery: None,
             metrics: None,
-            trace_config: None,
             log_dir: None,
             log_level: None,
             request_id_headers: None,
@@ -435,22 +370,9 @@ impl RouterConfig {
         }
     }
 
-    /// Check if service discovery is enabled
-    pub fn has_service_discovery(&self) -> bool {
-        self.discovery.as_ref().is_some_and(|d| d.enabled)
-    }
-
     /// Check if metrics are enabled
     pub fn has_metrics(&self) -> bool {
         self.metrics.is_some()
-    }
-
-    /// Check if tracing is enabled
-    pub fn has_tracing(&self) -> bool {
-        match &self.trace_config {
-            Some(trace_config) => trace_config.enable_trace,
-            None => false,
-        }
     }
 
     /// Compute the effective retry config considering disable flag
@@ -491,9 +413,7 @@ mod tests {
         assert_eq!(config.request_timeout_secs, 1800);
         assert_eq!(config.worker_startup_timeout_secs, 1800);
         assert_eq!(config.worker_startup_check_interval_secs, 30);
-        assert!(config.discovery.is_none());
         assert!(config.metrics.is_none());
-        assert!(config.trace_config.is_none());
         assert!(config.log_dir.is_none());
         assert!(config.log_level.is_none());
     }
@@ -540,9 +460,7 @@ mod tests {
         assert_eq!(config.max_payload_size, deserialized.max_payload_size);
         assert_eq!(config.log_dir, deserialized.log_dir);
         assert_eq!(config.log_level, deserialized.log_level);
-        assert!(deserialized.discovery.is_none());
         assert!(deserialized.metrics.is_none());
-        assert!(deserialized.trace_config.is_none());
     }
 
     #[test]
@@ -705,61 +623,6 @@ mod tests {
     }
 
     #[test]
-    fn test_discovery_config_default() {
-        let config = DiscoveryConfig::default();
-
-        assert!(!config.enabled);
-        assert!(config.namespace.is_none());
-        assert_eq!(config.port, 8000);
-        assert_eq!(config.check_interval_secs, 120);
-        assert!(config.selector.is_empty());
-        assert!(config.prefill_selector.is_empty());
-        assert!(config.decode_selector.is_empty());
-        assert_eq!(config.bootstrap_port_annotation, "sglang.ai/bootstrap-port");
-    }
-
-    #[test]
-    fn test_discovery_config_with_selectors() {
-        let mut selector = HashMap::new();
-        selector.insert("app".to_string(), "sglang".to_string());
-        selector.insert("role".to_string(), "worker".to_string());
-
-        let config = DiscoveryConfig {
-            enabled: true,
-            namespace: Some("default".to_string()),
-            port: 9000,
-            check_interval_secs: 30,
-            selector: selector.clone(),
-            prefill_selector: selector.clone(),
-            decode_selector: selector.clone(),
-            bootstrap_port_annotation: "custom.io/port".to_string(),
-            router_selector: HashMap::new(),
-            router_mesh_port_annotation: "sglang.ai/mesh-port".to_string(),
-        };
-
-        assert!(config.enabled);
-        assert_eq!(config.namespace, Some("default".to_string()));
-        assert_eq!(config.port, 9000);
-        assert_eq!(config.selector.len(), 2);
-        assert_eq!(config.selector.get("app"), Some(&"sglang".to_string()));
-    }
-
-    #[test]
-    fn test_discovery_config_namespace() {
-        let config = DiscoveryConfig {
-            namespace: None,
-            ..Default::default()
-        };
-        assert!(config.namespace.is_none());
-
-        let config = DiscoveryConfig {
-            namespace: Some("production".to_string()),
-            ..Default::default()
-        };
-        assert_eq!(config.namespace, Some("production".to_string()));
-    }
-
-    #[test]
     fn test_metrics_config_default() {
         let config = MetricsConfig::default();
 
@@ -779,25 +642,6 @@ mod tests {
     }
 
     #[test]
-    fn test_trace_config_default() {
-        let config = TraceConfig::default();
-
-        assert!(!config.enable_trace);
-        assert_eq!(config.otlp_traces_endpoint, "localhost:4317");
-    }
-
-    #[test]
-    fn test_trace_config_custom() {
-        let config = TraceConfig {
-            enable_trace: true,
-            otlp_traces_endpoint: "otel-collector:4317".to_string(),
-        };
-
-        assert!(config.enable_trace);
-        assert_eq!(config.otlp_traces_endpoint, "otel-collector:4317");
-    }
-
-    #[test]
     fn test_mode_type() {
         let config = RouterConfig::builder()
             .regular_mode(vec![])
@@ -811,23 +655,6 @@ mod tests {
     }
 
     #[test]
-    fn test_has_service_discovery() {
-        let config = RouterConfig::default();
-        assert!(!config.has_service_discovery());
-
-        let config = RouterConfig::builder()
-            .discovery_config(DiscoveryConfig {
-                enabled: false,
-                ..Default::default()
-            })
-            .build_unchecked();
-        assert!(!config.has_service_discovery());
-
-        let config = RouterConfig::builder().enable_discovery().build_unchecked();
-        assert!(config.has_service_discovery());
-    }
-
-    #[test]
     fn test_has_metrics() {
         let config = RouterConfig::default();
         assert!(!config.has_metrics());
@@ -836,17 +663,6 @@ mod tests {
             .metrics_config(MetricsConfig::default())
             .build_unchecked();
         assert!(config.has_metrics());
-    }
-
-    #[test]
-    fn test_has_tracing() {
-        let config = RouterConfig::default();
-        assert!(!config.has_tracing());
-
-        let config = RouterConfig::builder()
-            .enable_trace("localhost:4317")
-            .build_unchecked();
-        assert!(config.has_tracing());
     }
 
     #[test]
@@ -927,13 +743,7 @@ mod tests {
             .request_timeout_secs(120)
             .worker_startup_timeout_secs(60)
             .worker_startup_check_interval_secs(5)
-            .discovery_config(DiscoveryConfig {
-                enabled: true,
-                namespace: Some("sglang".to_string()),
-                ..Default::default()
-            })
             .enable_metrics("0.0.0.0", 9090)
-            .enable_trace("localhost:4317")
             .log_dir("/var/log/sglang")
             .log_level("info")
             .max_concurrent_requests(64)
@@ -942,16 +752,11 @@ mod tests {
         assert!(config.mode.is_pd_mode());
         assert_eq!(config.mode.worker_count(), 4);
         assert_eq!(config.policy.name(), "power_of_two");
-        assert!(config.has_service_discovery());
         assert!(config.has_metrics());
-        assert!(config.has_tracing());
     }
 
     #[test]
     fn test_full_regular_mode_config() {
-        let mut selector = HashMap::new();
-        selector.insert("app".to_string(), "sglang".to_string());
-
         let config = RouterConfig::builder()
             .regular_mode(vec![
                 "http://worker1:8000".to_string(),
@@ -965,16 +770,7 @@ mod tests {
             .request_timeout_secs(300)
             .worker_startup_timeout_secs(180)
             .worker_startup_check_interval_secs(15)
-            .discovery_config(DiscoveryConfig {
-                enabled: true,
-                namespace: None,
-                port: 8080,
-                check_interval_secs: 45,
-                selector,
-                ..Default::default()
-            })
             .metrics_config(MetricsConfig::default())
-            .enable_trace("localhost:4317")
             .log_level("debug")
             .max_concurrent_requests(64)
             .build_unchecked();
@@ -982,17 +778,11 @@ mod tests {
         assert!(!config.mode.is_pd_mode());
         assert_eq!(config.mode.worker_count(), 3);
         assert_eq!(config.policy.name(), "cache_aware");
-        assert!(config.has_service_discovery());
         assert!(config.has_metrics());
-        assert!(config.has_tracing());
     }
 
     #[test]
     fn test_config_with_all_options() {
-        let mut selectors = HashMap::new();
-        selectors.insert("env".to_string(), "prod".to_string());
-        selectors.insert("version".to_string(), "v1".to_string());
-
         let config = RouterConfig::builder()
             .regular_mode(vec!["http://worker1".to_string()])
             .round_robin_policy()
@@ -1002,28 +792,13 @@ mod tests {
             .request_timeout_secs(900)
             .worker_startup_timeout_secs(600)
             .worker_startup_check_interval_secs(20)
-            .discovery_config(DiscoveryConfig {
-                enabled: true,
-                namespace: Some("production".to_string()),
-                port: 8443,
-                check_interval_secs: 120,
-                selector: selectors.clone(),
-                prefill_selector: selectors.clone(),
-                decode_selector: selectors,
-                bootstrap_port_annotation: "mycompany.io/bootstrap".to_string(),
-                router_selector: HashMap::new(),
-                router_mesh_port_annotation: "sglang.ai/mesh-port".to_string(),
-            })
             .enable_metrics("::", 9999) // IPv6 any
-            .enable_trace("localhost:4317")
             .log_dir("/opt/logs/sglang")
             .log_level("trace")
             .max_concurrent_requests(64)
             .build_unchecked();
 
-        assert!(config.has_service_discovery());
         assert!(config.has_metrics());
-        assert!(config.has_tracing());
         assert_eq!(config.mode_type(), "regular");
 
         let json = serde_json::to_string_pretty(&config).unwrap();
@@ -1031,10 +806,6 @@ mod tests {
 
         assert_eq!(deserialized.host, "::1");
         assert_eq!(deserialized.port, 8888);
-        assert_eq!(
-            deserialized.discovery.unwrap().namespace,
-            Some("production".to_string())
-        );
     }
 
     #[test]

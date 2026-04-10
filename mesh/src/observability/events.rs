@@ -1,16 +1,6 @@
 //! Request events for observability and monitoring.
-//!
-//! Events use DEBUG level when OTEL is disabled, INFO when enabled.
 
-use tracing::{debug, event, Level};
-
-use super::otel_trace::is_otel_enabled;
-
-/// Module path used by CustomOtelFilter to identify events for OTEL export.
-#[inline]
-pub const fn get_module_path() -> &'static str {
-    "mesh::observability::events"
-}
+use tracing::debug;
 
 pub trait Event {
     fn emit(&self);
@@ -26,20 +16,11 @@ pub struct RequestPDSentEvent<'a> {
 impl Event for RequestPDSentEvent<'_> {
     #[inline]
     fn emit(&self) {
-        if is_otel_enabled() {
-            event!(
-                Level::INFO,
-                prefill_url = %self.prefill_url,
-                decode_url = %self.decode_url,
-                "Sending concurrent requests"
-            );
-        } else {
-            debug!(
-                prefill_url = %self.prefill_url,
-                decode_url = %self.decode_url,
-                "Sending concurrent requests"
-            );
-        }
+        debug!(
+            prefill_url = %self.prefill_url,
+            decode_url = %self.decode_url,
+            "Sending concurrent requests"
+        );
     }
 }
 
@@ -52,11 +33,7 @@ pub struct RequestSentEvent<'a> {
 impl Event for RequestSentEvent<'_> {
     #[inline]
     fn emit(&self) {
-        if is_otel_enabled() {
-            event!(Level::INFO, url = %self.url, "Sending request");
-        } else {
-            debug!(url = %self.url, "Sending request");
-        }
+        debug!(url = %self.url, "Sending request");
     }
 }
 
@@ -67,11 +44,7 @@ pub struct RequestReceivedEvent;
 impl Event for RequestReceivedEvent {
     #[inline]
     fn emit(&self) {
-        if is_otel_enabled() {
-            event!(Level::INFO, "Received concurrent requests");
-        } else {
-            debug!("Received concurrent requests");
-        }
+        debug!("Received concurrent requests");
     }
 }
 
@@ -86,11 +59,6 @@ mod tests {
         assert_eq!(size_of::<RequestReceivedEvent>(), 0);
         assert_eq!(size_of::<RequestSentEvent>(), 16);
         assert_eq!(size_of::<RequestPDSentEvent>(), 32);
-    }
-
-    #[test]
-    fn test_get_module_path() {
-        assert_eq!(get_module_path(), "mesh::observability::events");
     }
 
     #[test]
@@ -122,7 +90,6 @@ mod tests {
 
     #[test]
     fn test_event_emit_does_not_panic() {
-        // Just verify emit() doesn't panic with OTEL disabled (default)
         RequestPDSentEvent {
             prefill_url: "http://p:8000",
             decode_url: "http://d:8000",

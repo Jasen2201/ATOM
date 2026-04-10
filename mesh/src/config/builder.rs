@@ -1,7 +1,7 @@
 use super::{
-    CircuitBreakerConfig, ConfigResult, DiscoveryConfig, HealthCheckConfig,
+    CircuitBreakerConfig, ConfigResult, HealthCheckConfig,
     MetricsConfig, PolicyConfig,
-    RetryConfig, RouterConfig, RoutingMode, TokenizerCacheConfig, TraceConfig,
+    RetryConfig, RouterConfig, RoutingMode, TokenizerCacheConfig,
 };
 use crate::core::ConnectionMode;
 
@@ -238,22 +238,6 @@ impl RouterConfigBuilder {
         self
     }
 
-    // ==================== Discovery ====================
-
-    pub fn discovery_config(mut self, discovery: DiscoveryConfig) -> Self {
-        self.config.discovery = Some(discovery);
-        self
-    }
-
-    /// With default settings
-    pub fn enable_discovery(mut self) -> Self {
-        self.config.discovery = Some(DiscoveryConfig {
-            enabled: true,
-            ..Default::default()
-        });
-        self
-    }
-
     // ==================== Metrics ====================
 
     pub fn metrics_config(mut self, metrics: MetricsConfig) -> Self {
@@ -265,24 +249,6 @@ impl RouterConfigBuilder {
         self.config.metrics = Some(MetricsConfig {
             host: host.into(),
             port,
-        });
-        self
-    }
-
-    // ===================== Otel Trace ====================
-
-    pub fn enable_trace<S: Into<String>>(mut self, endpoint: S) -> Self {
-        self.config.trace_config = Some(TraceConfig {
-            enable_trace: true,
-            otlp_traces_endpoint: endpoint.into(),
-        });
-        self
-    }
-
-    pub fn disable_trace(mut self) -> Self {
-        self.config.trace_config = Some(TraceConfig {
-            enable_trace: false,
-            otlp_traces_endpoint: "".to_string(),
         });
         self
     }
@@ -394,18 +360,8 @@ impl RouterConfigBuilder {
     }
 
 
-    pub fn maybe_discovery(mut self, discovery: Option<DiscoveryConfig>) -> Self {
-        self.config.discovery = discovery;
-        self
-    }
-
     pub fn maybe_metrics(mut self, metrics: Option<MetricsConfig>) -> Self {
         self.config.metrics = metrics;
-        self
-    }
-
-    pub fn maybe_trace(mut self, trace_config: Option<TraceConfig>) -> Self {
-        self.config.trace_config = trace_config;
         self
     }
 
@@ -508,13 +464,11 @@ mod tests {
             .to_builder()
             .port(4000)
             .enable_metrics("0.0.0.0", 29000)
-            .enable_trace("localhost:4317")
             .build()
             .unwrap();
 
         assert_eq!(modified.port, 4000);
         assert!(modified.metrics.is_some());
-        assert!(modified.trace_config.is_some());
     }
 
     /// Test complex routing mode helper method
@@ -856,31 +810,6 @@ mod tests {
     }
 
     #[test]
-    fn test_builder_discovery() {
-        let config = RouterConfigBuilder::new()
-            .enable_discovery()
-            .build_unchecked();
-        assert!(config.discovery.is_some());
-        assert!(config.discovery.as_ref().unwrap().enabled);
-    }
-
-    #[test]
-    fn test_builder_discovery_config() {
-        let disc = DiscoveryConfig {
-            enabled: true,
-            namespace: Some("prod".to_string()),
-            ..Default::default()
-        };
-        let config = RouterConfigBuilder::new()
-            .discovery_config(disc)
-            .build_unchecked();
-        assert_eq!(
-            config.discovery.as_ref().unwrap().namespace.as_deref(),
-            Some("prod")
-        );
-    }
-
-    #[test]
     fn test_builder_metrics() {
         let config = RouterConfigBuilder::new()
             .enable_metrics("0.0.0.0", 9090)
@@ -900,25 +829,6 @@ mod tests {
             .metrics_config(mc)
             .build_unchecked();
         assert_eq!(config.metrics.as_ref().unwrap().port, 8080);
-    }
-
-    #[test]
-    fn test_builder_trace() {
-        let config = RouterConfigBuilder::new()
-            .enable_trace("http://jaeger:4317")
-            .build_unchecked();
-        let tc = config.trace_config.unwrap();
-        assert!(tc.enable_trace);
-        assert_eq!(tc.otlp_traces_endpoint, "http://jaeger:4317");
-    }
-
-    #[test]
-    fn test_builder_disable_trace() {
-        let config = RouterConfigBuilder::new()
-            .disable_trace()
-            .build_unchecked();
-        let tc = config.trace_config.unwrap();
-        assert!(!tc.enable_trace);
     }
 
     #[test]
@@ -1046,9 +956,7 @@ mod tests {
     #[test]
     fn test_builder_maybe_setters_with_none() {
         let config = RouterConfigBuilder::new()
-            .maybe_discovery(None)
             .maybe_metrics(None)
-            .maybe_trace(None)
             .maybe_log_dir(None::<String>)
             .maybe_log_level(None::<String>)
             .maybe_request_id_headers(None)
@@ -1059,9 +967,7 @@ mod tests {
             .maybe_reasoning_parser(None::<String>)
             .maybe_tool_call_parser(None::<String>)
             .build_unchecked();
-        assert!(config.discovery.is_none());
         assert!(config.metrics.is_none());
-        assert!(config.trace_config.is_none());
         assert!(config.log_dir.is_none());
         assert!(config.log_level.is_none());
         assert!(config.request_id_headers.is_none());
@@ -1162,7 +1068,6 @@ mod tests {
             .max_concurrent_requests(200)
             .api_key("secret-key")
             .enable_metrics("0.0.0.0", 9090)
-            .enable_trace("localhost:4317")
             .log_dir("/var/log")
             .log_level("info")
             .enable_dp_aware()
@@ -1179,7 +1084,6 @@ mod tests {
         assert_eq!(config.max_concurrent_requests, 200);
         assert_eq!(config.api_key.as_deref(), Some("secret-key"));
         assert!(config.metrics.is_some());
-        assert!(config.trace_config.is_some());
         assert!(config.dp_aware);
         assert!(config.tokenizer_cache.enable_l0);
         assert_eq!(config.model_path.as_deref(), Some("my-model"));

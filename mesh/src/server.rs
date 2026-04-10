@@ -33,7 +33,6 @@ use crate::{
     observability::{
         logging::{self, LoggingConfig},
         metrics::{self, PrometheusConfig},
-        otel_trace,
     },
     protocols::{
         chat::ChatCompletionRequest,
@@ -51,7 +50,6 @@ use crate::{
         router_manager::RouterManager,
         tokenize, RouterTrait,
     },
-    service_discovery::{start_service_discovery, ServiceDiscoveryConfig},
     tokenizer::TokenizerRegistry,
 };
 #[derive(Clone)]
@@ -469,7 +467,6 @@ pub struct ServerConfig {
     pub log_dir: Option<String>,
     pub log_level: Option<String>,
     pub json_log: bool,
-    pub service_discovery_config: Option<ServiceDiscoveryConfig>,
     pub prometheus_config: Option<PrometheusConfig>,
     pub request_timeout_secs: u64,
     pub request_id_headers: Option<Vec<String>>,
@@ -578,35 +575,25 @@ pub fn build_app(
 pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
     static LOGGING_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
-    if let Some(trace_config) = &config.router_config.trace_config {
-        otel_trace::otel_tracing_init(
-            trace_config.enable_trace,
-            Some(&trace_config.otlp_traces_endpoint),
-        )?;
-    }
-
     let _log_guard = if !LOGGING_INITIALIZED.swap(true, Ordering::SeqCst) {
-        Some(logging::init_logging(
-            LoggingConfig {
-                level: config
-                    .log_level
-                    .as_deref()
-                    .and_then(|s| match s.to_uppercase().parse::<Level>() {
-                        Ok(l) => Some(l),
-                        Err(_) => {
-                            warn!("Invalid log level string: '{s}'. Defaulting to INFO.");
-                            None
-                        }
-                    })
-                    .unwrap_or(Level::INFO),
-                json_format: config.json_log,
-                log_dir: config.log_dir.clone(),
-                colorize: true,
-                log_file_name: "mesh".to_string(),
-                log_targets: None,
-            },
-            config.router_config.trace_config.clone(),
-        ))
+        Some(logging::init_logging(LoggingConfig {
+            level: config
+                .log_level
+                .as_deref()
+                .and_then(|s| match s.to_uppercase().parse::<Level>() {
+                    Ok(l) => Some(l),
+                    Err(_) => {
+                        warn!("Invalid log level string: '{s}'. Defaulting to INFO.");
+                        None
+                    }
+                })
+                .unwrap_or(Level::INFO),
+            json_format: config.json_log,
+            log_dir: config.log_dir.clone(),
+            colorize: true,
+            log_file_name: "mesh".to_string(),
+            log_targets: None,
+        }))
     } else {
         None
     };
@@ -768,32 +755,6 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         concurrency_queue_tx: limiter.queue_tx.clone(),
         router_manager: Some(router_manager),
     });
-    if let Some(service_discovery_config) = config.service_discovery_config {
-        if service_discovery_config.enabled {
-            let app_context_arc = Arc::clone(&app_state.context);
-
-            match start_service_discovery(
-                service_discovery_config,
-                app_context_arc,
-            )
-            .await
-            {
-                Ok(handle) => {
-                    info!("Service discovery started");
-                    spawn(async move {
-                        if let Err(e) = handle.await {
-                            error!("Service discovery task failed: {:?}", e);
-                        }
-                    });
-                }
-                Err(e) => {
-                    error!("Failed to start service discovery: {e}");
-                    warn!("Continuing without service discovery");
-                }
-            }
-        }
-    }
-
     info!(
         "Router ready | workers: {:?}",
         WorkerManager::get_worker_urls(&app_state.context.worker_registry)

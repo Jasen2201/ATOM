@@ -1,20 +1,13 @@
-use std::collections::HashMap;
-
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use mesh::{
     config::{
-        CircuitBreakerConfig, ConfigResult, DiscoveryConfig, HealthCheckConfig,
+        CircuitBreakerConfig, ConfigResult, HealthCheckConfig,
         MetricsConfig, PolicyConfig,
         RetryConfig, RouterConfig, RoutingMode, TokenizerCacheConfig,
-        TraceConfig,
     },
     core::ConnectionMode,
-    observability::{
-        metrics::PrometheusConfig,
-        otel_trace::{is_otel_enabled, shutdown_otel},
-    },
+    observability::metrics::PrometheusConfig,
     server::{self, ServerConfig},
-    service_discovery::ServiceDiscoveryConfig,
     version,
 };
 fn parse_prefill_args() -> Vec<(String, Option<u16>)> {
@@ -196,39 +189,6 @@ struct CliArgs {
     #[arg(long, default_value_t = 30, help_heading = "PD Disaggregation")]
     worker_startup_check_interval: u64,
 
-    // ==================== Service Discovery (Kubernetes) ====================
-    /// Enable Kubernetes service discovery
-    #[arg(
-        long,
-        default_value_t = false,
-        help_heading = "Service Discovery (Kubernetes)"
-    )]
-    service_discovery: bool,
-
-    /// Label selector for Kubernetes service discovery (format: key=value)
-    #[arg(long, num_args = 0.., help_heading = "Service Discovery (Kubernetes)")]
-    selector: Vec<String>,
-
-    /// Port to use for discovered worker pods
-    #[arg(
-        long,
-        default_value_t = 80,
-        help_heading = "Service Discovery (Kubernetes)"
-    )]
-    service_discovery_port: u16,
-
-    /// Kubernetes namespace to watch for pods
-    #[arg(long, help_heading = "Service Discovery (Kubernetes)")]
-    service_discovery_namespace: Option<String>,
-
-    /// Label selector for prefill server pods in PD mode
-    #[arg(long, num_args = 0.., help_heading = "Service Discovery (Kubernetes)")]
-    prefill_selector: Vec<String>,
-
-    /// Label selector for decode server pods in PD mode
-    #[arg(long, num_args = 0.., help_heading = "Service Discovery (Kubernetes)")]
-    decode_selector: Vec<String>,
-
     // ==================== Logging ====================
     /// Directory to store log files
     #[arg(long, help_heading = "Logging")]
@@ -403,23 +363,6 @@ struct CliArgs {
     #[arg(long, value_enum, default_value_t = Backend::Sglang, alias = "runtime", help_heading = "Backend")]
     backend: Backend,
 
-    // ==================== Tracing (OpenTelemetry) ====================
-    /// Enable OpenTelemetry tracing
-    #[arg(
-        long,
-        default_value_t = false,
-        help_heading = "Tracing (OpenTelemetry)"
-    )]
-    enable_trace: bool,
-
-    /// OTLP collector endpoint (format: host:port)
-    #[arg(
-        long,
-        default_value = "localhost:4317",
-        help_heading = "Tracing (OpenTelemetry)"
-    )]
-    otlp_traces_endpoint: String,
-
     // ==================== Control Plane Authentication ====================
     /// API key for worker connections
     #[arg(long, help_heading = "Control Plane Authentication")]
@@ -434,18 +377,6 @@ impl CliArgs {
             }
         }
         ConnectionMode::Http
-    }
-
-    fn parse_selector(selector_list: &[String]) -> HashMap<String, String> {
-        let mut map = HashMap::new();
-        for item in selector_list {
-            if let Some(eq_pos) = item.find('=') {
-                let key = item[..eq_pos].to_string();
-                let value = item[eq_pos + 1..].to_string();
-                map.insert(key, value);
-            }
-        }
-        map
     }
 
     fn parse_policy(&self, policy_str: &str) -> PolicyConfig {
@@ -490,31 +421,9 @@ impl CliArgs {
 
         let policy = self.parse_policy(&self.policy);
 
-        let discovery = if self.service_discovery {
-            Some(DiscoveryConfig {
-                enabled: true,
-                namespace: self.service_discovery_namespace.clone(),
-                port: self.service_discovery_port,
-                check_interval_secs: 60,
-                selector: Self::parse_selector(&self.selector),
-                prefill_selector: Self::parse_selector(&self.prefill_selector),
-                decode_selector: Self::parse_selector(&self.decode_selector),
-                bootstrap_port_annotation: "sglang.ai/bootstrap-port".to_string(),
-                router_selector: HashMap::new(), // Can be set via config file
-                router_mesh_port_annotation: "sglang.ai/ha-port".to_string(),
-            })
-        } else {
-            None
-        };
-
         let metrics = Some(MetricsConfig {
             port: self.prometheus_port,
             host: self.prometheus_host.clone(),
-        });
-
-        let trace_config = Some(TraceConfig {
-            enable_trace: self.enable_trace,
-            otlp_traces_endpoint: self.otlp_traces_endpoint.clone(),
         });
 
         let mut all_urls = Vec::new();
@@ -577,9 +486,7 @@ impl CliArgs {
             })
             .log_level(&self.log_level)
             .maybe_api_key(self.api_key.as_ref())
-            .maybe_discovery(discovery)
             .maybe_metrics(metrics)
-            .maybe_trace(trace_config)
             .maybe_log_dir(self.log_dir.as_ref())
             .maybe_request_id_headers(
                 (!self.request_id_headers.is_empty()).then(|| self.request_id_headers.clone()),
@@ -598,36 +505,6 @@ impl CliArgs {
     }
 
     fn to_server_config(&self, router_config: RouterConfig) -> ServerConfig {
-        let service_discovery_config = if self.service_discovery {
-            // Get router discovery config from router_config.discovery if available
-            let (router_selector, router_mesh_port_annotation) = router_config
-                .discovery
-                .as_ref()
-                .map(|d| {
-                    (
-                        d.router_selector.clone(),
-                        d.router_mesh_port_annotation.clone(),
-                    )
-                })
-                .unwrap_or_else(|| (HashMap::new(), "sglang.ai/mesh-port".to_string()));
-
-            Some(ServiceDiscoveryConfig {
-                enabled: true,
-                selector: Self::parse_selector(&self.selector),
-                check_interval: std::time::Duration::from_secs(60),
-                port: self.service_discovery_port,
-                namespace: self.service_discovery_namespace.clone(),
-                pd_mode: self.pd_disaggregation,
-                prefill_selector: Self::parse_selector(&self.prefill_selector),
-                decode_selector: Self::parse_selector(&self.decode_selector),
-                bootstrap_port_annotation: "sglang.ai/bootstrap-port".to_string(),
-                router_selector,
-                router_mesh_port_annotation,
-            })
-        } else {
-            None
-        };
-
         let prometheus_config = Some(PrometheusConfig {
             port: self.prometheus_port,
             host: self.prometheus_host.clone(),
@@ -646,7 +523,6 @@ impl CliArgs {
             log_dir: self.log_dir.clone(),
             log_level: Some(self.log_level.clone()),
             json_log: self.json_log,
-            service_discovery_config,
             prometheus_config,
             request_timeout_secs: self.request_timeout_secs,
             request_id_headers: if self.request_id_headers.is_empty() {
@@ -734,8 +610,5 @@ Provide --worker-urls or PD flags as usual.",
     let server_config = cli_args.to_server_config(router_config);
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move { server::startup(server_config).await })?;
-    if is_otel_enabled() {
-        shutdown_otel();
-    }
     Ok(())
 }

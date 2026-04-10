@@ -1,7 +1,6 @@
 use once_cell::sync::OnceCell;
 use pyo3::prelude::*;
 use mesh::*;
-use std::collections::HashMap;
 
 // Define the enums with PyO3 bindings
 #[pyclass(eq)]
@@ -40,13 +39,6 @@ struct Router {
     log_dir: Option<String>,
     log_level: Option<String>,
     json_log: bool,
-    service_discovery: bool,
-    selector: HashMap<String, String>,
-    service_discovery_port: u16,
-    service_discovery_namespace: Option<String>,
-    prefill_selector: HashMap<String, String>,
-    decode_selector: HashMap<String, String>,
-    bootstrap_port_annotation: String,
     prometheus_port: Option<u16>,
     prometheus_host: Option<String>,
     prometheus_duration_buckets: Option<Vec<f64>>,
@@ -90,8 +82,6 @@ struct Router {
     reasoning_parser: Option<String>,
     tool_call_parser: Option<String>,
     backend: BackendType,
-    enable_trace: bool,
-    otlp_traces_endpoint: String,
 }
 
 impl Router {
@@ -105,9 +95,7 @@ impl Router {
     }
 
     pub fn to_router_config(&self) -> config::ConfigResult<config::RouterConfig> {
-        use config::{
-            DiscoveryConfig, MetricsConfig, PolicyConfig as ConfigPolicyConfig, RoutingMode,
-        };
+        use config::{MetricsConfig, PolicyConfig as ConfigPolicyConfig, RoutingMode};
 
         let convert_policy = |policy: &PolicyType| -> ConfigPolicyConfig {
             match policy {
@@ -145,23 +133,6 @@ impl Router {
 
         let policy = convert_policy(&self.policy);
 
-        let discovery = if self.service_discovery {
-            Some(DiscoveryConfig {
-                enabled: true,
-                namespace: self.service_discovery_namespace.clone(),
-                port: self.service_discovery_port,
-                check_interval_secs: 60,
-                selector: self.selector.clone(),
-                prefill_selector: self.prefill_selector.clone(),
-                decode_selector: self.decode_selector.clone(),
-                bootstrap_port_annotation: self.bootstrap_port_annotation.clone(),
-                router_selector: HashMap::new(),
-                router_mesh_port_annotation: "sglang.ai/mesh-port".to_string(),
-            })
-        } else {
-            None
-        };
-
         let metrics = match (self.prometheus_port, self.prometheus_host.as_ref()) {
             (Some(port), Some(host)) => Some(MetricsConfig {
                 port,
@@ -169,11 +140,6 @@ impl Router {
             }),
             _ => None,
         };
-
-        let trace_config = Some(config::TraceConfig {
-            enable_trace: self.enable_trace,
-            otlp_traces_endpoint: self.otlp_traces_endpoint.clone(),
-        });
 
         config::RouterConfig::builder()
             .mode(mode)
@@ -216,9 +182,7 @@ impl Router {
                 l1_max_memory: self.tokenizer_cache_l1_max_memory,
             })
             .maybe_api_key(self.api_key.as_ref())
-            .maybe_discovery(discovery)
             .maybe_metrics(metrics)
-            .maybe_trace(trace_config)
             .maybe_log_dir(self.log_dir.as_ref())
             .maybe_log_level(self.log_level.as_ref())
             .maybe_request_id_headers(self.request_id_headers.clone())
@@ -256,13 +220,6 @@ impl Router {
         log_dir = None,
         log_level = None,
         json_log = false,
-        service_discovery = false,
-        selector = HashMap::new(),
-        service_discovery_port = 80,
-        service_discovery_namespace = None,
-        prefill_selector = HashMap::new(),
-        decode_selector = HashMap::new(),
-        bootstrap_port_annotation = String::from("sglang.ai/bootstrap-port"),
         prometheus_port = None,
         prometheus_host = None,
         prometheus_duration_buckets = None,
@@ -305,8 +262,6 @@ impl Router {
         reasoning_parser = None,
         tool_call_parser = None,
         backend = BackendType::Sglang,
-        enable_trace = false,
-        otlp_traces_endpoint = String::from("localhost:4317"),
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -327,13 +282,6 @@ impl Router {
         log_dir: Option<String>,
         log_level: Option<String>,
         json_log: bool,
-        service_discovery: bool,
-        selector: HashMap<String, String>,
-        service_discovery_port: u16,
-        service_discovery_namespace: Option<String>,
-        prefill_selector: HashMap<String, String>,
-        decode_selector: HashMap<String, String>,
-        bootstrap_port_annotation: String,
         prometheus_port: Option<u16>,
         prometheus_host: Option<String>,
         prometheus_duration_buckets: Option<Vec<f64>>,
@@ -376,8 +324,6 @@ impl Router {
         reasoning_parser: Option<String>,
         tool_call_parser: Option<String>,
         backend: BackendType,
-        enable_trace: bool,
-        otlp_traces_endpoint: String,
     ) -> PyResult<Self> {
         let mut all_urls = worker_urls.clone();
 
@@ -411,13 +357,6 @@ impl Router {
             log_dir,
             log_level,
             json_log,
-            service_discovery,
-            selector,
-            service_discovery_port,
-            service_discovery_namespace,
-            prefill_selector,
-            decode_selector,
-            bootstrap_port_annotation,
             prometheus_port,
             prometheus_host,
             prometheus_duration_buckets,
@@ -461,8 +400,6 @@ impl Router {
             reasoning_parser,
             tool_call_parser,
             backend,
-            enable_trace,
-            otlp_traces_endpoint,
         })
     }
 
@@ -479,24 +416,6 @@ impl Router {
                 e
             ))
         })?;
-
-        let service_discovery_config = if self.service_discovery {
-            Some(service_discovery::ServiceDiscoveryConfig {
-                enabled: true,
-                selector: self.selector.clone(),
-                check_interval: std::time::Duration::from_secs(60),
-                port: self.service_discovery_port,
-                namespace: self.service_discovery_namespace.clone(),
-                pd_mode: self.pd_disaggregation,
-                prefill_selector: self.prefill_selector.clone(),
-                decode_selector: self.decode_selector.clone(),
-                bootstrap_port_annotation: self.bootstrap_port_annotation.clone(),
-                router_selector: HashMap::new(),
-                router_mesh_port_annotation: "sglang.ai/mesh-port".to_string(),
-            })
-        } else {
-            None
-        };
 
         let prometheus_config = Some(PrometheusConfig {
             port: self.prometheus_port.unwrap_or(29000),
@@ -519,7 +438,6 @@ impl Router {
                 log_dir: self.log_dir.clone(),
                 log_level: self.log_level.clone(),
                 json_log: self.json_log,
-                service_discovery_config,
                 prometheus_config,
                 request_timeout_secs: self.request_timeout_secs,
                 request_id_headers: self.request_id_headers.clone(),

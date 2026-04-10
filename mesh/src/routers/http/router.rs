@@ -21,7 +21,6 @@ use crate::{
     observability::{
         events::{self, Event},
         metrics::{bool_to_static_str, metrics_labels, Metrics},
-        otel_trace::inject_trace_context_http,
     },
     policies::{PolicyRegistry, SelectWorkerInfo},
     protocols::{
@@ -295,9 +294,6 @@ impl Router {
 
         // Note: Using borrowed reference avoids heap allocation
         events::RequestSentEvent { url: worker.url() }.emit();
-        let mut headers_with_trace = headers.cloned().unwrap_or_default();
-        inject_trace_context_http(&mut headers_with_trace);
-        let headers = Some(&headers_with_trace);
 
         let response = self
             .send_typed_request(

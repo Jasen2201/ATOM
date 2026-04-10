@@ -290,36 +290,6 @@ class TestConfigurationValidation:
         assert len(args.prefill_urls) > 0
         assert len(args.decode_urls) > 0
 
-    def test_service_discovery_validation(self):
-        """Test service discovery configuration validation."""
-        # Valid service discovery configuration
-        args = RouterArgs(
-            service_discovery=True,
-            selector={"app": "worker", "env": "prod"},
-            service_discovery_port=8080,
-            service_discovery_namespace="default",
-        )
-
-        assert args.service_discovery is True
-        assert args.selector == {"app": "worker", "env": "prod"}
-        assert args.service_discovery_port == 8080
-        assert args.service_discovery_namespace == "default"
-
-    def test_pd_service_discovery_validation(self):
-        """Test PD service discovery configuration validation."""
-        # Valid PD service discovery configuration
-        args = RouterArgs(
-            pd_disaggregation=True,
-            service_discovery=True,
-            prefill_selector={"app": "prefill"},
-            decode_selector={"app": "decode"},
-        )
-
-        assert args.pd_disaggregation is True
-        assert args.service_discovery is True
-        assert args.prefill_selector == {"app": "prefill"}
-        assert args.decode_selector == {"app": "decode"}
-
     def test_policy_validation(self):
         """Test policy configuration validation."""
         # Valid policies
@@ -408,7 +378,6 @@ class TestLaunchValidation:
             pd_disaggregation=True,
             prefill_urls=[],
             decode_urls=[],
-            service_discovery=False,
         )
 
         # Should not raise validation error - URLs are now optional
@@ -420,28 +389,9 @@ class TestLaunchValidation:
             launch_router(args)
             router_mod.from_args.assert_called_once()
 
-    def test_pd_mode_with_service_discovery_allows_empty_urls(self):
-        """Test that PD mode with service discovery allows empty URLs."""
-        args = RouterArgs(
-            pd_disaggregation=True,
-            prefill_urls=[],
-            decode_urls=[],
-            service_discovery=True,
-        )
-
-        # Should not raise validation error
-        with patch("mesh_router.launch_router.Router") as router_mod:
-            mock_router_instance = MagicMock()
-            router_mod.from_args = MagicMock(return_value=mock_router_instance)
-
-            launch_router(args)
-
-            # Should create router instance via from_args
-            router_mod.from_args.assert_called_once()
-
     def test_regular_mode_allows_empty_worker_urls(self):
         """Test that regular mode allows empty worker URLs."""
-        args = RouterArgs(worker_urls=[], service_discovery=False)
+        args = RouterArgs(worker_urls=[])
 
         # Should not raise validation error
         with patch("mesh_router.launch_router.Router") as router_mod:
@@ -491,20 +441,3 @@ class TestLaunchValidation:
             # Should create router instance via from_args
             router_mod.from_args.assert_called_once()
 
-    def test_launch_with_service_discovery_config(self):
-        """Test launching with valid service discovery configuration."""
-        args = RouterArgs(
-            service_discovery=True,
-            selector={"app": "worker"},
-            service_discovery_port=8080,
-        )
-
-        # Should not raise validation error
-        with patch("mesh_router.launch_router.Router") as router_mod:
-            mock_router_instance = MagicMock()
-            router_mod.from_args = MagicMock(return_value=mock_router_instance)
-
-            launch_router(args)
-
-            # Should create router instance via from_args
-            router_mod.from_args.assert_called_once()

@@ -1,14 +1,9 @@
 //! Unified gRPC client wrapper for SGLang and vLLM backends
 
-use std::sync::Arc;
-
 use mesh_grpc::{SglangSchedulerClient, VllmEngineClient};
 
-use crate::{
-    observability::otel_trace::OtelTraceInjector,
-    routers::grpc::proto_wrapper::{
-        ProtoEmbedRequest, ProtoEmbedResponse, ProtoGenerateRequest, ProtoStream,
-    },
+use crate::routers::grpc::proto_wrapper::{
+    ProtoEmbedRequest, ProtoEmbedResponse, ProtoGenerateRequest, ProtoStream,
 };
 
 /// Health check response (common across backends)
@@ -73,13 +68,12 @@ impl GrpcClient {
         url: &str,
         runtime_type: &str,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let trace_injector = Arc::new(OtelTraceInjector);
         match runtime_type {
             "sglang" => Ok(Self::Sglang(
-                SglangSchedulerClient::connect_with_trace_injector(url, trace_injector).await?,
+                SglangSchedulerClient::connect(url).await?,
             )),
             "vllm" => Ok(Self::Vllm(
-                VllmEngineClient::connect_with_trace_injector(url, trace_injector).await?,
+                VllmEngineClient::connect(url).await?,
             )),
             _ => Err(format!("Unknown runtime type: {}", runtime_type).into()),
         }

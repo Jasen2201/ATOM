@@ -53,7 +53,7 @@ class Router:
         # Convert RouterArgs to _Router parameters
         args_dict["worker_urls"] = (
             []
-            if args_dict["service_discovery"] or args_dict["pd_disaggregation"]
+            if args_dict["pd_disaggregation"]
             else args_dict["worker_urls"]
         )
         args_dict["policy"] = policy_from_str(args_dict["policy"])
