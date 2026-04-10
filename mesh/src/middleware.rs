@@ -258,18 +258,8 @@ impl<B> OnRequest<B> for RequestLogger {
 }
 
 /// Custom on_response handler
-#[derive(Clone, Debug)]
-pub struct ResponseLogger {
-    _start_time: Instant,
-}
-
-impl Default for ResponseLogger {
-    fn default() -> Self {
-        Self {
-            _start_time: Instant::now(),
-        }
-    }
-}
+#[derive(Clone, Debug, Default)]
+pub struct ResponseLogger;
 
 impl<B> OnResponse<B> for ResponseLogger {
     fn on_response(self, response: &Response<B>, latency: Duration, span: &Span) {

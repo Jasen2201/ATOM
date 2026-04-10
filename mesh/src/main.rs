@@ -45,20 +45,13 @@ fn parse_prefill_args() -> Vec<(String, Option<u16>)> {
 pub enum Backend {
     #[value(name = "sglang")]
     Sglang,
-    #[value(name = "vllm")]
-    Vllm,
-    #[value(name = "trtllm")]
-    Trtllm,
 }
 
 impl std::fmt::Display for Backend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Backend::Sglang => "sglang",
-            Backend::Vllm => "vllm",
-            Backend::Trtllm => "trtllm",
-        };
-        write!(f, "{}", s)
+        match self {
+            Backend::Sglang => write!(f, "sglang"),
+        }
     }
 }
 
@@ -578,7 +571,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => cli.router_args,
     };
 
-    println!("SGLang Router starting...");
+    println!("ATOM Mesh starting...");
     println!("Host: {}:{}", cli_args.host, cli_args.port);
     let mode_str = if cli_args.pd_disaggregation {
         "PD Disaggregated".to_string()
@@ -586,18 +579,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         format!("Regular ({})", cli_args.backend)
     };
     println!("Mode: {}", mode_str);
-
-    match cli_args.backend {
-        Backend::Vllm | Backend::Trtllm => {
-            println!(
-                "WARNING: runtime '{}' not implemented yet; falling back to regular routing. \
-Provide --worker-urls or PD flags as usual.",
-                cli_args.backend
-            );
-        }
-        Backend::Sglang => {}
-    }
-
     println!("Policy: {}", cli_args.policy);
 
     if cli_args.pd_disaggregation && !prefill_urls.is_empty() {
