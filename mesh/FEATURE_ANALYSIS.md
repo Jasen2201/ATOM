@@ -251,7 +251,7 @@ O(log n) 查找代替 CacheAware 的 O(prefix_len) 前缀树遍历。
 ---
 
 ### 4.2 Completion API (`/v1/completions`)
-- [ ] 保留 - [x] 删除 - [ ] 待讨论
+- [x] 保留 - [] 删除 - [ ] 待讨论
 
 > **建议删除理由**: Completion API 是旧格式 API，现代使用场景少。PD 分离只需要 `/v1/chat/completions` 和 `/generate`。减少代码量。
 >
@@ -330,7 +330,7 @@ O(log n) 查找代替 CacheAware 的 O(prefix_len) 前缀树遍历。
 ---
 
 ### 4.8 Conversations API (`/v1/conversations`)
-- [ ] 保留 - [] 删除 - [x] 待讨论
+- [x] 保留 - [] 删除 - [] 待讨论
 
 > **Claude 意见**: 理解你改为待讨论。**倾向删除**。Conversations API 是状态管理层（CRUD 对话），与 PD 路由的无状态转发完全正交。它依赖 `ConversationStorage` / `data-connector` 持久化层，如果保留会同时拖入 12.1 History Backend 的依赖。除非你们有明确的产品需求（如多轮对话管理），否则建议删除。如果需要多轮对话，客户端侧管理即可。
 
@@ -645,7 +645,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ## 7. Kubernetes 服务发现
 
 ### 7.1 Service Discovery
-- [x] 保留 - [ ] 删除 - [ ] 待讨论
+- [ ] 保留 - [x] 删除 - [ ] 待讨论
 
 > **建议保留理由**: 长期分布式方案必需。Dynamo 也有类似的 worker discovery 机制。K8s 是 GPU 集群的标准编排工具。自动发现 prefill/decode Pod、实时监听 Pod 变化、支持动态扩缩容——这些是分布式解决方案的基础能力。打榜时也可以先用 CLI 手动指定，Service Discovery 作为可选开关。
 >
@@ -689,7 +689,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 ---
 
 ### 8.2 OpenTelemetry Tracing
-- [ ] 保留 - [] 删除 - [x] 待讨论
+- [ ] 保留 - [x] 删除 - [] 待讨论
 
 > **Claude 意见**: 理解你改为待讨论。**倾向短期删除、长期可选**。理由：OTel 引入了 `opentelemetry*` + `tracing-opentelemetry` 等重依赖，编译时间和二进制大小增加明显。短期打榜阶段 Prometheus metrics + structured logging 完全够用。但长期如果做多节点分布式（多 router + 多 worker），分布式 tracing 对排查跨节点的请求链路确实有价值。**建议作为 Cargo feature flag 保留代码，默认不编译。**
 
@@ -711,6 +711,7 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 **代码位置**: `src/observability/logging.rs`
 
 **详细说明**: 结构化日志系统。使用 `tracing` + `tracing-subscriber`。支持功能：
+
 - JSON 格式日志输出（`--json-log`）
 - 日志文件输出（`--log-dir`，使用 `tracing-appender`）
 - 日志级别控制（`--log-level`：debug/info/warn/error）
@@ -1178,129 +1179,129 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 
 ## 功能总结
 
-| 类别 | 功能数量 |
-|------|---------|
-| 路由模式 | 3 |
-| 通信协议 | 3 |
-| 负载均衡策略 | 9 |
-| API 端点 | 14 |
-| Mesh/HA | 3 |
-| Worker 管理 | 8 |
-| K8s 服务发现 | 1 |
-| 可观测性 | 5 |
-| 中间件 | 7 |
-| MCP | 1 |
-| TLS/mTLS | 2 |
-| 数据持久化 | 1 |
-| IGW 多模型 | 2 |
-| 多后端 | 1 |
-| 优雅关闭 | 1 |
-| 语言绑定 | 2 |
-| 构建部署 | 4 |
-| 工作流引擎 | 1 |
-| 版本管理 | 1 |
-| Header 路由 | 1 |
-| 配置系统 | 1 |
-| **总计** | **~71** |
+| 类别         | 功能数量 |
+| ------------ | -------- |
+| 路由模式     | 3        |
+| 通信协议     | 3        |
+| 负载均衡策略 | 9        |
+| API 端点     | 14       |
+| Mesh/HA      | 3        |
+| Worker 管理  | 8        |
+| K8s 服务发现 | 1        |
+| 可观测性     | 5        |
+| 中间件       | 7        |
+| MCP          | 1        |
+| TLS/mTLS     | 2        |
+| 数据持久化   | 1        |
+| IGW 多模型   | 2        |
+| 多后端       | 1        |
+| 优雅关闭     | 1        |
+| 语言绑定     | 2        |
+| 构建部署     | 4        |
+| 工作流引擎   | 1        |
+| 版本管理     | 1        |
+| Header 路由  | 1        |
+| 配置系统     | 1        |
+| **总计**     | **~71**  |
 
 ---
 
 ## 建议决策汇总（AMD PD 分离 + 对标 Dynamo + InferMax 打榜）
 
-### 明确保留 — 42 项
+### 明确保留 — 43 项
 > 这些是 PD 分离核心 + 性能优化 + 长期分布式方案所必需的。
 
-| # | 功能 | 理由 |
-|---|------|------|
-| **路由核心** | | |
-| 1.1 | Regular 模式 | 性能基线对比 + 长期需要 |
-| 1.2 | PrefillDecode 模式 | **PD 核心** |
-| 2.1 | HTTP 路由转发 | PD 请求转发必需 |
-| 2.2 | gRPC 路由转发 | ATOM 后端用 gRPC |
-| **性能关键策略** | | |
-| 3.1 | Random 策略 | 基础策略 |
-| 3.2 | RoundRobin 策略 | 基础策略 |
-| 3.3 | CacheAware 策略 | **打榜关键：KV cache 命中率** |
-| 3.4 | PowerOfTwo 策略 | **打榜关键：GPU 利用率均衡** |
-| 3.8 | PrefixHash 策略 | CacheAware 轻量替代，调优选项 |
-| 3.9 | Policy Registry | 策略管理框架 |
-| **核心 API** | | |
-| 4.1 | Chat Completion API | 核心推理 API |
-| 4.3 | Generate API | SGLang 原生 API |
-| 4.4 | Responses API | OpenAI 生态兼容，长期需要 |
-| 4.9 | Tokenize API | CacheAware/PrefixHash 依赖 |
-| 4.10 | Parse API | 函数调用/推理解析 |
-| 4.11 | Worker 管理 API | 动态扩缩容 |
-| 4.12 | 健康检查 API | 运维必需 |
-| 4.13 | 模型信息 API | 基本信息查询 |
-| 4.14 | 缓存管理 API | KV cache 管理 |
-| **Worker 管理** | | |
-| 6.1 | Worker Registry | Worker 管理核心 |
-| 6.2 | Worker Builder | Worker 创建核心 |
-| 6.3 | Worker Manager | Worker 操作 + LoadMonitor |
-| 6.4 | Health Check | 运维必需 |
-| 6.5 | Circuit Breaker | 代码小、稳定性必需 |
-| 6.6 | Retry 机制 | 代码小、P99 延迟优化 |
-| 6.7 | Job Queue | Worker 初始化入口 |
-| 6.8 | DP Aware 调度 | AMD 多卡 TP+DP 场景必需 |
-| **可观测性** | | |
-| 8.1 | Prometheus Metrics | **打榜必须：量化性能指标** |
-| 8.3 | Structured Logging | 调试必需 |
-| 8.4 | InFlight Tracker | GPU 利用率指标 |
-| 8.5 | Event System | 代码小，debug PD 路由决策有用 |
-| **基础设施** | | |
-| 7.1 | K8s Service Discovery | 分布式部署必需 |
-| 9.5 | Request ID 中间件 | PD 调试追踪 |
-| 9.7 | HTTP Logging Layer | 请求日志 |
-| 14.1 | Backend Runtime | 多后端兼容（SGLang/vLLM 等） |
-| 15.1 | 优雅关闭 | 基本运维 |
-| 17.2 | Makefile | 构建基础 |
-| 17.3 | E2E 测试（裁剪后） | 打榜验证准确性+性能 |
-| 17.4 | Benchmark（裁剪后） | request_processing + tree_benchmark 有参考价值 |
-| 18.1 | Workflow Engine | Worker 生命周期管理 |
-| 19.1 | Version 模块 | 基础设施 |
-| 21.1 | 配置系统 | 基础设施 |
+| #                | 功能                  | 理由                                           |
+| ---------------- | --------------------- | ---------------------------------------------- |
+| **路由核心**     |                       |                                                |
+| 1.1              | Regular 模式          | 性能基线对比 + 长期需要                        |
+| 1.2              | PrefillDecode 模式    | **PD 核心**                                    |
+| 2.1              | HTTP 路由转发         | PD 请求转发必需                                |
+| 2.2              | gRPC 路由转发         | ATOM 后端用 gRPC                               |
+| **性能关键策略** |                       |                                                |
+| 3.1              | Random 策略           | 基础策略                                       |
+| 3.2              | RoundRobin 策略       | 基础策略                                       |
+| 3.3              | CacheAware 策略       | **打榜关键：KV cache 命中率**                  |
+| 3.4              | PowerOfTwo 策略       | **打榜关键：GPU 利用率均衡**                   |
+| 3.8              | PrefixHash 策略       | CacheAware 轻量替代，调优选项                  |
+| 3.9              | Policy Registry       | 策略管理框架                                   |
+| **核心 API**     |                       |                                                |
+| 4.1              | Chat Completion API   | 核心推理 API                                   |
+| 4.2              | Completion API        | 保留旧格式兼容                                 |
+| 4.3              | Generate API          | SGLang 原生 API                                |
+| 4.4              | Responses API         | OpenAI 生态兼容，长期需要                      |
+| 4.9              | Tokenize API          | CacheAware/PrefixHash 依赖                     |
+| 4.10             | Parse API             | 函数调用/推理解析                              |
+| 4.11             | Worker 管理 API       | 动态扩缩容                                     |
+| 4.12             | 健康检查 API          | 运维必需                                       |
+| 4.13             | 模型信息 API          | 基本信息查询                                   |
+| 4.14             | 缓存管理 API          | KV cache 管理                                  |
+| 4.8              | Conversations API     | 对话管理，长期产品需求                         |
+| **Worker 管理**  |                       |                                                |
+| 6.1              | Worker Registry       | Worker 管理核心                                |
+| 6.2              | Worker Builder        | Worker 创建核心                                |
+| 6.3              | Worker Manager        | Worker 操作 + LoadMonitor                      |
+| 6.4              | Health Check          | 运维必需                                       |
+| 6.5              | Circuit Breaker       | 代码小、稳定性必需                             |
+| 6.6              | Retry 机制            | 代码小、P99 延迟优化                           |
+| 6.7              | Job Queue             | Worker 初始化入口                              |
+| 6.8              | DP Aware 调度         | AMD 多卡 TP+DP 场景必需                        |
+| **可观测性**     |                       |                                                |
+| 8.1              | Prometheus Metrics    | **打榜必须：量化性能指标**                     |
+| 8.3              | Structured Logging    | 调试必需                                       |
+| 8.4              | InFlight Tracker      | GPU 利用率指标                                 |
+| 8.5              | Event System          | 代码小，debug PD 路由决策有用                  |
+| **基础设施**     |                       |                                                |
+| 9.5              | Request ID 中间件     | PD 调试追踪                                    |
+| 9.7              | HTTP Logging Layer    | 请求日志                                       |
+| 14.1             | Backend Runtime       | 多后端兼容（SGLang/vLLM 等）                   |
+| 15.1             | 优雅关闭              | 基本运维                                       |
+| 17.2             | Makefile              | 构建基础                                       |
+| 17.3             | E2E 测试（裁剪后）    | 打榜验证准确性+性能                            |
+| 17.4             | Benchmark（裁剪后）   | request_processing + tree_benchmark 有参考价值 |
+| 18.1             | Workflow Engine       | Worker 生命周期管理                            |
+| 19.1             | Version 模块          | 基础设施                                       |
+| 21.1             | 配置系统              | 基础设施                                       |
 
-### 明确删除 — 25 项
+### 明确删除 — 26 项
 > 这些与 PD 分离/性能优化无关，删除可大幅减少代码量和依赖。
 
-| # | 功能 | 理由 |
-|---|------|------|
-| 1.3 | OpenAI 模式 | 代理外部 API，与 AMD 硬件无关 |
-| 2.3 | Harmony 协议 | GPT-OSS 特有，AMD 不用 |
-| 3.5 | Bucket 策略 | 非核心，CacheAware 更优 |
-| 3.6 | Manual 策略 | 粘性会话，非性能场景 |
-| 3.7 | ConsistentHashing | 会话亲和性，非性能场景 |
-| 4.2 | Completion API | 旧格式 API |
-| 4.5 | Embedding API | Encoder-only 架构，不涉及 PD 分离 |
-| 4.6 | Rerank API | 非生成类模型 |
-| 4.7 | Classify API | 非生成类模型 |
-| 5.1 | Mesh Server | Gossip/CRDT 复杂度高，短期不需要 |
-| 5.2 | Mesh 管理 API | 随 Mesh Server 删除 |
-| 5.3 | 全局速率限制 | 依赖 Mesh 集群，随 Mesh 删除 |
-| 9.1 | Auth 中间件 | 内部服务不需要 |
-| 9.2 | Control Plane Auth | JWT/OIDC 内部不需要 |
-| 9.4 | WASM 中间件 | 非核心，wasmtime 重依赖 |
-| 9.6 | CORS | 非浏览器场景 |
-| 10.1 | MCP 集成 | 工具调用，与 PD 无关 |
-| 11.1 | TLS Server | 内部通信 |
-| 11.2 | mTLS Client | 内部通信 |
-| 12.1 | History Backend | 持久化存储，与 PD 无关 |
-| 13.1 | IGW 模式 | 多模型路由，PD 是单模型 |
-| 13.2 | Model Card | 随 IGW 删除 |
-| 16.2 | Golang Binding | 非核心 |
-| 17.1 | Docker 构建 | 自己的构建流程 |
-| 20.1 | Header-based Routing | 服务于 Manual/ConsistentHashing |
+| #    | 功能                 | 理由                              |
+| ---- | -------------------- | --------------------------------- |
+| 1.3  | OpenAI 模式          | 代理外部 API，与 AMD 硬件无关     |
+| 2.3  | Harmony 协议         | GPT-OSS 特有，AMD 不用            |
+| 3.5  | Bucket 策略          | 非核心，CacheAware 更优           |
+| 3.6  | Manual 策略          | 粘性会话，非性能场景              |
+| 3.7  | ConsistentHashing    | 会话亲和性，非性能场景            |
+| 4.5  | Embedding API        | Encoder-only 架构，不涉及 PD 分离 |
+| 4.6  | Rerank API           | 非生成类模型                      |
+| 4.7  | Classify API         | 非生成类模型                      |
+| 5.1  | Mesh Server          | Gossip/CRDT 复杂度高，短期不需要  |
+| 5.2  | Mesh 管理 API        | 随 Mesh Server 删除               |
+| 5.3  | 全局速率限制         | 依赖 Mesh 集群，随 Mesh 删除      |
+| 9.1  | Auth 中间件          | 内部服务不需要                    |
+| 9.2  | Control Plane Auth   | JWT/OIDC 内部不需要               |
+| 9.4  | WASM 中间件          | 非核心，wasmtime 重依赖           |
+| 9.6  | CORS                 | 非浏览器场景                      |
+| 10.1 | MCP 集成             | 工具调用，与 PD 无关              |
+| 11.1 | TLS Server           | 内部通信                          |
+| 11.2 | mTLS Client          | 内部通信                          |
+| 12.1 | History Backend      | 持久化存储，与 PD 无关            |
+| 13.1 | IGW 模式             | 多模型路由，PD 是单模型           |
+| 13.2 | Model Card           | 随 IGW 删除                       |
+| 16.2 | Golang Binding       | 非核心                            |
+| 17.1 | Docker 构建          | 自己的构建流程                    |
+| 20.1 | Header-based Routing | 服务于 Manual/ConsistentHashing   |
+| 7.1  | K8s Service Discovery | 短期不需要，长期再评估           |
+| 8.2  | OpenTelemetry Tracing | 重依赖，短期 Prometheus 够用     |
 
-### 待讨论 — 4 项
+### 待讨论 — 2 项
 > 需要根据具体部署拓扑和短期/长期优先级决定。
 
-| # | 功能 | 关键考虑 |
-|---|------|---------|
-| 4.8 | Conversations API | 对话管理是否是长期产品需求？ |
-| 8.2 | OpenTelemetry | 分布式追踪对多节点调试有价值 |
-| 9.3 | Concurrency Limiter | 打榜时防 OOM 有用，但默认禁用可保留代码 |
-| 16.1 | Python Binding | 取决于 ATOM 的集成方式 |
+| #    | 功能                | 关键考虑                                |
+| ---- | ------------------- | --------------------------------------- |
+| 9.3  | Concurrency Limiter | 打榜时防 OOM 有用，但默认禁用可保留代码 |
+| 16.1 | Python Binding      | 取决于 ATOM 的集成方式                  |
 
 ### 依赖裁剪建议
 
@@ -1315,9 +1316,10 @@ Tokenizer 通过 `TokenizerRegistry` 管理，支持从 HuggingFace model ID 或
 - `wasm-encoder` — 测试用 WASM 编码
 - `npyz` — 测试用 numpy 读取
 - `rsa` — 测试用 RSA
+- `opentelemetry*`, `tracing-opentelemetry` — OTel（8.2 确认删除）
 
 **待讨论的依赖**（取决于待讨论项的最终决策）：
-- `opentelemetry*`, `tracing-opentelemetry` — OTel（若 8.2 最终删除则移除）
+- （无）
 
 **保留的关键依赖**：
 - `axum`, `tower`, `tower-http` — HTTP 服务框架
