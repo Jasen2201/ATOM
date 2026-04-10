@@ -16,34 +16,25 @@ pub use tokenizer_registration::{
 };
 pub use worker::{
     // Workflow builders
-    create_external_worker_workflow,
-    // Workflow data helpers
-    create_external_worker_workflow_data,
     create_local_worker_workflow,
+    // Workflow data helpers
     create_local_worker_workflow_data,
     create_worker_removal_workflow,
     create_worker_removal_workflow_data,
     create_worker_update_workflow,
     create_worker_update_workflow_data,
-    // Utility functions
-    group_model_ids,
     // Shared steps
     ActivateWorkersStep,
-    // External registration steps
-    CreateExternalWorkersStep,
     // Local registration steps
     CreateLocalWorkerStep,
     DetectConnectionModeStep,
     DiscoverDPInfoStep,
     DiscoverMetadataStep,
-    DiscoverModelsStep,
     DpInfo,
     // Update steps
     FindWorkerToUpdateStep,
     // Removal steps
     FindWorkersToRemoveStep,
-    ModelInfo,
-    ModelsResponse,
     RegisterWorkersStep,
     RemoveFromPolicyRegistryStep,
     RemoveFromWorkerRegistryStep,
@@ -56,9 +47,9 @@ pub use worker::{
 };
 // Typed workflow data structures
 pub use workflow_data::{
-    ExternalWorkerWorkflowData, LocalWorkerWorkflowData, ProtocolUpdateRequest,
-    TokenizerWorkflowData, WorkerConfigRequest, WorkerList as WorkflowWorkerList,
-    WorkerRegistrationData, WorkerRemovalWorkflowData, WorkerUpdateWorkflowData,
+    LocalWorkerWorkflowData, ProtocolUpdateRequest, TokenizerWorkflowData, WorkerConfigRequest,
+    WorkerList as WorkflowWorkerList, WorkerRegistrationData, WorkerRemovalWorkflowData,
+    WorkerUpdateWorkflowData,
 };
 // Typed workflow engines
 pub use workflow_engines::WorkflowEngines;

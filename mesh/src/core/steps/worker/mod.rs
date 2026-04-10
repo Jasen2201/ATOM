@@ -1,11 +1,6 @@
-pub mod external;
 pub mod local;
 pub mod shared;
 
-pub use external::{
-    create_external_worker_workflow, create_external_worker_workflow_data, group_model_ids,
-    CreateExternalWorkersStep, DiscoverModelsStep, ModelInfo, ModelsResponse,
-};
 pub use local::{
     create_local_worker_workflow, create_local_worker_workflow_data,
     create_worker_removal_workflow, create_worker_removal_workflow_data,

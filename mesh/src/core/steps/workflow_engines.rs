@@ -8,9 +8,8 @@ use std::sync::Arc;
 use wfaas::{EventSubscriber, InMemoryStore, WorkflowEngine};
 
 use super::{
-    create_external_worker_workflow, create_local_worker_workflow,
-    create_tokenizer_registration_workflow, create_worker_removal_workflow,
-    create_worker_update_workflow, ExternalWorkerWorkflowData, LocalWorkerWorkflowData,
+    create_local_worker_workflow, create_tokenizer_registration_workflow,
+    create_worker_removal_workflow, create_worker_update_workflow, LocalWorkerWorkflowData,
     TokenizerWorkflowData, WorkerRemovalWorkflowData, WorkerUpdateWorkflowData,
 };
 use crate::config::RouterConfig;
@@ -18,10 +17,6 @@ use crate::config::RouterConfig;
 /// Type alias for local worker workflow engine
 pub type LocalWorkerEngine =
     WorkflowEngine<LocalWorkerWorkflowData, InMemoryStore<LocalWorkerWorkflowData>>;
-
-/// Type alias for external worker workflow engine
-pub type ExternalWorkerEngine =
-    WorkflowEngine<ExternalWorkerWorkflowData, InMemoryStore<ExternalWorkerWorkflowData>>;
 
 /// Type alias for worker removal workflow engine
 pub type WorkerRemovalEngine =
@@ -43,8 +38,6 @@ pub type TokenizerEngine =
 pub struct WorkflowEngines {
     /// Engine for local worker registration workflows
     pub local_worker: Arc<LocalWorkerEngine>,
-    /// Engine for external worker registration workflows
-    pub external_worker: Arc<ExternalWorkerEngine>,
     /// Engine for worker removal workflows
     pub worker_removal: Arc<WorkerRemovalEngine>,
     /// Engine for worker update workflows
@@ -61,12 +54,6 @@ impl WorkflowEngines {
         local_worker
             .register_workflow(create_local_worker_workflow(router_config))
             .expect("local_worker_registration workflow should be valid");
-
-        // Create external worker engine
-        let external_worker = WorkflowEngine::new();
-        external_worker
-            .register_workflow(create_external_worker_workflow())
-            .expect("external_worker_registration workflow should be valid");
 
         // Create worker removal engine
         let worker_removal = WorkflowEngine::new();
@@ -88,7 +75,6 @@ impl WorkflowEngines {
 
         Self {
             local_worker: Arc::new(local_worker),
-            external_worker: Arc::new(external_worker),
             worker_removal: Arc::new(worker_removal),
             worker_update: Arc::new(worker_update),
             tokenizer: Arc::new(tokenizer),
@@ -98,10 +84,6 @@ impl WorkflowEngines {
     /// Subscribe an event subscriber to all workflow engines
     pub async fn subscribe_all<S: EventSubscriber + 'static>(&self, subscriber: Arc<S>) {
         self.local_worker
-            .event_bus()
-            .subscribe(subscriber.clone())
-            .await;
-        self.external_worker
             .event_bus()
             .subscribe(subscriber.clone())
             .await;

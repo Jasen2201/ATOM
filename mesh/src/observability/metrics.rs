@@ -352,8 +352,6 @@ pub mod metrics_labels {
     // Backend types
     pub const BACKEND_REGULAR: &str = "regular";
     pub const BACKEND_PD: &str = "pd";
-    pub const BACKEND_EXTERNAL: &str = "external";
-
     // Connection modes
     pub const CONNECTION_HTTP: &str = "http";
     pub const CONNECTION_GRPC: &str = "grpc";

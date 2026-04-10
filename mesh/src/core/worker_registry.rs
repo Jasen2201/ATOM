@@ -461,7 +461,7 @@ impl WorkerRegistry {
     /// - model_id: Filter by specific model
     /// - worker_type: Filter by worker type (Regular, Prefill, Decode)
     /// - connection_mode: Filter by connection mode (Http, Grpc)
-    /// - runtime_type: Filter by runtime type (Sglang, Vllm, External)
+    /// - runtime_type: Filter by runtime type (Sglang, Vllm)
     /// - healthy_only: Only return healthy workers
     pub fn get_workers_filtered(
         &self,

@@ -662,15 +662,6 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_worker_runtime_type_external() {
-        let worker = BasicWorkerBuilder::new("http://w:8000")
-            .runtime_type(RuntimeType::External)
-            .build();
-
-        assert_eq!(worker.metadata().runtime_type, RuntimeType::External);
-    }
-
-    #[test]
     fn test_basic_worker_default_runtime_is_sglang() {
         let worker = BasicWorkerBuilder::new("http://w:8000").build();
         assert_eq!(worker.metadata().runtime_type, RuntimeType::Sglang);
