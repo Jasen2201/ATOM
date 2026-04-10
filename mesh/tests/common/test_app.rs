@@ -9,7 +9,7 @@ use mesh::{
     app_context::AppContext,
     config::RouterConfig,
     core::{
-        BasicWorkerBuilder, LoadMonitor, RuntimeType, Worker, WorkerRegistry, WorkerType,
+        BasicWorkerBuilder, LoadMonitor, Worker, WorkerRegistry, WorkerType,
     },
     middleware::TokenBucket,
     policies::PolicyRegistry,
@@ -182,28 +182,4 @@ pub async fn create_test_app_context() -> Arc<AppContext> {
             .build()
             .unwrap(),
     )
-}
-
-/// Register an external worker (OpenAI-compatible API endpoint) in the test AppContext.
-///
-/// This is used by tests that need to test the OpenAI router, which expects
-/// workers to be registered in the WorkerRegistry before routing requests.
-///
-/// # Arguments
-/// * `ctx` - The AppContext to register the worker in
-/// * `url` - The base URL of the external API endpoint
-/// * `model_id` - Optional model ID this worker supports. If None, uses "gpt-3.5-turbo" as default.
-#[allow(dead_code)]
-pub fn register_external_worker(ctx: &Arc<AppContext>, url: &str, model_id: Option<&str>) {
-    let model = model_id.unwrap_or("gpt-3.5-turbo");
-
-    let worker: Arc<dyn Worker> = Arc::new(
-        BasicWorkerBuilder::new(url)
-            .worker_type(WorkerType::Regular)
-            .runtime_type(RuntimeType::External)
-            .model_id(model)
-            .build(),
-    );
-
-    ctx.worker_registry.register(worker);
 }

@@ -23,7 +23,7 @@ use mesh::{
     app_context::AppContext,
     config::{RouterConfig, RoutingMode},
     core::{
-        BasicWorkerBuilder, Job, LoadMonitor, RuntimeType, Worker, WorkerRegistry,
+        BasicWorkerBuilder, Job, LoadMonitor, Worker, WorkerRegistry,
         WorkerType,
     },
     middleware::TokenBucket,
