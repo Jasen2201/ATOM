@@ -11,7 +11,7 @@ use std::{
 use axum::{
     body::Body,
     extract::{Request, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{HeaderValue, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -317,15 +317,6 @@ pub struct QueuedRequest {
     queued_at: Instant,
     /// Channel to send the permit back when acquired
     permit_tx: oneshot::Sender<Result<(), StatusCode>>,
-}
-
-/// Queue metrics for monitoring
-#[derive(Debug, Default)]
-pub struct QueueMetrics {
-    pub total_queued: AtomicU64,
-    pub current_queued: AtomicU64,
-    pub total_timeout: AtomicU64,
-    pub total_rejected: AtomicU64,
 }
 
 /// Queue processor that handles queued requests
