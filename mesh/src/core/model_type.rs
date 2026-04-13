@@ -2,7 +2,7 @@
 //!
 //! This module defines [`ModelType`] using bitflags to represent which endpoints
 //! a model can support. This allows combining capabilities like
-//! `ModelType::CHAT | ModelType::COMPLETIONS`.
+//! `ModelType::CHAT | ModelType::GENERATE`.
 //!
 //! Inspired by Dynamo's model_type.rs implementation.
 
@@ -14,10 +14,6 @@ bitflags! {
     pub struct ModelType: u16 {
         /// OpenAI Chat Completions API (/v1/chat/completions)
         const CHAT        = 1 << 0;
-        /// OpenAI Completions API - legacy (/v1/completions)
-        const COMPLETIONS = 1 << 1;
-        /// OpenAI Responses API (/v1/responses)
-        const RESPONSES   = 1 << 2;
         /// Embeddings API (/v1/embeddings)
         const EMBEDDINGS  = 1 << 3;
         /// Rerank API (/v1/rerank)
@@ -37,9 +33,8 @@ bitflags! {
         /// Content moderation models
         const MODERATION  = 1 << 11;
 
-        /// Standard LLM: chat + completions + responses + tools
-        const LLM = Self::CHAT.bits() | Self::COMPLETIONS.bits()
-                  | Self::RESPONSES.bits() | Self::TOOLS.bits();
+        /// Standard LLM: chat + tools
+        const LLM = Self::CHAT.bits() | Self::TOOLS.bits();
 
         /// Vision-capable LLM: LLM + vision
         const VISION_LLM = Self::LLM.bits() | Self::VISION.bits();
@@ -71,8 +66,6 @@ bitflags! {
 /// Used by `as_capability_names()` for a data-driven approach.
 const CAPABILITY_NAMES: &[(ModelType, &str)] = &[
     (ModelType::CHAT, "chat"),
-    (ModelType::COMPLETIONS, "completions"),
-    (ModelType::RESPONSES, "responses"),
     (ModelType::EMBEDDINGS, "embeddings"),
     (ModelType::RERANK, "rerank"),
     (ModelType::GENERATE, "generate"),
@@ -89,18 +82,6 @@ impl ModelType {
     #[inline]
     pub fn supports_chat(&self) -> bool {
         self.contains(Self::CHAT)
-    }
-
-    /// Check if this model type supports the legacy completions endpoint
-    #[inline]
-    pub fn supports_completions(&self) -> bool {
-        self.contains(Self::COMPLETIONS)
-    }
-
-    /// Check if this model type supports the responses endpoint
-    #[inline]
-    pub fn supports_responses(&self) -> bool {
-        self.contains(Self::RESPONSES)
     }
 
     /// Check if this model type supports the embeddings endpoint
@@ -161,8 +142,6 @@ impl ModelType {
     pub fn supports_endpoint(&self, endpoint: Endpoint) -> bool {
         match endpoint {
             Endpoint::Chat => self.supports_chat(),
-            Endpoint::Completions => self.supports_completions(),
-            Endpoint::Responses => self.supports_responses(),
             Endpoint::Embeddings => self.supports_embeddings(),
             Endpoint::Rerank => self.supports_rerank(),
             Endpoint::Generate => self.supports_generate(),
@@ -259,10 +238,6 @@ impl<'de> Deserialize<'de> for ModelType {
 pub enum Endpoint {
     /// Chat completions endpoint (/v1/chat/completions)
     Chat,
-    /// Legacy completions endpoint (/v1/completions)
-    Completions,
-    /// Responses endpoint (/v1/responses)
-    Responses,
     /// Embeddings endpoint (/v1/embeddings)
     Embeddings,
     /// Rerank endpoint (/v1/rerank)
@@ -278,8 +253,6 @@ impl Endpoint {
     pub fn path(&self) -> &'static str {
         match self {
             Endpoint::Chat => "/v1/chat/completions",
-            Endpoint::Completions => "/v1/completions",
-            Endpoint::Responses => "/v1/responses",
             Endpoint::Embeddings => "/v1/embeddings",
             Endpoint::Rerank => "/v1/rerank",
             Endpoint::Generate => "/generate",
@@ -293,8 +266,6 @@ impl Endpoint {
         let path = path.trim_end_matches('/');
         match path {
             "/v1/chat/completions" => Some(Endpoint::Chat),
-            "/v1/completions" => Some(Endpoint::Completions),
-            "/v1/responses" => Some(Endpoint::Responses),
             "/v1/embeddings" => Some(Endpoint::Embeddings),
             "/v1/rerank" => Some(Endpoint::Rerank),
             "/generate" => Some(Endpoint::Generate),
@@ -307,8 +278,6 @@ impl Endpoint {
     pub fn required_capability(&self) -> Option<ModelType> {
         match self {
             Endpoint::Chat => Some(ModelType::CHAT),
-            Endpoint::Completions => Some(ModelType::COMPLETIONS),
-            Endpoint::Responses => Some(ModelType::RESPONSES),
             Endpoint::Embeddings => Some(ModelType::EMBEDDINGS),
             Endpoint::Rerank => Some(ModelType::RERANK),
             Endpoint::Generate => Some(ModelType::GENERATE),
@@ -321,8 +290,6 @@ impl std::fmt::Display for Endpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Endpoint::Chat => write!(f, "chat"),
-            Endpoint::Completions => write!(f, "completions"),
-            Endpoint::Responses => write!(f, "responses"),
             Endpoint::Embeddings => write!(f, "embeddings"),
             Endpoint::Rerank => write!(f, "rerank"),
             Endpoint::Generate => write!(f, "generate"),

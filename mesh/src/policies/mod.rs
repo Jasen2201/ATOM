@@ -135,9 +135,6 @@ pub struct SelectWorkerInfo<'a> {
     /// Used by PrefixHashPolicy for token-based prefix hashing
     pub tokens: Option<&'a [u32]>,
     /// HTTP headers for header-based routing policies
-    /// Policies can extract routing information from headers like:
-    /// - X-Mesh-Target-Worker: Direct routing to a specific worker by index
-    /// - X-Mesh-Routing-Key: Consistent hash routing for session affinity
     pub headers: Option<&'a http::HeaderMap>,
     /// Pre-computed hash ring for O(log n) consistent hashing
     /// Built and cached by WorkerRegistry, passed through to avoid per-request rebuilds

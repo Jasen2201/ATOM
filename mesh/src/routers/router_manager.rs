@@ -14,18 +14,13 @@ use axum::{
 };
 use dashmap::DashMap;
 use serde_json::Value;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::{
     app_context::AppContext,
     config::RoutingMode,
     core::{ConnectionMode, WorkerRegistry, WorkerType},
-    protocols::{
-        chat::ChatCompletionRequest,
-        completion::CompletionRequest,
-        generate::GenerateRequest,
-        responses::{ResponsesGetParams, ResponsesRequest},
-    },
+    protocols::{chat::ChatCompletionRequest, generate::GenerateRequest},
     routers::RouterTrait,
     server::ServerConfig,
 };
@@ -136,53 +131,6 @@ impl RouterManager {
 
     pub fn router_count(&self) -> usize {
         self.routers.len()
-    }
-
-    /// Resolve model_id for a request, inferring from available workers if not specified.
-    ///
-    /// - If model_id is provided, use it directly
-    /// - If not provided and only one model exists, use it as implicit default
-    /// - If not provided and multiple models exist, return error requiring specification
-    /// - If no models exist, return service unavailable error
-    fn resolve_model_id(&self, model_id: Option<&str>) -> Result<String, Box<Response>> {
-        // If model_id is provided, use it
-        if let Some(id) = model_id {
-            return Ok(id.to_string());
-        }
-
-        // Get all available models from worker registry
-        let available_models = self.worker_registry.get_models();
-
-        match available_models.len() {
-            0 => Err(Box::new(
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "No models available - no workers registered",
-                )
-                    .into_response(),
-            )),
-            1 => {
-                // Single model: use it as implicit default
-                debug!(
-                    "Model not specified, using implicit default: {}",
-                    available_models[0]
-                );
-                Ok(available_models[0].clone())
-            }
-            _ => {
-                // Multiple models: require explicit model specification
-                Err(Box::new(
-                    (
-                        StatusCode::BAD_REQUEST,
-                        format!(
-                            "Model must be specified. Available models: {}",
-                            available_models.join(", ")
-                        ),
-                    )
-                        .into_response(),
-                ))
-            }
-        }
     }
 
     pub fn get_router_for_model(&self, model_id: &str) -> Option<Arc<dyn RouterTrait>> {
@@ -374,103 +322,6 @@ impl RouterTrait for RouterManager {
             (
                 StatusCode::NOT_FOUND,
                 format!("Model '{}' not found or no router available", body.model),
-            )
-                .into_response()
-        }
-    }
-
-    async fn route_completion(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &CompletionRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        let router = self.select_router_for_request(headers, model_id);
-
-        if let Some(router) = router {
-            router.route_completion(headers, body, model_id).await
-        } else {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Model '{}' not found or no router available", body.model),
-            )
-                .into_response()
-        }
-    }
-
-    async fn route_responses(
-        &self,
-        headers: Option<&HeaderMap>,
-        body: &ResponsesRequest,
-        model_id: Option<&str>,
-    ) -> Response {
-        let selected_model = model_id.or(Some(body.model.as_str()));
-        let router = self.select_router_for_request(headers, selected_model);
-
-        if let Some(router) = router {
-            router.route_responses(headers, body, selected_model).await
-        } else {
-            (
-                StatusCode::NOT_FOUND,
-                "No router available to handle responses request",
-            )
-                .into_response()
-        }
-    }
-
-    async fn get_response(
-        &self,
-        headers: Option<&HeaderMap>,
-        response_id: &str,
-        params: &ResponsesGetParams,
-    ) -> Response {
-        let router = self.select_router_for_request(headers, None);
-        if let Some(router) = router {
-            router.get_response(headers, response_id, params).await
-        } else {
-            (
-                StatusCode::NOT_FOUND,
-                format!("No router available to get response '{}'", response_id),
-            )
-                .into_response()
-        }
-    }
-
-    async fn cancel_response(&self, headers: Option<&HeaderMap>, response_id: &str) -> Response {
-        let router = self.select_router_for_request(headers, None);
-        if let Some(router) = router {
-            router.cancel_response(headers, response_id).await
-        } else {
-            (
-                StatusCode::NOT_FOUND,
-                format!("No router available to cancel response '{}'", response_id),
-            )
-                .into_response()
-        }
-    }
-
-    async fn delete_response(&self, _headers: Option<&HeaderMap>, _response_id: &str) -> Response {
-        (
-            StatusCode::NOT_IMPLEMENTED,
-            "responses api not yet implemented in inference gateway mode",
-        )
-            .into_response()
-    }
-
-    async fn list_response_input_items(
-        &self,
-        headers: Option<&HeaderMap>,
-        response_id: &str,
-    ) -> Response {
-        // Delegate to the default router (typically http-regular)
-        // Response storage is shared across all routers via AppContext
-        let router = self.select_router_for_request(headers, None);
-        if let Some(router) = router {
-            router.list_response_input_items(headers, response_id).await
-        } else {
-            (
-                StatusCode::NOT_FOUND,
-                "No router available to list response input items",
             )
                 .into_response()
         }

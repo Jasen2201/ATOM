@@ -3,12 +3,7 @@ use std::{
     time::Duration,
 };
 
-use data_connector::{
-    ConversationItemStorage, ConversationStorage, MemoryConversationItemStorage,
-    MemoryConversationStorage, MemoryResponseStorage, ResponseStorage,
-};
 use reqwest::Client;
-use tracing::debug;
 
 use crate::{
     config::RouterConfig,
@@ -45,9 +40,6 @@ pub struct AppContext {
     pub worker_registry: Arc<WorkerRegistry>,
     pub policy_registry: Arc<PolicyRegistry>,
     pub router_manager: Option<Arc<RouterManager>>,
-    pub response_storage: Arc<dyn ResponseStorage>,
-    pub conversation_storage: Arc<dyn ConversationStorage>,
-    pub conversation_item_storage: Arc<dyn ConversationItemStorage>,
     pub load_monitor: Option<Arc<LoadMonitor>>,
     pub configured_reasoning_parser: Option<String>,
     pub configured_tool_parser: Option<String>,
@@ -75,9 +67,6 @@ pub struct AppContextBuilder {
     worker_registry: Option<Arc<WorkerRegistry>>,
     policy_registry: Option<Arc<PolicyRegistry>>,
     router_manager: Option<Arc<RouterManager>>,
-    response_storage: Option<Arc<dyn ResponseStorage>>,
-    conversation_storage: Option<Arc<dyn ConversationStorage>>,
-    conversation_item_storage: Option<Arc<dyn ConversationItemStorage>>,
     load_monitor: Option<Arc<LoadMonitor>>,
     worker_job_queue: Option<Arc<OnceLock<Arc<JobQueue>>>>,
     workflow_engines: Option<Arc<OnceLock<WorkflowEngines>>>,
@@ -113,9 +102,6 @@ impl AppContextBuilder {
             worker_registry: None,
             policy_registry: None,
             router_manager: None,
-            response_storage: None,
-            conversation_storage: None,
-            conversation_item_storage: None,
             load_monitor: None,
             worker_job_queue: None,
             workflow_engines: None,
@@ -170,27 +156,6 @@ impl AppContextBuilder {
         self
     }
 
-    pub fn response_storage(mut self, response_storage: Arc<dyn ResponseStorage>) -> Self {
-        self.response_storage = Some(response_storage);
-        self
-    }
-
-    pub fn conversation_storage(
-        mut self,
-        conversation_storage: Arc<dyn ConversationStorage>,
-    ) -> Self {
-        self.conversation_storage = Some(conversation_storage);
-        self
-    }
-
-    pub fn conversation_item_storage(
-        mut self,
-        conversation_item_storage: Arc<dyn ConversationItemStorage>,
-    ) -> Self {
-        self.conversation_item_storage = Some(conversation_item_storage);
-        self
-    }
-
     pub fn load_monitor(mut self, load_monitor: Option<Arc<LoadMonitor>>) -> Self {
         self.load_monitor = load_monitor;
         self
@@ -241,15 +206,6 @@ impl AppContextBuilder {
                 .policy_registry
                 .ok_or(AppContextBuildError("policy_registry"))?,
             router_manager: self.router_manager,
-            response_storage: self
-                .response_storage
-                .ok_or(AppContextBuildError("response_storage"))?,
-            conversation_storage: self
-                .conversation_storage
-                .ok_or(AppContextBuildError("conversation_storage"))?,
-            conversation_item_storage: self
-                .conversation_item_storage
-                .ok_or(AppContextBuildError("conversation_item_storage"))?,
             load_monitor: self.load_monitor,
             configured_reasoning_parser,
             configured_tool_parser,
@@ -276,7 +232,6 @@ impl AppContextBuilder {
             .with_tool_parser_factory()
             .with_worker_registry()
             .with_policy_registry(&router_config)
-            .with_storage(&router_config)?
             .with_load_monitor(&router_config)
             .with_worker_job_queue()
             .with_workflow_engines()
@@ -354,14 +309,6 @@ impl AppContextBuilder {
     fn with_policy_registry(mut self, config: &RouterConfig) -> Self {
         self.policy_registry = Some(Arc::new(PolicyRegistry::new(config.policy.clone())));
         self
-    }
-
-    /// Create in-memory storage backends
-    fn with_storage(mut self, _config: &RouterConfig) -> Result<Self, String> {
-        self.response_storage = Some(Arc::new(MemoryResponseStorage::new()));
-        self.conversation_storage = Some(Arc::new(MemoryConversationStorage::new()));
-        self.conversation_item_storage = Some(Arc::new(MemoryConversationItemStorage::new()));
-        Ok(self)
     }
 
     /// Create load monitor

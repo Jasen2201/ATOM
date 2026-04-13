@@ -6,7 +6,7 @@
 use std::{sync::Arc, time::Instant};
 
 use axum::response::{IntoResponse, Response};
-use tracing::{debug, error};
+use tracing::error;
 
 use super::{
     common::stages::*,
@@ -23,7 +23,7 @@ use crate::{
     observability::metrics::{bool_to_static_str, metrics_labels, Metrics},
     policies::PolicyRegistry,
     protocols::{
-        chat::{ChatCompletionRequest, ChatCompletionResponse},
+        chat::ChatCompletionRequest,
         generate::GenerateRequest,
     },
     reasoning_parser::ParserFactory as ReasoningParserFactory,
@@ -332,75 +332,6 @@ impl RequestPipeline {
                     metrics_labels::ERROR_INTERNAL,
                 );
                 error::internal_error("no_response_produced", "No response produced")
-            }
-        }
-    }
-
-    /// Execute chat pipeline for responses endpoint
-    ///
-    /// Used by ALL non-streaming /v1/responses requests.
-    /// Uses the same 7 pipeline stages as execute_chat(), with two differences:
-    /// 1. Returns Result<ChatCompletionResponse, Response> for tool_loop composition
-    /// 2. Disallows streaming (responses endpoint uses different SSE format)
-    pub async fn execute_chat_for_responses(
-        &self,
-        request: Arc<ChatCompletionRequest>,
-        headers: Option<http::HeaderMap>,
-        model_id: Option<String>,
-        components: Arc<SharedComponents>,
-    ) -> Result<ChatCompletionResponse, Response> {
-        let mut ctx = RequestContext::for_chat(request, headers, model_id, components);
-
-        for (idx, stage) in self.stages.iter().enumerate() {
-            match stage.execute(&mut ctx).await {
-                Ok(Some(_response)) => {
-                    // Streaming not supported for responses sync mode
-                    error!(
-                        function = "execute_chat_for_responses",
-                        "Streaming attempted in responses context"
-                    );
-                    return Err(error::bad_request(
-                        "streaming_not_supported",
-                        "Streaming is not supported in this context".to_string(),
-                    ));
-                }
-                Ok(None) => {
-                    continue;
-                }
-                Err(response) => {
-                    // Error occurred - return the response as-is to preserve HTTP status codes
-                    error!(
-                        "Stage {} ({}) failed with status {}",
-                        idx + 1,
-                        stage.name(),
-                        response.status()
-                    );
-                    return Err(response);
-                }
-            }
-        }
-
-        match ctx.state.response.final_response {
-            Some(FinalResponse::Chat(response)) => Ok(response),
-            Some(FinalResponse::Generate(_)) => {
-                error!(
-                    function = "execute_chat_for_responses",
-                    "Wrong response type: expected Chat, got Generate"
-                );
-                Err(error::internal_error(
-                    "wrong_response_type",
-                    "Internal error: wrong response type",
-                ))
-            }
-            None => {
-                error!(
-                    function = "execute_chat_for_responses",
-                    "No response produced by pipeline"
-                );
-                Err(error::internal_error(
-                    "no_response_produced",
-                    "No response produced",
-                ))
             }
         }
     }

@@ -10,21 +10,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use crate::protocols::{
-    chat::ChatCompletionRequest,
-    completion::CompletionRequest,
-    generate::GenerateRequest,
-    responses::{ResponsesGetParams, ResponsesRequest},
-};
+use crate::protocols::{chat::ChatCompletionRequest, generate::GenerateRequest};
 
-pub mod conversations;
 pub mod error;
 pub mod factory;
 pub mod grpc;
 pub mod header_utils;
 pub mod http;
 pub mod parse;
-pub mod persistence_utils;
 pub mod router_manager;
 pub mod tokenize;
 
@@ -90,75 +83,6 @@ pub trait RouterTrait: Send + Sync + Debug {
         body: &ChatCompletionRequest,
         model_id: Option<&str>,
     ) -> Response;
-
-    /// Route a completion request
-    async fn route_completion(
-        &self,
-        _headers: Option<&HeaderMap>,
-        _body: &CompletionRequest,
-        _model_id: Option<&str>,
-    ) -> Response {
-        (
-            StatusCode::NOT_IMPLEMENTED,
-            "Completion endpoint not implemented",
-        )
-            .into_response()
-    }
-
-    /// Route a responses request
-    async fn route_responses(
-        &self,
-        _headers: Option<&HeaderMap>,
-        _body: &ResponsesRequest,
-        _model_id: Option<&str>,
-    ) -> Response {
-        (
-            StatusCode::NOT_IMPLEMENTED,
-            "Responses endpoint not implemented",
-        )
-            .into_response()
-    }
-
-    /// Retrieve a stored/background response by id
-    async fn get_response(
-        &self,
-        _headers: Option<&HeaderMap>,
-        _response_id: &str,
-        _params: &ResponsesGetParams,
-    ) -> Response {
-        (StatusCode::NOT_IMPLEMENTED, "Get response not implemented").into_response()
-    }
-
-    /// Cancel a background response by id
-    async fn cancel_response(&self, _headers: Option<&HeaderMap>, _response_id: &str) -> Response {
-        (
-            StatusCode::NOT_IMPLEMENTED,
-            "Cancel response not implemented",
-        )
-            .into_response()
-    }
-
-    /// Delete a response by id
-    async fn delete_response(&self, _headers: Option<&HeaderMap>, _response_id: &str) -> Response {
-        (
-            StatusCode::NOT_IMPLEMENTED,
-            "Responses delete endpoint not implemented",
-        )
-            .into_response()
-    }
-
-    /// List input items of a response by id
-    async fn list_response_input_items(
-        &self,
-        _headers: Option<&HeaderMap>,
-        _response_id: &str,
-    ) -> Response {
-        (
-            StatusCode::NOT_IMPLEMENTED,
-            "Responses list input items endpoint not implemented",
-        )
-            .into_response()
-    }
 
     /// Get router type name
     fn router_type(&self) -> &'static str;

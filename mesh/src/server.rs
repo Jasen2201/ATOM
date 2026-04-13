@@ -7,16 +7,15 @@ use std::{
 };
 
 use axum::{
-    extract::{Path, Query, Request, State},
+    extract::{Path, Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router,
 };
-use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use tokio::{signal, spawn};
-use tracing::{debug, error, info, warn, Level};
+use tracing::{debug, info, warn, Level};
 use wfaas::LoggingSubscriber;
 
 use crate::{
@@ -36,20 +35,13 @@ use crate::{
     },
     protocols::{
         chat::ChatCompletionRequest,
-        completion::CompletionRequest,
         generate::GenerateRequest,
         parser::{ParseFunctionCallRequest, SeparateReasoningRequest},
-        responses::{ResponsesGetParams, ResponsesRequest},
         tokenize::{AddTokenizerRequest, DetokenizeRequest, TokenizeRequest},
         validated::ValidatedJson,
         worker_spec::{WorkerConfigRequest, WorkerUpdateRequest},
     },
-    routers::{
-        conversations,
-        parse,
-        router_manager::RouterManager,
-        tokenize, RouterTrait,
-    },
+    routers::{parse, router_manager::RouterManager, tokenize, RouterTrait},
     tokenizer::TokenizerRegistry,
 };
 #[derive(Clone)]
@@ -168,178 +160,6 @@ async fn v1_chat_completions(
         .router
         .route_chat(Some(&headers), &body, Some(&body.model))
         .await
-}
-
-async fn v1_completions(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    Json(body): Json<CompletionRequest>,
-) -> Response {
-    state
-        .router
-        .route_completion(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_responses(
-    State(state): State<Arc<AppState>>,
-    headers: http::HeaderMap,
-    ValidatedJson(body): ValidatedJson<ResponsesRequest>,
-) -> Response {
-    state
-        .router
-        .route_responses(Some(&headers), &body, Some(&body.model))
-        .await
-}
-
-async fn v1_responses_get(
-    State(state): State<Arc<AppState>>,
-    Path(response_id): Path<String>,
-    headers: http::HeaderMap,
-    Query(params): Query<ResponsesGetParams>,
-) -> Response {
-    state
-        .router
-        .get_response(Some(&headers), &response_id, &params)
-        .await
-}
-
-async fn v1_responses_cancel(
-    State(state): State<Arc<AppState>>,
-    Path(response_id): Path<String>,
-    headers: http::HeaderMap,
-) -> Response {
-    state
-        .router
-        .cancel_response(Some(&headers), &response_id)
-        .await
-}
-
-async fn v1_responses_delete(
-    State(state): State<Arc<AppState>>,
-    Path(response_id): Path<String>,
-    headers: http::HeaderMap,
-) -> Response {
-    state
-        .router
-        .delete_response(Some(&headers), &response_id)
-        .await
-}
-
-async fn v1_responses_list_input_items(
-    State(state): State<Arc<AppState>>,
-    Path(response_id): Path<String>,
-    headers: http::HeaderMap,
-) -> Response {
-    state
-        .router
-        .list_response_input_items(Some(&headers), &response_id)
-        .await
-}
-
-async fn v1_conversations_create(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> Response {
-    conversations::create_conversation(&state.context.conversation_storage, body).await
-}
-
-async fn v1_conversations_get(
-    State(state): State<Arc<AppState>>,
-    Path(conversation_id): Path<String>,
-) -> Response {
-    conversations::get_conversation(&state.context.conversation_storage, &conversation_id).await
-}
-
-async fn v1_conversations_update(
-    State(state): State<Arc<AppState>>,
-    Path(conversation_id): Path<String>,
-    Json(body): Json<Value>,
-) -> Response {
-    conversations::update_conversation(&state.context.conversation_storage, &conversation_id, body)
-        .await
-}
-
-async fn v1_conversations_delete(
-    State(state): State<Arc<AppState>>,
-    Path(conversation_id): Path<String>,
-) -> Response {
-    conversations::delete_conversation(&state.context.conversation_storage, &conversation_id).await
-}
-
-#[derive(Deserialize, Default)]
-struct ListItemsQuery {
-    limit: Option<usize>,
-    order: Option<String>,
-    after: Option<String>,
-}
-
-async fn v1_conversations_list_items(
-    State(state): State<Arc<AppState>>,
-    Path(conversation_id): Path<String>,
-    Query(ListItemsQuery {
-        limit,
-        order,
-        after,
-    }): Query<ListItemsQuery>,
-) -> Response {
-    conversations::list_conversation_items(
-        &state.context.conversation_storage,
-        &state.context.conversation_item_storage,
-        &conversation_id,
-        limit,
-        order.as_deref(),
-        after.as_deref(),
-    )
-    .await
-}
-
-#[derive(Deserialize, Default)]
-struct GetItemQuery {
-    /// Additional fields to include in response (not yet implemented)
-    include: Option<Vec<String>>,
-}
-
-async fn v1_conversations_create_items(
-    State(state): State<Arc<AppState>>,
-    Path(conversation_id): Path<String>,
-    Json(body): Json<Value>,
-) -> Response {
-    conversations::create_conversation_items(
-        &state.context.conversation_storage,
-        &state.context.conversation_item_storage,
-        &conversation_id,
-        body,
-    )
-    .await
-}
-
-async fn v1_conversations_get_item(
-    State(state): State<Arc<AppState>>,
-    Path((conversation_id, item_id)): Path<(String, String)>,
-    Query(query): Query<GetItemQuery>,
-) -> Response {
-    conversations::get_conversation_item(
-        &state.context.conversation_storage,
-        &state.context.conversation_item_storage,
-        &conversation_id,
-        &item_id,
-        query.include,
-    )
-    .await
-}
-
-async fn v1_conversations_delete_item(
-    State(state): State<Arc<AppState>>,
-    Path((conversation_id, item_id)): Path<(String, String)>,
-) -> Response {
-    conversations::delete_conversation_item(
-        &state.context.conversation_storage,
-        &state.context.conversation_item_storage,
-        &conversation_id,
-        &item_id,
-    )
-    .await
 }
 
 async fn flush_cache(State(state): State<Arc<AppState>>, _req: Request) -> Response {
@@ -481,33 +301,6 @@ pub fn build_app(
     let protected_routes = Router::new()
         .route("/generate", post(generate))
         .route("/v1/chat/completions", post(v1_chat_completions))
-        .route("/v1/completions", post(v1_completions))
-        .route("/v1/responses", post(v1_responses))
-        .route("/v1/responses/{response_id}", get(v1_responses_get))
-        .route(
-            "/v1/responses/{response_id}/cancel",
-            post(v1_responses_cancel),
-        )
-        .route("/v1/responses/{response_id}", delete(v1_responses_delete))
-        .route(
-            "/v1/responses/{response_id}/input_items",
-            get(v1_responses_list_input_items),
-        )
-        .route("/v1/conversations", post(v1_conversations_create))
-        .route(
-            "/v1/conversations/{conversation_id}",
-            get(v1_conversations_get)
-                .post(v1_conversations_update)
-                .delete(v1_conversations_delete),
-        )
-        .route(
-            "/v1/conversations/{conversation_id}/items",
-            get(v1_conversations_list_items).post(v1_conversations_create_items),
-        )
-        .route(
-            "/v1/conversations/{conversation_id}/items/{item_id}",
-            get(v1_conversations_get_item).delete(v1_conversations_delete_item),
-        )
         // Tokenize / Detokenize endpoints
         .route("/v1/tokenize", post(v1_tokenize))
         .route("/v1/detokenize", post(v1_detokenize))
