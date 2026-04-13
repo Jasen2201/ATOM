@@ -11,7 +11,7 @@ use std::{
 use axum::{
     body::Body,
     extract::{Request, State},
-    http::{HeaderValue, StatusCode},
+    http::{header, HeaderValue, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -98,8 +98,12 @@ const REQUEST_ID_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 fn generate_request_id(path: &str) -> String {
     let prefix = if path.contains("/chat/completions") {
         "chatcmpl-"
+    } else if path.contains("/completions") {
+        "cmpl-"
     } else if path.contains("/generate") {
         "gnt-"
+    } else if path.contains("/responses") {
+        "resp-"
     } else {
         "req-"
     };
@@ -304,7 +308,7 @@ pub fn create_logging_layer() -> TraceLayer<
     TraceLayer::new_for_http()
         .make_span_with(RequestSpan)
         .on_request(RequestLogger)
-        .on_response(ResponseLogger)
+        .on_response(ResponseLogger::default())
 }
 
 /// Request queue entry
@@ -653,6 +657,10 @@ mod tests {
         assert_eq!(
             normalize_path_for_metrics("/v1/chat/completions"),
             "/v1/chat/completions"
+        );
+        assert_eq!(
+            normalize_path_for_metrics("/v1/completions"),
+            "/v1/completions"
         );
         assert_eq!(normalize_path_for_metrics("/v1/models"), "/v1/models");
         assert_eq!(normalize_path_for_metrics("/health"), "/health");

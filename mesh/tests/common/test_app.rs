@@ -1,11 +1,16 @@
 use std::sync::{Arc, OnceLock};
 
 use axum::Router;
+use data_connector::{
+    MemoryConversationItemStorage, MemoryConversationStorage, MemoryResponseStorage,
+};
 use reqwest::Client;
 use mesh::{
     app_context::AppContext,
     config::RouterConfig,
-    core::{LoadMonitor, WorkerRegistry},
+    core::{
+        BasicWorkerBuilder, LoadMonitor, Worker, WorkerRegistry, WorkerType,
+    },
     middleware::TokenBucket,
     policies::PolicyRegistry,
     routers::RouterTrait,
@@ -40,6 +45,11 @@ pub fn create_test_app(
     let worker_registry = Arc::new(WorkerRegistry::new());
     let policy_registry = Arc::new(PolicyRegistry::new(router_config.policy.clone()));
 
+    // Initialize storage backends
+    let response_storage = Arc::new(MemoryResponseStorage::new());
+    let conversation_storage = Arc::new(MemoryConversationStorage::new());
+    let conversation_item_storage = Arc::new(MemoryConversationItemStorage::new());
+
     // Initialize load monitor
     let load_monitor = Some(Arc::new(LoadMonitor::new(
         worker_registry.clone(),
@@ -63,6 +73,9 @@ pub fn create_test_app(
             .tool_parser_factory(None) // tool_parser_factory
             .worker_registry(worker_registry)
             .policy_registry(policy_registry)
+            .response_storage(response_storage)
+            .conversation_storage(conversation_storage)
+            .conversation_item_storage(conversation_item_storage)
             .load_monitor(load_monitor)
             .worker_job_queue(worker_job_queue)
             .workflow_engines(workflow_engines)
@@ -145,6 +158,11 @@ pub async fn create_test_app_context() -> Arc<AppContext> {
     let worker_registry = Arc::new(WorkerRegistry::new());
     let policy_registry = Arc::new(PolicyRegistry::new(router_config.policy.clone()));
 
+    // Initialize storage backends
+    let response_storage = Arc::new(MemoryResponseStorage::new());
+    let conversation_storage = Arc::new(MemoryConversationStorage::new());
+    let conversation_item_storage = Arc::new(MemoryConversationItemStorage::new());
+
     Arc::new(
         AppContext::builder()
             .router_config(router_config)
@@ -155,6 +173,9 @@ pub async fn create_test_app_context() -> Arc<AppContext> {
             .tool_parser_factory(None)
             .worker_registry(worker_registry)
             .policy_registry(policy_registry)
+            .response_storage(response_storage)
+            .conversation_storage(conversation_storage)
+            .conversation_item_storage(conversation_item_storage)
             .load_monitor(None)
             .worker_job_queue(worker_job_queue)
             .workflow_engines(workflow_engines)

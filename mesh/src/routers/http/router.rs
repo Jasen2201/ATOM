@@ -26,7 +26,9 @@ use crate::{
     protocols::{
         chat::ChatCompletionRequest,
         common::GenerationRequest,
+        completion::CompletionRequest,
         generate::GenerateRequest,
+        responses::{ResponsesGetParams, ResponsesRequest},
     },
     routers::{
         error::{self, extract_error_code_from_response},
@@ -126,9 +128,11 @@ impl Router {
         text: Option<&str>,
         headers: Option<&HeaderMap>,
     ) -> Option<Arc<dyn Worker>> {
+        let effective_model_id: Option<&str> = None;
+
         // Get workers for the specified model O(1), filtered by connection mode
         let workers = self.worker_registry.get_workers_filtered(
-            None,
+            effective_model_id,
             Some(WorkerType::Regular),
             Some(ConnectionMode::Http),
             None,  // any runtime type
@@ -153,7 +157,7 @@ impl Router {
         // Get cached hash ring for consistent hashing (O(log n) lookup)
         let hash_ring = self
             .worker_registry
-            .get_hash_ring(UNKNOWN_MODEL_ID);
+            .get_hash_ring(effective_model_id.unwrap_or(UNKNOWN_MODEL_ID));
 
         let idx = policy
             .select_worker(
@@ -320,7 +324,6 @@ impl Router {
     }
 
     // Helper: return base worker URL (strips DP suffix when enabled)
-    #[allow(dead_code)]
     fn worker_base_url(&self, worker_url: &str) -> String {
         if self.dp_aware {
             if let Ok((prefix, _)) = Self::extract_dp_rank(worker_url) {
@@ -331,7 +334,6 @@ impl Router {
     }
 
     // Generic simple routing for GET/POST without JSON body
-    #[allow(dead_code)]
     async fn route_simple_request(
         &self,
         headers: Option<&HeaderMap>,
@@ -436,14 +438,12 @@ impl Router {
     }
 
     // Route a GET request with provided headers to a specific endpoint
-    #[allow(dead_code)]
     async fn route_get_request(&self, headers: Option<&HeaderMap>, endpoint: &str) -> Response {
         self.route_simple_request(headers, endpoint, Method::GET)
             .await
     }
 
     // Route a POST request with empty body to a specific endpoint
-    #[allow(dead_code)]
     async fn route_post_empty_request(
         &self,
         headers: Option<&HeaderMap>,
@@ -726,6 +726,41 @@ impl RouterTrait for Router {
             .await
     }
 
+    async fn route_completion(
+        &self,
+        headers: Option<&HeaderMap>,
+        body: &CompletionRequest,
+        model_id: Option<&str>,
+    ) -> Response {
+        self.route_typed_request(headers, body, "/v1/completions", model_id)
+            .await
+    }
+
+    async fn route_responses(
+        &self,
+        headers: Option<&HeaderMap>,
+        body: &ResponsesRequest,
+        model_id: Option<&str>,
+    ) -> Response {
+        self.route_typed_request(headers, body, "/v1/responses", model_id)
+            .await
+    }
+
+    async fn get_response(
+        &self,
+        headers: Option<&HeaderMap>,
+        response_id: &str,
+        _params: &ResponsesGetParams,
+    ) -> Response {
+        let endpoint = format!("v1/responses/{}", response_id);
+        self.route_get_request(headers, &endpoint).await
+    }
+
+    async fn cancel_response(&self, headers: Option<&HeaderMap>, response_id: &str) -> Response {
+        let endpoint = format!("v1/responses/{}/cancel", response_id);
+        self.route_post_empty_request(headers, &endpoint).await
+    }
+
     fn router_type(&self) -> &'static str {
         "regular"
     }
@@ -919,7 +954,7 @@ mod tests {
     #[test]
     fn test_convert_reqwest_error() {
         // Build a reqwest error via an invalid URL
-        let err = Client::new()
+        let err = reqwest::Client::new()
             .get("http://[invalid]")
             .build()
             .unwrap_err();

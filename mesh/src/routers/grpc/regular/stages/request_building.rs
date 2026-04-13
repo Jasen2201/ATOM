@@ -2,10 +2,15 @@
 
 use async_trait::async_trait;
 use axum::response::Response;
+use tracing::error;
+
 use super::{chat::ChatRequestBuildingStage, generate::GenerateRequestBuildingStage};
-use crate::routers::grpc::{
-    common::stages::PipelineStage,
-    context::{RequestContext, RequestType},
+use crate::routers::{
+    error as grpc_error,
+    grpc::{
+        common::stages::PipelineStage,
+        context::{RequestContext, RequestType},
+    },
 };
 
 /// Request building stage (delegates to endpoint-specific implementations)
@@ -29,6 +34,16 @@ impl PipelineStage for RequestBuildingStage {
         match &ctx.input.request_type {
             RequestType::Chat(_) => self.chat_stage.execute(ctx).await,
             RequestType::Generate(_) => self.generate_stage.execute(ctx).await,
+            RequestType::Responses(_request) => {
+                error!(
+                    function = "RequestBuildingStage::execute",
+                    "RequestType::Responses reached regular request building stage"
+                );
+                Err(grpc_error::internal_error(
+                    "responses_in_wrong_pipeline",
+                    "RequestType::Responses reached regular request building stage",
+                ))
+            }
         }
     }
 

@@ -64,7 +64,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use rand::Rng;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use super::{
     get_healthy_worker_indices, normalize_model_key, tree::Tree, utils::PeriodicTask,

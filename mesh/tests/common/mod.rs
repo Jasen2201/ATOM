@@ -14,13 +14,17 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
+use data_connector::{
+    MemoryConversationItemStorage, MemoryConversationStorage, MemoryResponseStorage,
+};
 use mock_worker::{MockWorker, MockWorkerConfig};
 use serde_json::json;
 use mesh::{
     app_context::AppContext,
     config::{RouterConfig, RoutingMode},
     core::{
-        Job, LoadMonitor, WorkerRegistry,
+        BasicWorkerBuilder, Job, LoadMonitor, Worker, WorkerRegistry,
+        WorkerType,
     },
     middleware::TokenBucket,
     policies::PolicyRegistry,
@@ -195,13 +199,15 @@ impl AppTestContext {
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         }
 
-        if let RoutingMode::Regular {
-            worker_urls: ref mut urls,
-        } = &mut config.mode
-        {
-            if urls.is_empty() {
-                *urls = worker_urls.clone();
+        match &mut config.mode {
+            RoutingMode::Regular {
+                worker_urls: ref mut urls,
+            } => {
+                if urls.is_empty() {
+                    *urls = worker_urls.clone();
+                }
             }
+            _ => {}
         }
 
         let app_context = create_test_context(config.clone()).await;
@@ -293,6 +299,11 @@ pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
     let worker_registry = Arc::new(WorkerRegistry::new());
     let policy_registry = Arc::new(PolicyRegistry::new(config.policy.clone()));
 
+    // Initialize storage backends (Memory for tests)
+    let response_storage = Arc::new(MemoryResponseStorage::new());
+    let conversation_storage = Arc::new(MemoryConversationStorage::new());
+    let conversation_item_storage = Arc::new(MemoryConversationItemStorage::new());
+
     // Initialize load monitor
     let load_monitor = Some(Arc::new(LoadMonitor::new(
         worker_registry.clone(),
@@ -316,6 +327,9 @@ pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
             .tool_parser_factory(None) // tool_parser_factory
             .worker_registry(worker_registry)
             .policy_registry(policy_registry)
+            .response_storage(response_storage)
+            .conversation_storage(conversation_storage)
+            .conversation_item_storage(conversation_item_storage)
             .load_monitor(load_monitor)
             .worker_job_queue(worker_job_queue)
             .workflow_engines(workflow_engines)
@@ -367,6 +381,11 @@ pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppCo
     let worker_registry = Arc::new(WorkerRegistry::new());
     let policy_registry = Arc::new(PolicyRegistry::new(config.policy.clone()));
 
+    // Initialize storage backends (Memory for tests)
+    let response_storage = Arc::new(MemoryResponseStorage::new());
+    let conversation_storage = Arc::new(MemoryConversationStorage::new());
+    let conversation_item_storage = Arc::new(MemoryConversationItemStorage::new());
+
     // Initialize load monitor
     let load_monitor = Some(Arc::new(LoadMonitor::new(
         worker_registry.clone(),
@@ -394,6 +413,9 @@ pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppCo
             .tool_parser_factory(tool_parser_factory)
             .worker_registry(worker_registry)
             .policy_registry(policy_registry)
+            .response_storage(response_storage)
+            .conversation_storage(conversation_storage)
+            .conversation_item_storage(conversation_item_storage)
             .load_monitor(load_monitor)
             .worker_job_queue(worker_job_queue)
             .workflow_engines(workflow_engines)

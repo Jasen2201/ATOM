@@ -300,6 +300,20 @@ pub(crate) fn init_metrics() {
         "Workers known via discovery by source"
     );
 
+    // Layer 5: Database metrics
+    describe_counter!(
+        "mesh_db_operations_total",
+        "Total database operations by storage_type, operation, result"
+    );
+    describe_histogram!(
+        "mesh_db_operation_duration_seconds",
+        "Database operation duration by storage_type, operation"
+    );
+    describe_gauge!(
+        "mesh_db_connections_active",
+        "Active database connections by storage_type"
+    );
+    describe_counter!("mesh_db_items_stored", "Total items stored by storage_type");
 }
 
 pub fn start_prometheus(config: PrometheusConfig) {
@@ -331,6 +345,7 @@ pub fn start_prometheus(config: PrometheusConfig) {
 /// Label constants for consistent metric labeling
 pub mod metrics_labels {
     // Router types
+    pub const ROUTER_OPENAI: &str = "openai";
     pub const ROUTER_HTTP: &str = "http";
     pub const ROUTER_GRPC: &str = "grpc";
 
@@ -344,6 +359,8 @@ pub mod metrics_labels {
     // Endpoints
     pub const ENDPOINT_CHAT: &str = "chat";
     pub const ENDPOINT_GENERATE: &str = "generate";
+    pub const ENDPOINT_RESPONSES: &str = "responses";
+    pub const ENDPOINT_COMPLETIONS: &str = "completions";
 
     // Worker types
     pub const WORKER_REGULAR: &str = "regular";
@@ -356,6 +373,17 @@ pub mod metrics_labels {
     pub const TOKEN_INPUT: &str = "input";
     pub const TOKEN_OUTPUT: &str = "output";
 
+    // Storage types
+    pub const STORAGE_RESPONSE: &str = "response";
+    pub const STORAGE_CONVERSATION: &str = "conversation";
+    pub const STORAGE_CONVERSATION_ITEM: &str = "conversation_item";
+
+    // Database operations
+    pub const DB_OP_GET: &str = "get";
+    pub const DB_OP_PUT: &str = "put";
+    pub const DB_OP_DELETE: &str = "delete";
+    pub const DB_OP_LIST: &str = "list";
+
     // Result types
     pub const RESULT_SUCCESS: &str = "success";
     pub const RESULT_ERROR: &str = "error";
@@ -364,11 +392,15 @@ pub mod metrics_labels {
 
     // Discovery sources
     pub const DISCOVERY_STATIC: &str = "static";
+    pub const DISCOVERY_KUBERNETES: &str = "kubernetes";
+    pub const DISCOVERY_CONSUL: &str = "consul";
+    pub const DISCOVERY_MANUAL: &str = "manual";
 
     // Discovery registration results
     pub const REGISTRATION_SUCCESS: &str = "success";
     pub const REGISTRATION_FAILED: &str = "failed";
     pub const REGISTRATION_DUPLICATE: &str = "duplicate";
+    pub const DEREGISTRATION_POD_DELETED: &str = "pod_deleted";
 
     // Rate limit results
     pub const RATE_LIMIT_ALLOWED: &str = "allowed";

@@ -8,8 +8,13 @@ use axum::{
 use tracing::debug;
 
 use super::{
+    common::responses::{
+        handlers::{cancel_response_impl, get_response_impl},
+        ResponsesContext,
+    },
     context::SharedComponents,
     pipeline::RequestPipeline,
+    regular::responses,
 };
 use crate::{
     app_context::AppContext,
@@ -19,6 +24,7 @@ use crate::{
     protocols::{
         chat::ChatCompletionRequest,
         generate::GenerateRequest,
+        responses::{ResponsesGetParams, ResponsesRequest},
     },
     routers::RouterTrait,
 };
@@ -29,6 +35,7 @@ pub struct GrpcRouter {
     worker_registry: Arc<WorkerRegistry>,
     pipeline: RequestPipeline,
     shared_components: Arc<SharedComponents>,
+    responses_context: ResponsesContext,
     retry_config: RetryConfig,
 }
 
@@ -69,10 +76,20 @@ impl GrpcRouter {
             ctx.configured_reasoning_parser.clone(),
         );
 
+        // Create responses context
+        let responses_context = ResponsesContext::new(
+            Arc::new(pipeline.clone()),
+            shared_components.clone(),
+            ctx.response_storage.clone(),
+            ctx.conversation_storage.clone(),
+            ctx.conversation_item_storage.clone(),
+        );
+
         Ok(GrpcRouter {
             worker_registry,
             pipeline,
             shared_components,
+            responses_context,
             retry_config: ctx.router_config.effective_retry_config(),
         })
     }
@@ -186,6 +203,22 @@ impl GrpcRouter {
         .await
     }
 
+    /// Main route_responses implementation
+    async fn route_responses_impl(
+        &self,
+        headers: Option<&HeaderMap>,
+        body: &ResponsesRequest,
+        model_id: Option<&str>,
+    ) -> Response {
+        responses::route_responses(
+            &self.responses_context,
+            Arc::new(body.clone()),
+            headers.cloned(),
+            model_id.map(|s| s.to_string()),
+        )
+        .await
+    }
+
 }
 
 impl std::fmt::Debug for GrpcRouter {
@@ -219,6 +252,28 @@ impl RouterTrait for GrpcRouter {
         model_id: Option<&str>,
     ) -> Response {
         self.route_chat_impl(headers, body, model_id).await
+    }
+
+    async fn route_responses(
+        &self,
+        headers: Option<&HeaderMap>,
+        body: &ResponsesRequest,
+        model_id: Option<&str>,
+    ) -> Response {
+        self.route_responses_impl(headers, body, model_id).await
+    }
+
+    async fn get_response(
+        &self,
+        _headers: Option<&HeaderMap>,
+        response_id: &str,
+        _params: &ResponsesGetParams,
+    ) -> Response {
+        get_response_impl(&self.responses_context, response_id).await
+    }
+
+    async fn cancel_response(&self, _headers: Option<&HeaderMap>, response_id: &str) -> Response {
+        cancel_response_impl(&self.responses_context, response_id).await
     }
 
     fn router_type(&self) -> &'static str {

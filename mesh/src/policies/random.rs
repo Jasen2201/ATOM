@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_random_default() {
-        let policy = RandomPolicy;
+        let policy = RandomPolicy::default();
         assert_eq!(policy.name(), "random");
     }
 

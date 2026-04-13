@@ -64,13 +64,15 @@ impl ParserTestContext {
         }
 
         // Update config with worker URLs if not already set
-        if let RoutingMode::Regular {
-            worker_urls: ref mut urls,
-        } = &mut config.mode
-        {
-            if urls.is_empty() {
-                *urls = worker_urls.clone();
+        match &mut config.mode {
+            RoutingMode::Regular {
+                worker_urls: ref mut urls,
+            } => {
+                if urls.is_empty() {
+                    *urls = worker_urls.clone();
+                }
             }
+            _ => {} // PrefillDecode mode has its own setup
         }
 
         let client = Client::builder()

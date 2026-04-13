@@ -3,7 +3,7 @@
 //! Provides pre-configured RouterConfig and MockWorkerConfig builders
 //! for common test scenarios.
 
-use mesh::config::{CircuitBreakerConfig, RetryConfig, RouterConfig};
+use mesh::config::{CircuitBreakerConfig, PolicyConfig, RetryConfig, RouterConfig};
 
 use super::mock_worker::{HealthStatus, MockWorkerConfig, WorkerType};
 

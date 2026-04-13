@@ -17,6 +17,7 @@ use crate::{
     protocols::{
         chat::{ChatCompletionRequest, ChatCompletionResponse},
         generate::{GenerateRequest, GenerateResponse},
+        responses::ResponsesRequest,
     },
     reasoning_parser::ParserFactory as ReasoningParserFactory,
     tokenizer::{stop::StopSequenceDecoder, traits::Tokenizer, TokenizerRegistry},
@@ -46,6 +47,7 @@ pub(crate) struct RequestInput {
 pub(crate) enum RequestType {
     Chat(Arc<ChatCompletionRequest>),
     Generate(Arc<GenerateRequest>),
+    Responses(Arc<ResponsesRequest>),
 }
 
 /// Shared components (injected once at creation)
@@ -213,6 +215,24 @@ impl RequestContext {
         }
     }
 
+    /// Create context for Responses API request
+    pub fn for_responses(
+        request: Arc<ResponsesRequest>,
+        headers: Option<HeaderMap>,
+        model_id: Option<String>,
+        components: Arc<SharedComponents>,
+    ) -> Self {
+        Self {
+            input: RequestInput {
+                request_type: RequestType::Responses(request),
+                headers,
+                model_id,
+            },
+            components,
+            state: ProcessingState::default(),
+        }
+    }
+
     /// Get chat request (panics if not chat)
     pub fn chat_request(&self) -> &ChatCompletionRequest {
         match &self.input.request_type {
@@ -245,11 +265,20 @@ impl RequestContext {
         }
     }
 
+    /// Get Arc clone of responses request (panics if not responses)
+    pub fn responses_request_arc(&self) -> Arc<ResponsesRequest> {
+        match &self.input.request_type {
+            RequestType::Responses(req) => Arc::clone(req),
+            _ => panic!("Expected responses request"),
+        }
+    }
+
     /// Check if request is streaming
     pub fn is_streaming(&self) -> bool {
         match &self.input.request_type {
             RequestType::Chat(req) => req.stream,
             RequestType::Generate(req) => req.stream,
+            RequestType::Responses(req) => req.stream.unwrap_or(false),
         }
     }
 

@@ -4,11 +4,16 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::response::Response;
+use tracing::error;
+
 use super::{chat::ChatResponseProcessingStage, generate::GenerateResponseProcessingStage};
-use crate::routers::grpc::{
-    common::stages::PipelineStage,
-    context::{RequestContext, RequestType},
-    regular::{processor, streaming},
+use crate::routers::{
+    error,
+    grpc::{
+        common::stages::PipelineStage,
+        context::{RequestContext, RequestType},
+        regular::{processor, streaming},
+    },
 };
 
 /// Response processing stage (delegates to endpoint-specific implementations)
@@ -38,6 +43,16 @@ impl PipelineStage for ResponseProcessingStage {
         match &ctx.input.request_type {
             RequestType::Chat(_) => self.chat_stage.execute(ctx).await,
             RequestType::Generate(_) => self.generate_stage.execute(ctx).await,
+            RequestType::Responses(_) => {
+                error!(
+                    function = "ResponseProcessingStage::execute",
+                    "RequestType::Responses reached regular response processing stage"
+                );
+                Err(error::internal_error(
+                    "responses_in_wrong_pipeline",
+                    "RequestType::Responses reached regular response processing stage",
+                ))
+            }
         }
     }
 

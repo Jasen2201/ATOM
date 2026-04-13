@@ -93,6 +93,11 @@ mod pd_routing_unit_tests {
                 balance_abs_threshold: 32,
                 balance_rel_threshold: 1.1,
             },
+            PDSelectionPolicy::Bucket {
+                balance_abs_threshold: 32,
+                balance_rel_threshold: 1.1,
+                bucket_adjust_interval_secs: 5,
+            },
         ];
 
         for policy in policies {
@@ -107,6 +112,12 @@ mod pd_routing_unit_tests {
                     cache_threshold, ..
                 } => {
                     assert!(*cache_threshold >= 0.0 && *cache_threshold <= 1.0);
+                }
+                PDSelectionPolicy::Bucket {
+                    balance_rel_threshold,
+                    ..
+                } => {
+                    assert!(*balance_rel_threshold >= 1.0);
                 }
             }
         }
@@ -203,6 +214,9 @@ mod pd_routing_unit_tests {
             let app_context = {
                 use std::sync::{Arc, OnceLock};
 
+                use data_connector::{
+                    MemoryConversationItemStorage, MemoryConversationStorage, MemoryResponseStorage,
+                };
                 use mesh::{
                     core::{LoadMonitor, WorkerRegistry},
                     middleware::TokenBucket,
@@ -217,6 +231,11 @@ mod pd_routing_unit_tests {
                 // Initialize registries
                 let worker_registry = Arc::new(WorkerRegistry::new());
                 let policy_registry = Arc::new(PolicyRegistry::new(config.policy.clone()));
+
+                // Initialize storage backends
+                let response_storage = Arc::new(MemoryResponseStorage::new());
+                let conversation_storage = Arc::new(MemoryConversationStorage::new());
+                let conversation_item_storage = Arc::new(MemoryConversationItemStorage::new());
 
                 // Initialize load monitor
                 let load_monitor = Some(Arc::new(LoadMonitor::new(
@@ -240,6 +259,9 @@ mod pd_routing_unit_tests {
                         .tool_parser_factory(None) // tool_parser_factory
                         .worker_registry(worker_registry)
                         .policy_registry(policy_registry)
+                        .response_storage(response_storage)
+                        .conversation_storage(conversation_storage)
+                        .conversation_item_storage(conversation_item_storage)
                         .load_monitor(load_monitor)
                         .worker_job_queue(worker_job_queue)
                         .workflow_engines(workflow_engines)
