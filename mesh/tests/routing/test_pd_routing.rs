@@ -93,11 +93,6 @@ mod pd_routing_unit_tests {
                 balance_abs_threshold: 32,
                 balance_rel_threshold: 1.1,
             },
-            PDSelectionPolicy::Bucket {
-                balance_abs_threshold: 32,
-                balance_rel_threshold: 1.1,
-                bucket_adjust_interval_secs: 5,
-            },
         ];
 
         for policy in policies {
@@ -112,12 +107,6 @@ mod pd_routing_unit_tests {
                     cache_threshold, ..
                 } => {
                     assert!(*cache_threshold >= 0.0 && *cache_threshold <= 1.0);
-                }
-                PDSelectionPolicy::Bucket {
-                    balance_rel_threshold,
-                    ..
-                } => {
-                    assert!(*balance_rel_threshold >= 1.0);
                 }
             }
         }

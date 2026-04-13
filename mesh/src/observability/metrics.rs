@@ -345,7 +345,6 @@ pub fn start_prometheus(config: PrometheusConfig) {
 /// Label constants for consistent metric labeling
 pub mod metrics_labels {
     // Router types
-    pub const ROUTER_OPENAI: &str = "openai";
     pub const ROUTER_HTTP: &str = "http";
     pub const ROUTER_GRPC: &str = "grpc";
 
@@ -373,17 +372,6 @@ pub mod metrics_labels {
     pub const TOKEN_INPUT: &str = "input";
     pub const TOKEN_OUTPUT: &str = "output";
 
-    // Storage types
-    pub const STORAGE_RESPONSE: &str = "response";
-    pub const STORAGE_CONVERSATION: &str = "conversation";
-    pub const STORAGE_CONVERSATION_ITEM: &str = "conversation_item";
-
-    // Database operations
-    pub const DB_OP_GET: &str = "get";
-    pub const DB_OP_PUT: &str = "put";
-    pub const DB_OP_DELETE: &str = "delete";
-    pub const DB_OP_LIST: &str = "list";
-
     // Result types
     pub const RESULT_SUCCESS: &str = "success";
     pub const RESULT_ERROR: &str = "error";
@@ -392,15 +380,11 @@ pub mod metrics_labels {
 
     // Discovery sources
     pub const DISCOVERY_STATIC: &str = "static";
-    pub const DISCOVERY_KUBERNETES: &str = "kubernetes";
-    pub const DISCOVERY_CONSUL: &str = "consul";
-    pub const DISCOVERY_MANUAL: &str = "manual";
 
     // Discovery registration results
     pub const REGISTRATION_SUCCESS: &str = "success";
     pub const REGISTRATION_FAILED: &str = "failed";
     pub const REGISTRATION_DUPLICATE: &str = "duplicate";
-    pub const DEREGISTRATION_POD_DELETED: &str = "pod_deleted";
 
     // Rate limit results
     pub const RATE_LIMIT_ALLOWED: &str = "allowed";
