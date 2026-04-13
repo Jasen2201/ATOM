@@ -1,8 +1,7 @@
-//! Core abstractions for the SGLang router
+//! Core abstractions for ATOM Mesh
 //!
 //! This module contains the fundamental types and traits used throughout the router:
 //! - Worker trait and implementations
-//! - Model types and endpoint definitions
 //! - Error types
 //! - Circuit breaker for reliability
 //! - Token buckets for rate limiting
@@ -16,7 +15,6 @@ pub mod circuit_breaker;
 pub mod error;
 pub mod job_queue;
 pub mod metrics_aggregator;
-pub mod model_type;
 pub mod retry;
 pub mod steps;
 pub mod token_bucket;

@@ -14,12 +14,12 @@ use axum::{
 };
 use dashmap::DashMap;
 use serde_json::Value;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::{
     app_context::AppContext,
     config::RoutingMode,
-    core::{ConnectionMode, WorkerRegistry, WorkerType},
+    core::{ConnectionMode, WorkerRegistry},
     protocols::{
         chat::ChatCompletionRequest,
         completion::CompletionRequest,
@@ -136,94 +136,6 @@ impl RouterManager {
 
     pub fn router_count(&self) -> usize {
         self.routers.len()
-    }
-
-    /// Resolve model_id for a request, inferring from available workers if not specified.
-    ///
-    /// - If model_id is provided, use it directly
-    /// - If not provided and only one model exists, use it as implicit default
-    /// - If not provided and multiple models exist, return error requiring specification
-    /// - If no models exist, return service unavailable error
-    fn resolve_model_id(&self, model_id: Option<&str>) -> Result<String, Box<Response>> {
-        // If model_id is provided, use it
-        if let Some(id) = model_id {
-            return Ok(id.to_string());
-        }
-
-        // Get all available models from worker registry
-        let available_models = self.worker_registry.get_models();
-
-        match available_models.len() {
-            0 => Err(Box::new(
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "No models available - no workers registered",
-                )
-                    .into_response(),
-            )),
-            1 => {
-                // Single model: use it as implicit default
-                debug!(
-                    "Model not specified, using implicit default: {}",
-                    available_models[0]
-                );
-                Ok(available_models[0].clone())
-            }
-            _ => {
-                // Multiple models: require explicit model specification
-                Err(Box::new(
-                    (
-                        StatusCode::BAD_REQUEST,
-                        format!(
-                            "Model must be specified. Available models: {}",
-                            available_models.join(", ")
-                        ),
-                    )
-                        .into_response(),
-                ))
-            }
-        }
-    }
-
-    pub fn get_router_for_model(&self, model_id: &str) -> Option<Arc<dyn RouterTrait>> {
-        let workers = self.worker_registry.get_by_model(model_id);
-
-        // Find the best router ID based on worker capabilities
-        // Priority: external (OpenAI) > grpc-pd > http-pd > grpc-regular > http-regular
-        let best_router_id = workers
-            .iter()
-            .map(|w| {
-                let is_pd = matches!(
-                    w.worker_type(),
-                    WorkerType::Prefill { .. } | WorkerType::Decode
-                );
-                let is_grpc = matches!(w.connection_mode(), ConnectionMode::Grpc { .. });
-                match (is_grpc, is_pd) {
-                    (true, true) => (3, &router_ids::GRPC_PD),
-                    (false, true) => (2, &router_ids::HTTP_PD),
-                    (true, false) => (1, &router_ids::GRPC_REGULAR),
-                    (false, false) => (0, &router_ids::HTTP_REGULAR),
-                }
-            })
-            .max_by_key(|(score, _)| *score)
-            .map(|(_, id)| id);
-
-        if let Some(router_id) = best_router_id {
-            if let Some(router) = self.routers.get(router_id) {
-                return Some(router.clone());
-            }
-        }
-
-        // Fallback to default router
-        let default_router = self
-            .default_router
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
-        if let Some(ref default_id) = *default_router {
-            self.routers.get(default_id).map(|r| r.clone())
-        } else {
-            None
-        }
     }
 
     pub fn select_router_for_request(
@@ -452,7 +364,7 @@ impl RouterTrait for RouterManager {
     async fn delete_response(&self, _headers: Option<&HeaderMap>, _response_id: &str) -> Response {
         (
             StatusCode::NOT_IMPLEMENTED,
-            "responses api not yet implemented in inference gateway mode",
+            "delete_response not yet implemented",
         )
             .into_response()
     }

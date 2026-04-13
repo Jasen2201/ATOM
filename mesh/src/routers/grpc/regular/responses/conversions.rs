@@ -156,7 +156,7 @@ pub(crate) fn responses_to_chat(req: &ResponsesRequest) -> Result<ChatCompletion
 
     // 3. Extract function tools from ResponseTools
     // Extract function tools from ResponseTools
-    let function_tools = extract_tools_from_response_tools(req.tools.as_deref(), false);
+    let function_tools = extract_tools_from_response_tools(req.tools.as_deref());
     let tools = if function_tools.is_empty() {
         None
     } else {

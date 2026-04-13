@@ -378,22 +378,9 @@ pub mod metrics_labels {
     pub const RESULT_TIMEOUT: &str = "timeout";
     pub const RESULT_NOT_FOUND: &str = "not_found";
 
-    // Discovery sources
-    pub const DISCOVERY_STATIC: &str = "static";
-
-    // Discovery registration results
-    pub const REGISTRATION_SUCCESS: &str = "success";
-    pub const REGISTRATION_FAILED: &str = "failed";
-    pub const REGISTRATION_DUPLICATE: &str = "duplicate";
-
     // Rate limit results
     pub const RATE_LIMIT_ALLOWED: &str = "allowed";
     pub const RATE_LIMIT_REJECTED: &str = "rejected";
-
-    // Circuit breaker states
-    pub const CB_CLOSED: &str = "closed";
-    pub const CB_OPEN: &str = "open";
-    pub const CB_HALF_OPEN: &str = "half_open";
 
     // Circuit breaker outcomes
     pub const CB_SUCCESS: &str = "success";

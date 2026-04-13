@@ -1,4 +1,4 @@
-//! Load balancing policies for SGLang router
+//! Load balancing policies for ATOM Mesh
 //!
 //! This module provides a unified abstraction for routing policies that work
 //! across both regular and prefill-decode (PD) routing modes.

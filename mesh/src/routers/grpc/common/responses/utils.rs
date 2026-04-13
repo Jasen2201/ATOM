@@ -39,7 +39,6 @@ pub(crate) fn validate_worker_availability(
 /// Extract function tools from ResponseTools
 pub(crate) fn extract_tools_from_response_tools(
     response_tools: Option<&[ResponseTool]>,
-    _include_mcp: bool,
 ) -> Vec<Tool> {
     let Some(tools) = response_tools else {
         return Vec::new();
