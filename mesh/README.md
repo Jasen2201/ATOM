@@ -12,8 +12,8 @@ High-performance model routing gateway for PD (Prefill-Decode) disaggregated LLM
 - **gRPC Pipeline**: Fully Rust tokenization, reasoning parsing, and tool-call execution for high-throughput serving
 - **Load Balancing**: Random, round-robin, cache-aware (prefix tree), power-of-two, prefix-hash strategies with DP-aware scheduling
 - **Reliability**: Retries with exponential backoff, per-worker circuit breakers, rate limiting, and request queuing
-- **Observability**: 40+ Prometheus metrics, OpenTelemetry tracing, structured logging
-- **Multi-Backend**: SGLang, vLLM, and TRT-LLM worker backends
+- **Observability**: 40+ Prometheus metrics, structured logging
+- **Multi-Backend**: SGLang worker backend
 
 ### Supported Endpoints
 
@@ -89,20 +89,6 @@ mesh launch \
 Supported reasoning parsers: `deepseek-r1`, `qwen3`, `qwen3-thinking`, `kimi`, `glm45`, `glm47`, `step3`, `minimax`.
 Supported tool parsers: `json`, `python`, `xml`.
 
-### Kubernetes Service Discovery
-
-```bash
-mesh launch --service-discovery \
-  --selector app=sglang-worker role=inference \
-  --service-discovery-namespace sglang-system \
-  --service-discovery-port 8000
-
-# PD mode with dedicated selectors
-mesh launch --pd-disaggregation --service-discovery \
-  --prefill-selector app=sglang component=prefill \
-  --decode-selector app=sglang component=decode
-```
-
 ## Architecture
 
 ### Control Plane
@@ -111,7 +97,6 @@ mesh launch --pd-disaggregation --service-discovery \
 - **Worker Manager**: Validates workers, discovers capabilities, tracks load
 - **Job Queue**: Async add/remove operations with status tracking via `/workers/{id}`
 - **Health Checker**: Background probes feeding circuit breakers and policies
-- **Service Discovery**: Kubernetes pod discovery with PD-aware selectors
 
 ### Data Plane
 
@@ -162,14 +147,6 @@ Default endpoint: `0.0.0.0:29000` (`--prometheus-host` / `--prometheus-port`)
 | Worker | `mesh_worker_*` | Pool size, connections, health, selection |
 | Circuit Breaker | `mesh_worker_cb_*` | State, transitions, outcomes |
 | Retry | `mesh_worker_retries_*` | Attempts, exhausted, backoff |
-| Discovery | `mesh_discovery_*` | Registrations, sync, workers discovered |
-
-### OpenTelemetry Tracing
-
-```bash
-mesh launch --worker-urls http://worker1:8000 \
-  --enable-trace --otlp-traces-endpoint localhost:4317
-```
 
 ### Logging
 
