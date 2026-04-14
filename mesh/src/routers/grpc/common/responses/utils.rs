@@ -11,7 +11,7 @@ use crate::{
         common::Tool,
         responses::{ResponseTool, ResponseToolType, ResponsesRequest, ResponsesResponse},
     },
-    routers::{error, persistence_utils::persist_conversation_items},
+    routers::persistence_utils::persist_conversation_items,
 };
 
 /// Extract function tools from ResponseTools
