@@ -37,8 +37,6 @@ High-performance model routing gateway for PD (Prefill-Decode) disaggregated LLM
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   source "$HOME/.cargo/env"
   ```
-- **Python 3.8+** (for Python bindings)
-
 ### Build from Source
 
 ```bash
@@ -51,20 +49,10 @@ cargo build --release
 
 Binaries: `target/release/atom-mesh`, `target/release/mesh`
 
-### Python Package
-
-```bash
-pip install maturin
-cd bindings/python
-maturin build --release --out dist --features vendored-openssl
-pip install --force-reinstall dist/*.whl
-```
-
 ### Verify
 
 ```bash
 ./target/release/mesh --version
-python3 -m mesh_router --version
 ```
 
 ## Usage
@@ -100,19 +88,6 @@ mesh launch \
 
 Supported reasoning parsers: `deepseek-r1`, `qwen3`, `qwen3-thinking`, `kimi`, `glm45`, `glm47`, `step3`, `minimax`.
 Supported tool parsers: `json`, `python`, `xml`.
-
-### Python Launcher
-
-```bash
-# Router only
-python3 -m mesh_router.launch_router \
-  --worker-urls http://worker1:8000 http://worker2:8000 --policy cache_aware
-
-# Router + workers (all-in-one)
-python3 -m mesh_router.launch_server \
-  --host 0.0.0.0 --port 8080 \
-  --model meta-llama/Llama-3.1-8B-Instruct --tp-size 1 --dp-size 8
-```
 
 ### Kubernetes Service Discovery
 
@@ -216,8 +191,6 @@ Clients must provide `Authorization: Bearer <key>`. Workers declared via CLI inh
 ```bash
 cargo build                              # build
 cargo test                               # run tests
-cd bindings/python && maturin develop    # python bindings (dev mode)
-pytest e2e_test/                         # e2e tests
 ```
 
 ### Pre-commit Hooks
