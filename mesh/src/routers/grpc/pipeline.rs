@@ -6,7 +6,7 @@
 use std::{sync::Arc, time::Instant};
 
 use axum::response::{IntoResponse, Response};
-use tracing::{debug, error};
+use tracing::error;
 
 use super::{
     common::stages::*,

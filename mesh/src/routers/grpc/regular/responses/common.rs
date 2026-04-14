@@ -4,8 +4,6 @@
 //! - Helper functions for tool extraction
 //! - Conversation history loading
 
-use std::sync::Arc;
-
 use axum::response::Response;
 use data_connector::{self, ConversationId, ResponseId};
 use tracing::{debug, warn};
@@ -16,49 +14,6 @@ use crate::{
     },
     routers::{error, grpc::common::responses::ResponsesContext},
 };
-
-// ============================================================================
-// Tool Extraction
-// ============================================================================
-
-/// Tool call extracted from a ChatCompletionResponse
-#[derive(Debug, Clone)]
-pub(super) struct ExtractedToolCall {
-    pub call_id: String,
-    pub name: String,
-    pub arguments: String,
-}
-
-/// Extract all tool calls from chat response (for parallel tool call support)
-pub(super) fn extract_all_tool_calls_from_chat(
-    response: &crate::protocols::chat::ChatCompletionResponse,
-) -> Vec<ExtractedToolCall> {
-    let Some(choice) = response.choices.first() else {
-        return Vec::new();
-    };
-    let message = &choice.message;
-
-    if let Some(tool_calls) = &message.tool_calls {
-        tool_calls
-            .iter()
-            .map(|tool_call| ExtractedToolCall {
-                call_id: tool_call.id.clone(),
-                name: tool_call.function.name.clone(),
-                arguments: tool_call
-                    .function
-                    .arguments
-                    .clone()
-                    .unwrap_or_else(|| "{}".to_string()),
-            })
-            .collect()
-    } else {
-        Vec::new()
-    }
-}
-
-// ============================================================================
-// Conversation History Loading
-// ============================================================================
 
 /// Load conversation history and response chains, returning modified request
 pub(super) async fn load_conversation_history(

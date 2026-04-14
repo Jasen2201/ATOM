@@ -16,7 +16,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::{signal, spawn};
-use tracing::{debug, error, info, warn, Level};
+use tracing::{debug, info, warn, Level};
 use wfaas::LoggingSubscriber;
 
 use crate::{

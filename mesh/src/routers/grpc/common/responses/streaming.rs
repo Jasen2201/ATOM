@@ -7,24 +7,18 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
 
-use crate::{
-    protocols::{
-        chat::ChatCompletionStreamResponse,
-        common::{Usage, UsageInfo},
-        event_types::{
-            ContentPartEvent, FunctionCallEvent, OutputItemEvent, OutputTextEvent,
-            ResponseEvent,
-        },
-        responses::{
-            ResponseOutputItem, ResponseStatus, ResponsesRequest, ResponsesResponse, ResponsesUsage,
-        },
+use crate::protocols::{
+    chat::ChatCompletionStreamResponse,
+    event_types::{
+        ContentPartEvent, FunctionCallEvent, OutputItemEvent, OutputTextEvent,
+        ResponseEvent,
     },
+    responses::ResponsesRequest,
 };
 
 pub(crate) enum OutputItemType {
     Message,
     FunctionCall,
-    Reasoning,
 }
 
 /// Status of an output item
@@ -389,7 +383,6 @@ impl ResponseStreamEventEmitter {
         let id_prefix = match &item_type {
             OutputItemType::FunctionCall => "fc",
             OutputItemType::Message => "msg",
-            OutputItemType::Reasoning => "rs",
         };
 
         let id = Self::generate_item_id(id_prefix);
@@ -423,83 +416,6 @@ impl ResponseStreamEventEmitter {
         {
             item.item_data = Some(item_data);
         }
-    }
-
-    /// Finalize and return the complete ResponsesResponse
-    ///
-    /// This constructs the final ResponsesResponse from all accumulated output items
-    /// for persistence. Should be called after streaming is complete.
-    pub fn finalize(&self, usage: Option<Usage>) -> ResponsesResponse {
-        // Build output array from tracked items
-        let output: Vec<ResponseOutputItem> = self
-            .output_items
-            .iter()
-            .filter_map(|item| {
-                item.item_data
-                    .as_ref()
-                    .and_then(|data| serde_json::from_value(data.clone()).ok())
-            })
-            .collect();
-
-        // Convert Usage to ResponsesUsage
-        let responses_usage = usage.map(|u| {
-            let usage_info = UsageInfo {
-                prompt_tokens: u.prompt_tokens,
-                completion_tokens: u.completion_tokens,
-                total_tokens: u.total_tokens,
-                reasoning_tokens: u
-                    .completion_tokens_details
-                    .as_ref()
-                    .and_then(|d| d.reasoning_tokens),
-                prompt_tokens_details: None,
-            };
-            ResponsesUsage::Classic(usage_info)
-        });
-
-        // Build response using builder
-        ResponsesResponse::builder(&self.response_id, &self.model)
-            .created_at(self.created_at as i64)
-            .status(ResponseStatus::Completed)
-            .output(output)
-            .maybe_copy_from_request(self.original_request.as_ref())
-            .maybe_usage(responses_usage)
-            .build()
-    }
-
-    /// Emit reasoning item wrapper events (added + done)
-    ///
-    /// Reasoning items in OpenAI format are simple placeholders emitted between tool iterations.
-    /// They don't have streaming content - just wrapper events with empty/null content.
-    pub fn emit_reasoning_item(
-        &mut self,
-        tx: &mpsc::UnboundedSender<Result<Bytes, std::io::Error>>,
-        reasoning_content: Option<String>,
-    ) -> Result<(), String> {
-        // Allocate output index and generate ID
-        let (output_index, item_id) = self.allocate_output_index(OutputItemType::Reasoning);
-
-        // Build reasoning item structure
-        let item = json!({
-            "id": item_id,
-            "type": "reasoning",
-            "summary": [],
-            "content": reasoning_content,
-            "encrypted_content": null,
-            "status": null
-        });
-
-        // Emit output_item.added
-        let added_event = self.emit_output_item_added(output_index, &item);
-        self.send_event(&added_event, tx)?;
-
-        // Immediately emit output_item.done (no streaming for reasoning)
-        let done_event = self.emit_output_item_done(output_index, &item);
-        self.send_event(&done_event, tx)?;
-
-        // Mark as completed
-        self.complete_output_item(output_index);
-
-        Ok(())
     }
 
     /// Process a chunk and emit appropriate events
@@ -701,46 +617,6 @@ impl ResponseStreamEventEmitter {
         Ok(())
     }
 
-    /// Send event and log any errors (typically client disconnect)
-    ///
-    /// This is a convenience method for streaming scenarios where client
-    /// disconnection is expected and should be logged but not fail the operation.
-    /// Returns true if sent successfully, false if client disconnected.
-    pub fn send_event_best_effort(
-        &self,
-        event: &serde_json::Value,
-        tx: &mpsc::UnboundedSender<Result<Bytes, std::io::Error>>,
-    ) -> bool {
-        match self.send_event(event, tx) {
-            Ok(()) => true,
-            Err(e) => {
-                tracing::debug!("Failed to send event (likely client disconnect): {}", e);
-                false
-            }
-        }
-    }
-
-    /// Emit an error event
-    ///
-    /// Creates and sends an error event with the given error message.
-    /// Uses OpenAI's error event format.
-    /// Use this for terminal errors that should abort the streaming response.
-    pub fn emit_error(
-        &mut self,
-        error_msg: &str,
-        error_code: Option<&str>,
-        tx: &mpsc::UnboundedSender<Result<Bytes, std::io::Error>>,
-    ) {
-        let event = json!({
-            "type": "error",
-            "code": error_code.unwrap_or("internal_error"),
-            "message": error_msg,
-            "param": null,
-            "sequence_number": self.next_sequence()
-        });
-        let sse_data = format!("data: {}\n\n", serde_json::to_string(&event).unwrap());
-        let _ = tx.send(Ok(Bytes::from(sse_data)));
-    }
 }
 
 /// Build a Server-Sent Events (SSE) response

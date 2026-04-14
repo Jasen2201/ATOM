@@ -7,34 +7,12 @@ use serde_json::to_value;
 use tracing::{debug, warn};
 
 use crate::{
-    core::WorkerRegistry,
     protocols::{
         common::Tool,
         responses::{ResponseTool, ResponseToolType, ResponsesRequest, ResponsesResponse},
     },
     routers::{error, persistence_utils::persist_conversation_items},
 };
-
-/// Validate that workers are available for the requested model
-pub(crate) fn validate_worker_availability(
-    worker_registry: &Arc<WorkerRegistry>,
-    model: &str,
-) -> Option<axum::response::Response> {
-    let available_models = worker_registry.get_models();
-
-    if !available_models.contains(&model.to_string()) {
-        return Some(error::service_unavailable(
-            "no_available_workers",
-            format!(
-                "No workers available for model '{}'. Available models: {}",
-                model,
-                available_models.join(", ")
-            ),
-        ));
-    }
-
-    None
-}
 
 /// Extract function tools from ResponseTools
 pub(crate) fn extract_tools_from_response_tools(

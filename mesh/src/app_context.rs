@@ -8,7 +8,6 @@ use data_connector::{
     MemoryConversationStorage, MemoryResponseStorage, ResponseStorage,
 };
 use reqwest::Client;
-use tracing::debug;
 
 use crate::{
     config::RouterConfig,
