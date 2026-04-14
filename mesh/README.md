@@ -190,13 +190,5 @@ Clients must provide `Authorization: Bearer <key>`. Workers declared via CLI inh
 
 ```bash
 cargo build                              # build
-cargo test                               # run tests
+cargo build --release                    # release build
 ```
-
-### Pre-commit Hooks
-
-```bash
-pip install pre-commit && pre-commit install
-```
-
-Hooks: `rustfmt`, `clippy`, `isort`, `black`, `ruff`, `codespell`.
