@@ -68,6 +68,7 @@ pub fn should_forward_request_header(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use http::HeaderValue;
 
     #[test]
     fn test_should_forward_request_header_whitelist() {
