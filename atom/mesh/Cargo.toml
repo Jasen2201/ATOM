@@ -18,10 +18,6 @@ crate-type = ["rlib"]
 name = "atom-mesh"
 path = "src/main.rs"
 
-[[bin]]
-name = "mesh"
-path = "src/main.rs"
-
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
 axum = { version = "0.8.6", features = ["macros", "ws", "tracing"] }

@@ -9,7 +9,7 @@ use mesh::{
     app_context::AppContext,
     config::RouterConfig,
     core::{
-        BasicWorkerBuilder, LoadMonitor, Worker, WorkerRegistry, WorkerType,
+        LoadMonitor, WorkerRegistry,
     },
     middleware::TokenBucket,
     policies::PolicyRegistry,

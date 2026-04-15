@@ -954,7 +954,7 @@ mod tests {
     #[test]
     fn test_convert_reqwest_error() {
         // Build a reqwest error via an invalid URL
-        let err = reqwest::Client::new()
+        let err = Client::new()
             .get("http://[invalid]")
             .build()
             .unwrap_err();
