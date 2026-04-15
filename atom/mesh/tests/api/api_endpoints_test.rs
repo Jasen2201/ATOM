@@ -3,8 +3,8 @@ use axum::{
     extract::Request,
     http::{header::CONTENT_TYPE, StatusCode},
 };
-use serde_json::json;
 use mesh::{config::RouterConfig, routers::RouterFactory};
+use serde_json::json;
 use tower::ServiceExt;
 
 use crate::common::{
@@ -1495,4 +1495,3 @@ mod request_id_tests {
         ctx.shutdown().await;
     }
 }
-

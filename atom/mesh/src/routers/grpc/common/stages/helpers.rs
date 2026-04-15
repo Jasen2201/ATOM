@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use rand::Rng;
 use mesh_grpc::sglang_proto::DisaggregatedParams;
+use rand::Rng;
 use tracing::debug;
 
 use crate::{core::Worker, routers::grpc::proto_wrapper::ProtoGenerateRequest};

@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod pd_routing_unit_tests {
-    use serde_json::json;
     use mesh::{
         app_context::AppContext,
         config::{PolicyConfig, RouterConfig, RoutingMode},
@@ -8,6 +7,7 @@ mod pd_routing_unit_tests {
         routers::{http::pd_types::PDSelectionPolicy, RouterFactory},
         tokenizer::registry::TokenizerRegistry,
     };
+    use serde_json::json;
 
     #[derive(Debug)]
     struct PDRequest {

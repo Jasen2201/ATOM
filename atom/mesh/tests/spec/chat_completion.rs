@@ -1,4 +1,3 @@
-use serde_json::json;
 use mesh::protocols::{
     chat::{ChatCompletionRequest, ChatMessage, MessageContent},
     common::{
@@ -7,6 +6,7 @@ use mesh::protocols::{
     },
     validated::Normalizable,
 };
+use serde_json::json;
 use validator::Validate;
 
 // Deprecated fields normalization tests

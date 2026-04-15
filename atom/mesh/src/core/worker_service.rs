@@ -577,10 +577,8 @@ mod tests {
     #[tokio::test]
     async fn test_create_worker_queue_not_initialized() {
         let (service, _) = make_service();
-        let config = serde_json::from_str::<WorkerConfigRequest>(
-            r#"{"url": "http://new:8000"}"#,
-        )
-        .unwrap();
+        let config =
+            serde_json::from_str::<WorkerConfigRequest>(r#"{"url": "http://new:8000"}"#).unwrap();
         let result = service.create_worker(config).await;
         match result {
             Err(WorkerServiceError::QueueNotInitialized) => {}

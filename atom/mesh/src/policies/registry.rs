@@ -336,8 +336,6 @@ impl PolicyRegistry {
             }
         }
     }
-
-
 }
 
 impl std::fmt::Debug for PolicyRegistry {

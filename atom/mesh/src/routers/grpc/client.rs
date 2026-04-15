@@ -69,12 +69,8 @@ impl GrpcClient {
         runtime_type: &str,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         match runtime_type {
-            "sglang" => Ok(Self::Sglang(
-                SglangSchedulerClient::connect(url).await?,
-            )),
-            "vllm" => Ok(Self::Vllm(
-                VllmEngineClient::connect(url).await?,
-            )),
+            "sglang" => Ok(Self::Sglang(SglangSchedulerClient::connect(url).await?)),
+            "vllm" => Ok(Self::Vllm(VllmEngineClient::connect(url).await?)),
             _ => Err(format!("Unknown runtime type: {}", runtime_type).into()),
         }
     }

@@ -102,7 +102,6 @@ pub(crate) struct PreparationOutput {
 
     /// Filtered request (if tools were filtered)
     pub filtered_request: Option<ChatCompletionRequest>,
-
 }
 
 /// Worker selection (Step 2)
@@ -173,7 +172,6 @@ pub(crate) struct ResponseState {
 
     /// Final processed response
     pub final_response: Option<FinalResponse>,
-
 }
 
 impl RequestContext {

@@ -60,8 +60,8 @@ pub(super) async fn route_responses_internal(
         .await?;
 
     // 4. Convert ChatCompletionResponse → ResponsesResponse
-    let responses_response =
-        conversions::chat_to_responses(&chat_response, &request, response_id).map_err(|e| {
+    let responses_response = conversions::chat_to_responses(&chat_response, &request, response_id)
+        .map_err(|e| {
             error!(
                 function = "route_responses_internal",
                 error = %e,

@@ -5,13 +5,13 @@ use axum::{
     extract::Request,
     http::{header::CONTENT_TYPE, StatusCode},
 };
-use reqwest::Client;
-use serde_json::json;
 use mesh::{
     app_context::AppContext,
     config::{RouterConfig, RoutingMode},
     routers::{RouterFactory, RouterTrait},
 };
+use reqwest::Client;
+use serde_json::json;
 use tower::ServiceExt;
 
 use crate::common::mock_worker::{MockWorker, MockWorkerConfig};
@@ -64,15 +64,13 @@ impl ParserTestContext {
         }
 
         // Update config with worker URLs if not already set
-        match &mut config.mode {
-            RoutingMode::Regular {
-                worker_urls: ref mut urls,
-            } => {
-                if urls.is_empty() {
-                    *urls = worker_urls.clone();
-                }
+        if let RoutingMode::Regular {
+            worker_urls: ref mut urls,
+        } = &mut config.mode
+        {
+            if urls.is_empty() {
+                *urls = worker_urls.clone();
             }
-            _ => {} // PrefillDecode mode has its own setup
         }
 
         let client = Client::builder()

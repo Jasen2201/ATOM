@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_random_default() {
-        let policy = RandomPolicy::default();
+        let policy = RandomPolicy;
         assert_eq!(policy.name(), "random");
     }
 
@@ -213,7 +213,8 @@ mod tests {
         for (i, &count) in counts.iter().enumerate() {
             assert!(
                 count > 100,
-                "Worker {i} got only {count}/{n} selections, expected ~{}", n / 5
+                "Worker {i} got only {count}/{n} selections, expected ~{}",
+                n / 5
             );
         }
     }

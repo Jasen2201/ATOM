@@ -42,11 +42,7 @@ const SUPPORTED_ITEM_TYPES: &[&str] = &[
     "custom_tool_call_output",
 ];
 
-const IMPLEMENTED_ITEM_TYPES: &[&str] = &[
-    "message",
-    "reasoning",
-    "item_reference",
-];
+const IMPLEMENTED_ITEM_TYPES: &[&str] = &["message", "reasoning", "item_reference"];
 
 // ============================================================================
 // Error Response Helpers

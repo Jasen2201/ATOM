@@ -10,8 +10,7 @@ use uuid::Uuid;
 use crate::protocols::{
     chat::ChatCompletionStreamResponse,
     event_types::{
-        ContentPartEvent, FunctionCallEvent, OutputItemEvent, OutputTextEvent,
-        ResponseEvent,
+        ContentPartEvent, FunctionCallEvent, OutputItemEvent, OutputTextEvent, ResponseEvent,
     },
     responses::ResponsesRequest,
 };
@@ -479,8 +478,12 @@ impl ResponseStreamEventEmitter {
                     while self.tool_call_items.len() <= tc_index {
                         let (output_index, item_id) =
                             self.allocate_output_index(OutputItemType::FunctionCall);
-                        self.tool_call_items
-                            .push((output_index, item_id, String::new(), String::new()));
+                        self.tool_call_items.push((
+                            output_index,
+                            item_id,
+                            String::new(),
+                            String::new(),
+                        ));
                     }
 
                     // Accumulate name from first delta
@@ -616,7 +619,6 @@ impl ResponseStreamEventEmitter {
 
         Ok(())
     }
-
 }
 
 /// Build a Server-Sent Events (SSE) response

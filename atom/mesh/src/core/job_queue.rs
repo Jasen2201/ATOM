@@ -18,9 +18,9 @@ use crate::{
     app_context::AppContext,
     config::{RouterConfig, RoutingMode},
     core::steps::{
-        create_local_worker_workflow_data,
-        create_tokenizer_workflow_data, create_worker_removal_workflow_data,
-        create_worker_update_workflow_data, TokenizerConfigRequest, TokenizerRemovalRequest,
+        create_local_worker_workflow_data, create_tokenizer_workflow_data,
+        create_worker_removal_workflow_data, create_worker_update_workflow_data,
+        TokenizerConfigRequest, TokenizerRemovalRequest,
     },
     protocols::worker_spec::{JobStatus, WorkerConfigRequest, WorkerUpdateRequest},
 };
@@ -278,16 +278,11 @@ impl JobQueue {
                 let timeout_duration =
                     Duration::from_secs(context.router_config.worker_startup_timeout_secs + 30);
 
-                let workflow_data = create_local_worker_workflow_data(
-                    (**config).clone(),
-                    Arc::clone(context),
-                );
+                let workflow_data =
+                    create_local_worker_workflow_data((**config).clone(), Arc::clone(context));
                 let instance_id = engines
                     .local_worker
-                    .start_workflow(
-                        WorkflowId::new("local_worker_registration"),
-                        workflow_data,
-                    )
+                    .start_workflow(WorkflowId::new("local_worker_registration"), workflow_data)
                     .await
                     .map_err(|e| {
                         format!(

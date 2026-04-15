@@ -20,7 +20,7 @@ use crate::{
     config::types::RetryConfig,
     core::{
         is_retryable_status, HashRing, RetryExecutor, Worker, WorkerLoadGuard, WorkerRegistry,
-        WorkerType, UNKNOWN_MODEL_ID,
+        UNKNOWN_MODEL_ID,
     },
     observability::{
         events::{self, Event},
@@ -695,42 +695,17 @@ impl PDRouter {
         model_id: Option<&str>,
         headers: Option<&HeaderMap>,
     ) -> Result<(Arc<dyn Worker>, Arc<dyn Worker>), String> {
-        let effective_model_id: Option<&str> = None;
+        debug!("Selecting PD pair: model_id={:?}", model_id);
 
-        debug!(
-            "Selecting PD pair: model_id={:?}, effective_model_id={:?}",
-            model_id, effective_model_id
-        );
+        let prefill_workers = self.worker_registry.get_prefill_workers();
 
-        let prefill_workers = if let Some(model) = effective_model_id {
-            self.worker_registry
-                .get_by_model(model)
-                .iter()
-                .filter(|w| matches!(w.worker_type(), WorkerType::Prefill { .. }))
-                .cloned()
-                .collect()
-        } else {
-            self.worker_registry.get_prefill_workers()
-        };
-
-        let decode_workers = if let Some(model) = effective_model_id {
-            self.worker_registry
-                .get_by_model(model)
-                .iter()
-                .filter(|w| matches!(w.worker_type(), WorkerType::Decode))
-                .cloned()
-                .collect()
-        } else {
-            self.worker_registry.get_decode_workers()
-        };
+        let decode_workers = self.worker_registry.get_decode_workers();
 
         let prefill_policy = self.policy_registry.get_prefill_policy();
         let decode_policy = self.policy_registry.get_decode_policy();
 
         // Get cached hash ring for consistent hashing
-        let hash_ring = self
-            .worker_registry
-            .get_hash_ring(effective_model_id.unwrap_or(UNKNOWN_MODEL_ID));
+        let hash_ring = self.worker_registry.get_hash_ring(UNKNOWN_MODEL_ID);
 
         let prefill = Self::pick_worker_by_policy_arc(
             &prefill_workers,
@@ -1562,11 +1537,8 @@ mod tests {
                 },
                 true,
             );
-            let decode = create_test_worker(
-                format!("http://decode-{}", i),
-                WorkerType::Decode,
-                true,
-            );
+            let decode =
+                create_test_worker(format!("http://decode-{}", i), WorkerType::Decode, true);
             router.worker_registry.register(Arc::from(prefill));
             router.worker_registry.register(Arc::from(decode));
         }
@@ -1714,9 +1686,9 @@ mod tests {
     #[test]
     fn test_policies_need_request_text_cache_aware() {
         let router = create_test_pd_router();
-        router.policy_registry.set_prefill_policy(Arc::new(
-            crate::policies::CacheAwarePolicy::new(),
-        ));
+        router
+            .policy_registry
+            .set_prefill_policy(Arc::new(crate::policies::CacheAwarePolicy::new()));
         assert!(router.policies_need_request_text());
     }
 

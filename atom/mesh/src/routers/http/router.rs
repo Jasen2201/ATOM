@@ -128,11 +128,9 @@ impl Router {
         text: Option<&str>,
         headers: Option<&HeaderMap>,
     ) -> Option<Arc<dyn Worker>> {
-        let effective_model_id: Option<&str> = None;
-
         // Get workers for the specified model O(1), filtered by connection mode
         let workers = self.worker_registry.get_workers_filtered(
-            effective_model_id,
+            None,
             Some(WorkerType::Regular),
             Some(ConnectionMode::Http),
             None,  // any runtime type
@@ -155,9 +153,7 @@ impl Router {
         };
 
         // Get cached hash ring for consistent hashing (O(log n) lookup)
-        let hash_ring = self
-            .worker_registry
-            .get_hash_ring(effective_model_id.unwrap_or(UNKNOWN_MODEL_ID));
+        let hash_ring = self.worker_registry.get_hash_ring(UNKNOWN_MODEL_ID);
 
         let idx = policy
             .select_worker(
@@ -627,7 +623,6 @@ impl Router {
             response
         }
     }
-
 }
 
 fn convert_reqwest_error(e: reqwest::Error) -> Response {
@@ -954,10 +949,7 @@ mod tests {
     #[test]
     fn test_convert_reqwest_error() {
         // Build a reqwest error via an invalid URL
-        let err = Client::new()
-            .get("http://[invalid]")
-            .build()
-            .unwrap_err();
+        let err = Client::new().get("http://[invalid]").build().unwrap_err();
         let response = convert_reqwest_error(err);
         // Should produce an error response
         let status = response.status();

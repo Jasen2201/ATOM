@@ -395,7 +395,6 @@ impl AppContextBuilder {
         self.workflow_engines = Some(Arc::new(OnceLock::new()));
         self
     }
-
 }
 
 impl Default for AppContextBuilder {

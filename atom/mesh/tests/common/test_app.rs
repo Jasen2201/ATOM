@@ -4,20 +4,17 @@ use axum::Router;
 use data_connector::{
     MemoryConversationItemStorage, MemoryConversationStorage, MemoryResponseStorage,
 };
-use reqwest::Client;
 use mesh::{
     app_context::AppContext,
     config::RouterConfig,
-    core::{
-        LoadMonitor, WorkerRegistry,
-    },
+    core::{LoadMonitor, WorkerRegistry},
     middleware::TokenBucket,
     policies::PolicyRegistry,
     routers::RouterTrait,
     server::{build_app, AppState},
     tokenizer::registry::TokenizerRegistry,
 };
-
+use reqwest::Client;
 
 /// Create a test Axum application using the actual server's build_app function
 #[allow(dead_code)]

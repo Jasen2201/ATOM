@@ -12,8 +12,8 @@ use axum::{
     extract::Request,
     http::{header::CONTENT_TYPE, StatusCode},
 };
-use serde_json::json;
 use mesh::config::{CircuitBreakerConfig, RetryConfig};
+use serde_json::json;
 use tower::ServiceExt;
 
 use crate::common::{AppTestContext, TestRouterConfig, TestWorkerConfig};

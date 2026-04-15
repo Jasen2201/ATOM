@@ -85,8 +85,7 @@ mod tests {
             max_tree_size: 1000,
         });
         assert_eq!(policy.name(), "cache_aware");
-
-}
+    }
 
     #[tokio::test]
     async fn test_create_by_name() {

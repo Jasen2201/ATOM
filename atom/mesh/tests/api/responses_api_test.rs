@@ -13,7 +13,6 @@ use mesh::{
     routers::{conversations, RouterFactory},
 };
 
-
 #[tokio::test]
 async fn test_conversations_crud_basic() {
     let router_cfg = RouterConfig::builder()
@@ -296,7 +295,6 @@ fn test_json_serialization() {
     assert_eq!(parsed.stream, Some(true));
     assert_eq!(parsed.tools.as_ref().map(|t| t.len()), Some(1));
 }
-
 
 #[tokio::test]
 async fn test_conversation_items_create_and_get() {

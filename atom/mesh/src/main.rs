@@ -1,8 +1,7 @@
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use mesh::{
     config::{
-        CircuitBreakerConfig, ConfigResult, HealthCheckConfig,
-        MetricsConfig, PolicyConfig,
+        CircuitBreakerConfig, ConfigResult, HealthCheckConfig, MetricsConfig, PolicyConfig,
         RetryConfig, RouterConfig, RoutingMode, TokenizerCacheConfig,
     },
     core::ConnectionMode,

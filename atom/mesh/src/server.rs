@@ -44,12 +44,7 @@ use crate::{
         validated::ValidatedJson,
         worker_spec::{WorkerConfigRequest, WorkerUpdateRequest},
     },
-    routers::{
-        conversations,
-        parse,
-        router_manager::RouterManager,
-        tokenize, RouterTrait,
-    },
+    routers::{conversations, parse, router_manager::RouterManager, tokenize, RouterTrait},
     tokenizer::TokenizerRegistry,
 };
 #[derive(Clone)]
@@ -769,11 +764,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         ]
     });
 
-    let app = build_app(
-        app_state,
-        config.max_payload_size,
-        request_id_headers,
-    );
+    let app = build_app(app_state, config.max_payload_size, request_id_headers);
 
     // TcpListener::bind accepts &str and handles IPv4/IPv6 via ToSocketAddrs
     let bind_addr = format!("{}:{}", config.host, config.port);
@@ -830,4 +821,3 @@ async fn shutdown_signal() {
         },
     }
 }
-

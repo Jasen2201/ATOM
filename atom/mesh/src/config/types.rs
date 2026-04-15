@@ -392,7 +392,6 @@ impl RouterConfig {
         }
         cfg
     }
-
 }
 
 #[cfg(test)]

@@ -308,7 +308,7 @@ pub fn create_logging_layer() -> TraceLayer<
     TraceLayer::new_for_http()
         .make_span_with(RequestSpan)
         .on_request(RequestLogger)
-        .on_response(ResponseLogger::default())
+        .on_response(ResponseLogger)
 }
 
 /// Request queue entry

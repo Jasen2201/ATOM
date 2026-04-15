@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum::{
-    http::HeaderMap,
-    response::Response,
-};
+use axum::{http::HeaderMap, response::Response};
 use tracing::debug;
 
 use super::{
@@ -218,7 +215,6 @@ impl GrpcRouter {
         )
         .await
     }
-
 }
 
 impl std::fmt::Debug for GrpcRouter {

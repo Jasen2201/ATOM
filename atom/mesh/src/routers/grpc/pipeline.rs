@@ -11,11 +11,7 @@ use tracing::error;
 use super::{
     common::stages::*,
     context::*,
-    regular::{
-        processor,
-        stages::*,
-        streaming,
-    },
+    regular::{processor, stages::*, streaming},
     utils::error_type_from_status,
 };
 use crate::{
@@ -404,5 +400,4 @@ impl RequestPipeline {
             }
         }
     }
-
 }

@@ -1,5 +1,5 @@
-use serde_json::json;
 use mesh::protocols::chat::{ChatMessage, MessageContent};
+use serde_json::json;
 
 #[test]
 fn test_chat_message_tagged_by_role_system() {

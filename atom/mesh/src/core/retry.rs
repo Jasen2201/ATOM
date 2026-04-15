@@ -331,10 +331,7 @@ mod tests {
             StatusCode::GATEWAY_TIMEOUT,
         ];
         for status in retryable {
-            assert!(
-                is_retryable_status(status),
-                "{status} should be retryable"
-            );
+            assert!(is_retryable_status(status), "{status} should be retryable");
         }
     }
 

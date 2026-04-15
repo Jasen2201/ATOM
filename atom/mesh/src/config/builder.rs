@@ -1,6 +1,5 @@
 use super::{
-    CircuitBreakerConfig, ConfigResult, HealthCheckConfig,
-    MetricsConfig, PolicyConfig,
+    CircuitBreakerConfig, ConfigResult, HealthCheckConfig, MetricsConfig, PolicyConfig,
     RetryConfig, RouterConfig, RoutingMode, TokenizerCacheConfig,
 };
 use crate::core::ConnectionMode;
@@ -359,7 +358,6 @@ impl RouterConfigBuilder {
         self
     }
 
-
     pub fn maybe_metrics(mut self, metrics: Option<MetricsConfig>) -> Self {
         self.config.metrics = metrics;
         self
@@ -643,7 +641,9 @@ mod tests {
 
     #[test]
     fn test_builder_http_connection() {
-        let config = RouterConfigBuilder::new().http_connection().build_unchecked();
+        let config = RouterConfigBuilder::new()
+            .http_connection()
+            .build_unchecked();
         assert!(matches!(config.connection_mode, ConnectionMode::Http));
     }
 
@@ -1017,7 +1017,9 @@ mod tests {
 
     #[test]
     fn test_builder_build_with_validation_false() {
-        let result = RouterConfigBuilder::new().port(0).build_with_validation(false);
+        let result = RouterConfigBuilder::new()
+            .port(0)
+            .build_with_validation(false);
         assert!(result.is_ok());
     }
 
@@ -1053,10 +1055,7 @@ mod tests {
                     ("http://p1:8000".to_string(), Some(8001)),
                     ("http://p2:8000".to_string(), None),
                 ],
-                vec![
-                    "http://d1:8000".to_string(),
-                    "http://d2:8000".to_string(),
-                ],
+                vec!["http://d1:8000".to_string(), "http://d2:8000".to_string()],
                 Some(PolicyConfig::RoundRobin),
                 Some(PolicyConfig::Random),
             )

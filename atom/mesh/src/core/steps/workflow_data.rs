@@ -226,5 +226,3 @@ impl WorkerUpdateWorkflowData {
         Ok(())
     }
 }
-
-

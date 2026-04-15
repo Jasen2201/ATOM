@@ -735,13 +735,8 @@ mod tests {
 
     #[test]
     fn test_dp_aware_worker_new_with_type() {
-        let worker = DPAwareWorkerBuilder::new_with_type(
-            "http://w:8000",
-            0,
-            4,
-            WorkerType::Decode,
-        )
-        .build();
+        let worker =
+            DPAwareWorkerBuilder::new_with_type("http://w:8000", 0, 4, WorkerType::Decode).build();
 
         assert_eq!(worker.url(), "http://w:8000@0");
         assert_eq!(worker.dp_rank(), Some(0));

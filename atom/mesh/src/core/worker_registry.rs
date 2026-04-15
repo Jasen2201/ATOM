@@ -918,7 +918,13 @@ mod tests {
     fn test_registry_get_workers_filtered() {
         let registry = WorkerRegistry::new();
 
-        let w1 = make_worker("http://p1:8000", WorkerType::Prefill { bootstrap_port: None }, "llama");
+        let w1 = make_worker(
+            "http://p1:8000",
+            WorkerType::Prefill {
+                bootstrap_port: None,
+            },
+            "llama",
+        );
         let w2 = make_worker("http://d1:8000", WorkerType::Decode, "llama");
         let w3 = make_worker("http://r1:8000", WorkerType::Regular, "gpt-4");
 
@@ -933,7 +939,9 @@ mod tests {
         // Filter by type
         let prefill = registry.get_workers_filtered(
             None,
-            Some(WorkerType::Prefill { bootstrap_port: None }),
+            Some(WorkerType::Prefill {
+                bootstrap_port: None,
+            }),
             None,
             None,
             false,
@@ -941,7 +949,10 @@ mod tests {
         assert_eq!(prefill.len(), 1);
 
         // Filter healthy only
-        registry.get_by_url("http://p1:8000").unwrap().set_healthy(false);
+        registry
+            .get_by_url("http://p1:8000")
+            .unwrap()
+            .set_healthy(false);
         let healthy = registry.get_workers_filtered(None, None, None, None, true);
         assert_eq!(healthy.len(), 2); // p1 is unhealthy
 
@@ -957,7 +968,13 @@ mod tests {
 
         registry.register(make_worker("http://r1:8000", WorkerType::Regular, "m"));
         registry.register(make_worker("http://r2:8000", WorkerType::Regular, "m"));
-        registry.register(make_worker("http://p1:8000", WorkerType::Prefill { bootstrap_port: None }, "m"));
+        registry.register(make_worker(
+            "http://p1:8000",
+            WorkerType::Prefill {
+                bootstrap_port: None,
+            },
+            "m",
+        ));
 
         let (regular, pd) = registry.get_worker_distribution();
         assert_eq!(regular, 2);
@@ -1027,7 +1044,10 @@ mod tests {
         assert_eq!(stats.unhealthy_workers, 0);
 
         // Mark one unhealthy
-        registry.get_by_url("http://w1:8000").unwrap().set_healthy(false);
+        registry
+            .get_by_url("http://w1:8000")
+            .unwrap()
+            .set_healthy(false);
         let stats = registry.stats();
         assert_eq!(stats.healthy_workers, 1);
         assert_eq!(stats.unhealthy_workers, 1);

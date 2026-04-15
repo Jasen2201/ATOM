@@ -17,14 +17,10 @@ use std::{
 use data_connector::{
     MemoryConversationItemStorage, MemoryConversationStorage, MemoryResponseStorage,
 };
-use mock_worker::{MockWorker, MockWorkerConfig};
-use serde_json::json;
 use mesh::{
     app_context::AppContext,
     config::{RouterConfig, RoutingMode},
-    core::{
-        Job, LoadMonitor, WorkerRegistry,
-    },
+    core::{Job, LoadMonitor, WorkerRegistry},
     middleware::TokenBucket,
     policies::PolicyRegistry,
     protocols::common::{Function, Tool},
@@ -33,6 +29,8 @@ use mesh::{
     tokenizer::registry::TokenizerRegistry,
     tool_parser::ParserFactory as ToolParserFactory,
 };
+use mock_worker::{MockWorker, MockWorkerConfig};
+use serde_json::json;
 #[allow(unused_imports)]
 pub use test_config::{TestRouterConfig, TestWorkerConfig};
 
@@ -198,15 +196,13 @@ impl AppTestContext {
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         }
 
-        match &mut config.mode {
-            RoutingMode::Regular {
-                worker_urls: ref mut urls,
-            } => {
-                if urls.is_empty() {
-                    *urls = worker_urls.clone();
-                }
+        if let RoutingMode::Regular {
+            worker_urls: ref mut urls,
+        } = &mut config.mode
+        {
+            if urls.is_empty() {
+                *urls = worker_urls.clone();
             }
-            _ => {}
         }
 
         let app_context = create_test_context(config.clone()).await;
@@ -315,7 +311,6 @@ pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
     let worker_job_queue = Arc::new(OnceLock::new());
     let workflow_engines = Arc::new(OnceLock::new());
 
-
     let app_context = Arc::new(
         AppContext::builder()
             .router_config(config.clone())
@@ -332,7 +327,6 @@ pub async fn create_test_context(config: RouterConfig) -> Arc<AppContext> {
             .load_monitor(load_monitor)
             .worker_job_queue(worker_job_queue)
             .workflow_engines(workflow_engines)
-
             .build()
             .unwrap(),
     );
@@ -397,7 +391,6 @@ pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppCo
     let worker_job_queue = Arc::new(OnceLock::new());
     let workflow_engines = Arc::new(OnceLock::new());
 
-
     // Initialize parser factories
     let reasoning_parser_factory = Some(ReasoningParserFactory::new());
     let tool_parser_factory = Some(ToolParserFactory::new());
@@ -418,7 +411,6 @@ pub async fn create_test_context_with_parsers(config: RouterConfig) -> Arc<AppCo
             .load_monitor(load_monitor)
             .worker_job_queue(worker_job_queue)
             .workflow_engines(workflow_engines)
-
             .build()
             .unwrap(),
     );

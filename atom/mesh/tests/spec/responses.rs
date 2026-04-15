@@ -1,4 +1,3 @@
-use serde_json::json;
 use mesh::protocols::{
     common::{Function, StringOrArray, ToolChoice, ToolChoiceValue},
     responses::{
@@ -6,6 +5,7 @@ use mesh::protocols::{
         ResponsesRequest, StringOrContentParts, TextConfig, TextFormat,
     },
 };
+use serde_json::json;
 use validator::Validate;
 
 /// Test that valid conversation IDs pass validation

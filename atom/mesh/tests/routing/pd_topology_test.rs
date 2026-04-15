@@ -9,8 +9,8 @@ use axum::{
     http::{header::CONTENT_TYPE, StatusCode},
 };
 use http_body_util::BodyExt;
-use serde_json::json;
 use mesh::config::RouterConfig;
+use serde_json::json;
 use tower::ServiceExt;
 
 use crate::common::{AppTestContext, TestWorkerConfig};
@@ -20,11 +20,7 @@ fn pick_port() -> u16 {
 }
 
 /// Build a PD mode config from pre-assigned ports.
-fn pd_config(
-    prefill_ports: &[u16],
-    decode_ports: &[u16],
-    policy: &str,
-) -> RouterConfig {
+fn pd_config(prefill_ports: &[u16], decode_ports: &[u16], policy: &str) -> RouterConfig {
     let prefill_urls: Vec<(String, Option<u16>)> = prefill_ports
         .iter()
         .map(|p| (format!("http://127.0.0.1:{}", p), None))
@@ -461,7 +457,10 @@ mod test_2p2d {
                 success += 1;
             }
         }
-        assert_eq!(success, 10, "All requests should succeed with random policy");
+        assert_eq!(
+            success, 10,
+            "All requests should succeed with random policy"
+        );
 
         ctx.shutdown().await;
     }
@@ -676,11 +675,9 @@ mod test_regular {
         let ports = [pick_port()];
 
         let config = regular_config(&ports);
-        let ctx = AppTestContext::new_with_config(
-            config,
-            vec![TestWorkerConfig::healthy(ports[0])],
-        )
-        .await;
+        let ctx =
+            AppTestContext::new_with_config(config, vec![TestWorkerConfig::healthy(ports[0])])
+                .await;
 
         let app = ctx.create_app().await;
         let resp = app.oneshot(models_request()).await.unwrap();

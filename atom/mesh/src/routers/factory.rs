@@ -110,5 +110,4 @@ impl RouterFactory {
 
         Ok(Box::new(router))
     }
-
 }

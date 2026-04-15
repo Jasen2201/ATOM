@@ -26,10 +26,7 @@ use uuid::Uuid;
 use super::{common::load_conversation_history, conversions, non_streaming, streaming};
 use crate::{
     protocols::responses::ResponsesRequest,
-    routers::{
-        error,
-        grpc::common::responses::ResponsesContext,
-    },
+    routers::{error, grpc::common::responses::ResponsesContext},
 };
 
 /// Main handler for POST /v1/responses

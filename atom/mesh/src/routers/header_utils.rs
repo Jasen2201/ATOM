@@ -1,8 +1,4 @@
-use axum::{
-    body::Body,
-    extract::Request,
-    http::HeaderMap,
-};
+use axum::{body::Body, extract::Request, http::HeaderMap};
 /// Copy request headers to a Vec of name-value string pairs
 /// Used for forwarding headers to backend workers
 pub fn copy_request_headers(req: &Request<Body>) -> Vec<(String, String)> {
@@ -122,10 +118,7 @@ mod tests {
             "host",
         ];
         for h in hop_by_hop {
-            assert!(
-                !should_forward_header_no_alloc(h),
-                "{h} should be filtered"
-            );
+            assert!(!should_forward_header_no_alloc(h), "{h} should be filtered");
         }
     }
 
@@ -151,10 +144,7 @@ mod tests {
             "x-custom-header",
         ];
         for h in forward {
-            assert!(
-                should_forward_header_no_alloc(h),
-                "{h} should be forwarded"
-            );
+            assert!(should_forward_header_no_alloc(h), "{h} should be forwarded");
         }
     }
 
@@ -166,10 +156,7 @@ mod tests {
         input.insert("content-type", HeaderValue::from_static("application/json"));
         input.insert("connection", HeaderValue::from_static("keep-alive"));
         input.insert("x-request-id", HeaderValue::from_static("abc123"));
-        input.insert(
-            "transfer-encoding",
-            HeaderValue::from_static("chunked"),
-        );
+        input.insert("transfer-encoding", HeaderValue::from_static("chunked"));
 
         let result = preserve_response_headers(&input);
         assert!(result.contains_key("content-type"));
@@ -205,7 +192,9 @@ mod tests {
         let request = req.body(Body::empty()).unwrap();
 
         let copied = copy_request_headers(&request);
-        assert!(copied.iter().any(|(k, v)| k == "content-type" && v == "application/json"));
+        assert!(copied
+            .iter()
+            .any(|(k, v)| k == "content-type" && v == "application/json"));
         assert!(copied.iter().any(|(k, v)| k == "x-custom" && v == "value"));
     }
 

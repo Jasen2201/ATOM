@@ -6,11 +6,7 @@
 
 use std::sync::Arc;
 
-use axum::{
-    body::Body,
-    http,
-    response::Response,
-};
+use axum::{body::Body, http, response::Response};
 use bytes::Bytes;
 use data_connector::{ConversationItemStorage, ConversationStorage, ResponseStorage};
 use futures_util::StreamExt;
@@ -29,8 +25,7 @@ use crate::{
         },
     },
     routers::grpc::common::responses::{
-        build_sse_response, persist_response_if_needed,
-        streaming::ResponseStreamEventEmitter,
+        build_sse_response, persist_response_if_needed, streaming::ResponseStreamEventEmitter,
         ResponsesContext,
     },
 };
@@ -386,4 +381,3 @@ impl StreamingResponseAccumulator {
             .build()
     }
 }
-

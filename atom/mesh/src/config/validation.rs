@@ -359,7 +359,6 @@ impl ConfigValidator {
                         });
                     }
                 }
-
             }
         }
 
@@ -646,7 +645,6 @@ mod tests {
 
         // Should pass validation even with empty URLs
         assert!(ConfigValidator::validate(&config).is_ok());
-
     }
 
     #[test]
