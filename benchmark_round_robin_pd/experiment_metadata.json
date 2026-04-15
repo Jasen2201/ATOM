@@ -1,0 +1,33 @@
+{
+    "cmd": "/opt/venv/bin/genai-bench --num-concurrency 32 --batch-size 1 --api-backend openai --api-base http://127.0.0.1:41129 --api-key dummy-token --api-model-name /it-share/models/meta-llama/Llama-3.1-8B-Instruct --model-tokenizer /it-share/models/meta-llama/Llama-3.1-8B-Instruct --task text-to-text --traffic-scenario D(4000,100) --max-requests-per-run 160 --max-time-per-run 3 --experiment-folder-name benchmark_round_robin_pd --experiment-base-dir /workspace/ATOM_MESH --gcp-location us-central1 --azure-api-version 2024-02-01 --profile DEFAULT --config-file ~/.oci/config --auth user_principal --metrics-time-unit s --model Llama-3.1-8B-Instruct --iteration-type num_concurrency --master-port 5557 --storage-provider oci",
+    "benchmark_version": "0.0.4",
+    "api_backend": "openai",
+    "auth_config": {
+        "auth_type": "api_key",
+        "has_api_key": true
+    },
+    "api_model_name": "/it-share/models/meta-llama/Llama-3.1-8B-Instruct",
+    "server_model_tokenizer": "/it-share/models/meta-llama/Llama-3.1-8B-Instruct",
+    "model": "Llama-3.1-8B-Instruct",
+    "task": "text-to-text",
+    "num_concurrency": [
+        32
+    ],
+    "batch_size": [
+        1
+    ],
+    "iteration_type": "num_concurrency",
+    "traffic_scenario": [
+        "D(4000,100)"
+    ],
+    "additional_request_params": {},
+    "server_engine": null,
+    "server_version": null,
+    "server_gpu_type": null,
+    "server_gpu_count": null,
+    "max_time_per_run_s": 180,
+    "max_requests_per_run": 160,
+    "experiment_folder_name": "/workspace/ATOM_MESH/benchmark_round_robin_pd",
+    "metrics_time_unit": "s",
+    "dataset_path": "None"
+}
