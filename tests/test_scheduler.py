@@ -2016,6 +2016,28 @@ class TestPostprocess:
         assert sched.is_finished()
         connector.request_finished.assert_called_once_with(seq)
 
+    def test_legacy_producer_keeps_its_send_completion_release_path(self, seq_factory):
+        sched = Scheduler(MockConfig())
+        seq = self._prefill(sched, seq_factory([1, 2, 3, 4]))
+        # No ownership hook: this backend has not migrated to the new protocol.
+        sched.kv_connector = SimpleNamespace(
+            is_producer=True, request_finished=mock.Mock()
+        )
+        assert sched._is_preemptable(seq)
+        sched.postprocess([seq], self._output(seq.id, [2]))
+        assert seq.id in sched.deferred_free_blocks
+        assert seq.block_table
+        sched._update_from_kv_xfer_finished(
+            KVConnectorOutput(finished_sending=None, finished_saving={str(seq.id)})
+        )
+        assert seq.block_table
+        sched._update_from_kv_xfer_finished(
+            KVConnectorOutput(finished_sending={str(seq.id)})
+        )
+        assert not seq.block_table
+        assert sched.is_finished()
+        sched.kv_connector.request_finished.assert_called_once_with(seq)
+
     def test_preemption_discards_send_completion_for_the_old_allocation(
         self, scheduler, seq_factory
     ):

@@ -890,6 +890,8 @@ class Scheduler:
             return None
 
     def _connector_should_defer_free(self, seq: Sequence) -> bool:
+        if getattr(seq, "_awaiting_legacy_kv_send", False):
+            return True
         callback = getattr(self.kv_connector, "should_defer_free", None)
         return bool(callable(callback) and callback(seq))
 
@@ -2889,11 +2891,6 @@ class Scheduler:
                 )
             num_tokens = seq.num_tokens - num_placeholder_width - num_rejected
             leave_reason = None
-            # Client disconnected -> finish now via the normal stop path (frees
-            # KV blocks, emits a finished RequestOutput). A natural stop below
-            # may still overwrite the reason; either way the seq terminates.
-            if seq.status == SequenceStatus.ABORTED:
-                leave_reason = "aborted"
             # MTP edge case: `rejection_sampler` does NOT inspect EOS — it
             # only compares draft vs target_argmax for acceptance. So when
             # the verified token is EOS the kernel still emits 1+ accepted
@@ -2953,6 +2950,12 @@ class Scheduler:
                 if stop_at_idx is None or max_stop_at_idx < stop_at_idx:
                     stop_at_idx = max_stop_at_idx
                     leave_reason = "max_tokens"
+
+            # Keep truncation at the natural stop/cap, but preserve cancellation
+            # for connector finalization: an aborted producer must not publish
+            # a send that the disconnected peer will never complete.
+            if seq.status == SequenceStatus.ABORTED:
+                leave_reason = "aborted"
 
             # Drop accepted-draft tokens past the stop position (MTP only —
             # for non-spec the sampler emits exactly 1 token so this is a
@@ -3082,6 +3085,12 @@ class Scheduler:
                 seq.is_partial_prefill = False
                 self._partial_prefill_count -= 1
             if self.kv_connector is not None:
+                # Preserve standalone producers that have not adopted the
+                # ownership contract. Composite producers must implement it.
+                if self._connector_flag("is_producer") and not callable(
+                    getattr(self.kv_connector, "should_defer_free", None)
+                ):
+                    seq._awaiting_legacy_kv_send = True
                 if self._connector_should_defer_free(seq):
                     protected = self._connector_protected_block_ids(seq)
                     if protected is not None:
@@ -3417,11 +3426,16 @@ class Scheduler:
             self.failed_recving_kv_req_ids.append(req_id)
 
         finished_saving = kv_connector_output.finished_saving or ()
-        completed_requests = set(kv_connector_output.finished_sending or ())
+        finished_sending = kv_connector_output.finished_sending or ()
+        completed_requests = set(finished_sending)
         completed_requests.update(finished_saving)
         for req_id in completed_requests:
             seq = self._deferred_sequence(req_id)
             if seq is not None:
+                if req_id in finished_sending and getattr(
+                    seq, "_awaiting_legacy_kv_send", False
+                ):
+                    del seq._awaiting_legacy_kv_send
                 self._maybe_release_deferred(seq)
         # Early-release requests are never in `deferred_free_blocks` (they were
         # fully torn down, minus their lease, at finish time), so the loops

@@ -75,7 +75,15 @@ class KVConnectorBase(ABC):
 
 
 class KVConnectorSchedulerBase(ABC):
-    """Scheduler-side KV connector interface."""
+    """Scheduler-side KV connector interface.
+
+    Async connectors using the ownership protocol implement
+    ``should_defer_free(seq)`` for both request finish and preemption. Include
+    reads, writes, and pending work that cannot be cancelled on source release.
+    MultiConnector requires this predicate from every producer child. Legacy
+    standalone producers retain their send-completion release path until they
+    migrate to the protocol.
+    """
 
     is_producer: bool
 
@@ -101,16 +109,6 @@ class KVConnectorSchedulerBase(ABC):
     @abstractmethod
     def request_finished(self, seq: Any) -> None:
         """Populate KV transfer output metadata when a request completes."""
-        ...
-
-    @abstractmethod
-    def should_defer_free(self, seq: Any) -> bool:
-        """Whether this connector still needs the sequence's allocation.
-
-        Applies both at request finish and before preemption. Include reads,
-        writes, and pending work that cannot be cancelled on source release.
-        A composite must retain the allocation while ANY child needs it.
-        """
         ...
 
     def process_completions(self, output: KVConnectorOutput) -> KVConnectorOutput:

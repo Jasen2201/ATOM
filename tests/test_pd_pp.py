@@ -770,6 +770,7 @@ def _fake_head(batch):
         scheduler=MagicMock(),
         _poll_kv_transfer_progress=MagicMock(),
         _dispatch_idle_offload_work=MagicMock(),
+        _advance_idle_kv_transfer=MagicMock(),
     )
     head.scheduler.schedule.side_effect = [(batch, {}), None]
     head.scheduler.take_rejected.return_value = None
@@ -810,7 +811,30 @@ def test_pp_head_skips_empty_meta_of_request_less_batch():
 
 def test_pp_head_dispatches_idle_offload_without_a_batch():
     head = _fake_head(None)
-    head._dispatch_idle_offload_work.assert_called_once()
+    head._advance_idle_kv_transfer.assert_called_once()
+
+
+@pytest.mark.parametrize("result", [None, (None, {})])
+def test_pp_head_throttles_idle_suffix_dispatch(monkeypatch, result):
+    from atom.model_engine.engine_core import EngineCore, KV_IDLE_DRAIN_INTERVAL_S
+
+    cls = _pp_engine_core_cls()
+    head = _fake_head(None)
+    head._dispatch_idle_offload_work.reset_mock()
+    head.scheduler.schedule.side_effect = None
+    head.scheduler.schedule.return_value = result
+    head._next_idle_kv_drain = 0.0
+    head._advance_idle_kv_transfer = EngineCore._advance_idle_kv_transfer.__get__(head)
+    clock = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: clock[0])
+
+    cls._pp_head_step(head)
+    cls._pp_head_step(head)
+    head._dispatch_idle_offload_work.assert_called_once_with(dispatch_new=True)
+
+    clock[0] += KV_IDLE_DRAIN_INTERVAL_S
+    cls._pp_head_step(head)
+    assert head._dispatch_idle_offload_work.call_count == 2
 
 
 def test_pp_head_forwards_normal_batch_with_meta():
@@ -823,7 +847,7 @@ def test_pp_head_forwards_normal_batch_with_meta():
     assert _dispatched_metas(head) == [meta]
     head.pp_transport.send_metadata.assert_called_once_with(batch)
     head.runner_mgr.call_func.assert_any_call("forward", batch, wait_out=True)
-    head._dispatch_idle_offload_work.assert_called_once()  # Next schedule is None.
+    head._advance_idle_kv_transfer.assert_called_once()  # Next schedule is None.
 
 
 def test_pp_downstream_skips_forward_for_request_less_batch():

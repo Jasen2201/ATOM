@@ -239,8 +239,8 @@ decisions go to the winner; source retention still queries every child.
 
 ## 4. Block-free correctness: independent send/save progress
 
-Each scheduler-side connector owns its source lifetime. Mooncake and MoRIIO
-share `PDSchedulerBase`: allocation records a send plan only for
+Mooncake owns its source lifetime through `PDSchedulerBase`: allocation
+records a send plan only for
 `do_remote_decode`; `request_finished` publishes that plan and retains its
 blocks until send completion. An unpublished plan can be discarded on
 preemption, and an early completion is remembered without re-arming the send.
@@ -249,9 +249,14 @@ Aborted unsent requests and local-only requests do not acquire a send hold.
 Offload connectors retain their existing `should_defer_free` implementation,
 including in-flight saves, computed suffixes waiting for dispatch, and DSV4
 PAGE/SLOT work. `MultiConnectorScheduler.should_defer_free` ORs all children.
-The scheduler frees a finished request only when this predicate clears; it
-needs no producer-specific flag. A holding sender also prevents partial block
+The scheduler frees a finished request only when this predicate clears.
+A holding sender also prevents partial block
 release: its allocation cannot be narrowed to an offload save's source range.
+
+This change migrates Mooncake, not the other P/D backends. Standalone producers
+without an ownership predicate keep the legacy send-completion release path.
+`multi` refuses a producer child without `should_defer_free`: its source
+ownership must be explicit before it can safely compose with offload.
 
 `MultiConnector.get_finished()` reports each child's progress immediately in
 `child_outputs[index]`. TP and PP aggregate each owner independently, even if

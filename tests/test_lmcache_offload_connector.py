@@ -1635,6 +1635,9 @@ def test_lmcache_connector_fused_chunk_fastpath_uses_chunk_major(monkeypatch):
 
     fake_state = _FakeState()
     monkeypatch.setattr(connector, "_thread_state", lambda: fake_state)
+    # The codec also enters this stream context. These CPU tensor doubles must
+    # not be passed to a real CUDA/ROCm stream context on GPU test runners.
+    monkeypatch.setattr(torch.cuda, "stream", lambda stream: nullcontext())
     memory_objs = [
         SimpleNamespace(
             tensor=torch.empty(2 * codec.bytes_per_block, dtype=torch.uint8)

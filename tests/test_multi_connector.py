@@ -912,7 +912,7 @@ def test_multi_rejects_multiple_send_owners(monkeypatch, connector_class):
     monkeypatch.setattr(
         KVConnectorFactory,
         "create_connector",
-        lambda config, role: FakeSchedSub(is_producer=True),
+        lambda config, role: FakeSchedSub(is_producer=True, offload_methods=True),
     )
     config = SimpleNamespace(
         kv_transfer_config={
@@ -921,3 +921,18 @@ def test_multi_rejects_multiple_send_owners(monkeypatch, connector_class):
     )
     with pytest.raises(ValueError, match="at most one"):
         connector_class(config)
+
+
+def test_multi_requires_source_ownership_from_a_producer_child(monkeypatch):
+    from atom.kv_transfer.disaggregation.factory import KVConnectorFactory
+
+    monkeypatch.setattr(
+        KVConnectorFactory,
+        "create_connector",
+        lambda config, role: SimpleNamespace(is_producer=True),
+    )
+    config = SimpleNamespace(
+        kv_transfer_config={"connectors": [{"kv_connector": "legacy_sender"}]}
+    )
+    with pytest.raises(ValueError, match="must implement should_defer_free"):
+        MultiConnectorScheduler(config)

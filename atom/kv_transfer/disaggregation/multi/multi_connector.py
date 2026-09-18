@@ -110,7 +110,17 @@ def _build_subconnectors(config: Any, role: str) -> list:
             raise ValueError("multi connector cannot nest another 'multi'")
         cfg_i = copy.copy(config)
         cfg_i.kv_transfer_config = sub
-        connectors.append(KVConnectorFactory.create_connector(cfg_i, role=role))
+        connector = KVConnectorFactory.create_connector(cfg_i, role=role)
+        if (
+            role == "scheduler"
+            and getattr(connector, "is_producer", False)
+            and not callable(getattr(connector, "should_defer_free", None))
+        ):
+            raise ValueError(
+                "multi producer sub-connectors must implement should_defer_free "
+                "to retain their source blocks"
+            )
+        connectors.append(connector)
         logger.debug(
             "multi: built sub-connector[%d] backend=%s role=%s",
             i,

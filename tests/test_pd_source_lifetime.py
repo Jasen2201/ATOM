@@ -4,28 +4,27 @@
 """P/D source ownership, using the actual scheduler connectors without RDMA."""
 
 import importlib
+from queue import Queue
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from aiter_stub import stubbed_aiter
 
 from atom.kv_transfer.disaggregation.types import KVConnectorOutput
+from atom.model_engine.scheduler import ScheduledBatchOutput
+from atom.model_engine.sequence import SequenceStatus
 
 
-@pytest.fixture(params=["mooncake", "moriio"])
-def connector(request, monkeypatch):
+@pytest.fixture
+def connector(monkeypatch):
     with stubbed_aiter():
         module = importlib.import_module(
-            f"atom.kv_transfer.disaggregation.{request.param}.{request.param}_connector"
+            "atom.kv_transfer.disaggregation.mooncake.mooncake_connector"
         )
-    cls = (
-        module.MooncakeConnectorScheduler
-        if request.param == "mooncake"
-        else module.MoRIIOConnectorScheduler
-    )
     monkeypatch.setattr(module, "get_open_port", lambda: 1234)
     monkeypatch.setattr(module, "get_ip", lambda: "127.0.0.1")
-    return cls(
+    return module.MooncakeConnectorScheduler(
         SimpleNamespace(
             kv_transfer_config={"kv_role": "kv_producer"},
             tensor_parallel_size=1,
@@ -114,3 +113,47 @@ def test_consumer_finishes_without_creating_a_send(connector, seq):
     assert not connector.transfer_id_to_request_id
     assert not connector.should_defer_free(seq)
     assert seq.kv_transfer_params_output["remote_block_ids"] == [1, 2]
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("stop", ["none", "eos", "length", "stop_sequence"])
+def test_aborted_producer_never_publishes_even_when_forward_also_stops(
+    connector, scheduler, seq_factory, streaming, stop
+):
+    seq = seq_factory(
+        [3, 4, 5, 6],
+        stop_token_sequences=[[10]] if stop == "stop_sequence" else [],
+    )
+    scheduler.add(seq)
+    scheduler.schedule()
+    seq.kv_transfer_params = {"do_remote_decode": True}
+    connector.update_state_after_alloc(seq)
+    scheduler.kv_connector = connector
+    connector.request_finished = Mock(wraps=connector.request_finished)
+    seq.status = SequenceStatus.ABORTED
+    seq.max_tokens = 1 if stop == "length" else 100
+    stream = Queue() if streaming else None
+
+    finished = scheduler.postprocess(
+        [seq],
+        ScheduledBatchOutput(
+            req_ids=[seq.id],
+            token_ids=[[2 if stop == "eos" else 10]],
+            num_rejected=None,
+            num_bonus=None,
+            draft_token_ids=None,
+        ),
+        stream_output_queue=stream,
+    )
+
+    assert finished == [seq]
+    assert seq.leave_reason == "aborted"
+    connector.request_finished.assert_called_once_with(seq)
+    assert seq.kv_transfer_params_output is None
+    assert not connector._send_sources
+    assert not seq.block_table
+    assert scheduler.is_finished()
+    if streaming:
+        output = stream.get_nowait()[0][1]
+        assert output.finished and output.finish_reason == "aborted"
+        assert output.kv_transfer_params_output is None

@@ -104,15 +104,14 @@ class PPEngineCoreProc(EngineCore):
                 self.output_queue.put_nowait(rejected)
 
             if result is None:
-                # Deferred producer blocks keep Scheduler.is_finished() false,
-                # so the busy loop still enters this method after the last
-                # request leaves running. Dispatch its remaining suffix saves
-                # even though no forward batch can be built.
-                self._dispatch_idle_offload_work()
+                # Deferred blocks keep the head in this busy loop after the
+                # last forward. Dispatch suffix saves through the same throttle
+                # as the idle drain, instead of rebuilding metadata every tick.
+                self._advance_idle_kv_transfer()
                 break
             scheduled_batch, seqs = result
             if scheduled_batch is None:
-                self._dispatch_idle_offload_work()
+                self._advance_idle_kv_transfer()
                 break
             if len(scheduled_batch.req_ids) == 0:
                 self._dispatch_connector_only_batch(scheduled_batch)
