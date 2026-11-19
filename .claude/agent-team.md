@@ -3,6 +3,7 @@ repo: Jasen2201/ATOM
 integration_branch: jasen/atom-grpc
 never_touch: ROCm/ATOM
 gate_task: bash .claude/agent-team/gate.sh
+gate_post_land: bash .claude/agent-team/post_land.sh
 design_entry: docs/architecture_guide.md
 new_tests_dir: tests
 import_check: PYTHONPATH=. /share_nfs/yajizhan/venv-cpu-test/bin/python -c "import atom, os; print(os.path.dirname(os.path.abspath(atom.__file__)))"
