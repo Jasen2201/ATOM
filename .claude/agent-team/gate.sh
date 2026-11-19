@@ -56,7 +56,6 @@ if [ -n "$(changed 'atom/mesh/*' '*.proto')" ]; then
             n=$(basename "$f" .rs)
             case "$n" in
                 ext_proc_tests | ext_proc_envoy) ;;  # need the ext-proc feature
-                proto_vendor_tests) ;;  # its manifest is untracked until ROCm/ATOM main 472ba87bc is merged
                 *) ITESTS+=(--test "$n") ;;
             esac
         done
