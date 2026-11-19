@@ -14,8 +14,8 @@ test_files: tests/*,*/tests/*,test_*,*/test_*,*_test.*,*/tests.rs,*/test_support
 
 # ATOM gRPC line (jasen/atom-grpc)
 
-Requirement: `.claude/agent-team/requirement-atom-grpc.md`. Tracking lives in
-wuhuikx/LLM-Booster#651 (sub-issues #660 to #670); agents do not write there.
+Requirement: the umbrella issue #2. Tracking lives in wuhuikx/LLM-Booster#651
+and its sub-issues; agents do not write there.
 
 ## Project rules
 
