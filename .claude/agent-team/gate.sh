@@ -31,7 +31,8 @@ if ((${#PYFILES[@]})); then
 fi
 
 # tests/entrypoints always, plus every changed or new test file elsewhere under tests/.
-mapfile -t TESTS < <(printf '%s\n' "${PYFILES[@]}" | grep -E '^tests/(.*/)?test_[^/]*\.py$' | grep -v '^tests/entrypoints/')
+mapfile -t TESTS < <(printf '%s\n' "${PYFILES[@]}" | grep -E '^tests/(.*/)?test_[^/]*\.py$' | grep -v -e '^tests/entrypoints/' -e '^tests/atom_grpc/')
+[ -d tests/atom_grpc ] && TESTS+=(tests/atom_grpc)  # this line's own tests run on every task
 DESELECT=(
     # Fail on main 52a0cf790 in this venv as well; not caused by this line of work.
     --deselect "tests/entrypoints/test_structured_output.py::test_relaxed_mtp_rejected_on_execution_worker"
@@ -45,11 +46,25 @@ TMPDIR=$SCR PYTHONPATH=. "$PY" -m pytest -q -p no:cacheprovider --basetemp="$SCR
 # mesh: only when the change touches atom/mesh or a .proto file.
 if [ -n "$(changed 'atom/mesh/*' '*.proto')" ]; then
     [ -f "$RUST_ENV" ] || { echo "gate: $RUST_ENV missing (see the overlay body)"; exit 2; }
-    echo "== mesh: cargo fmt --check, cargo test --lib"
+    echo "== mesh: cargo fmt --check; cargo check --all-targets (default features); cargo test --features atom-engine --lib, then the integration tests one test at a time"
     (
         . "$RUST_ENV"
         export CARGO_TARGET_DIR=/dev/shm/yajizhan-rust/target-$NAME
-        cd atom/mesh && cargo fmt --check && cargo test --lib -q -j 16
+        cd atom/mesh
+        ITESTS=()
+        for f in tests/*.rs; do
+            n=$(basename "$f" .rs)
+            case "$n" in
+                ext_proc_tests | ext_proc_envoy) ;;  # need the ext-proc feature
+                proto_vendor_tests) ;;  # its manifest is untracked until ROCm/ATOM main 472ba87bc is merged
+                *) ITESTS+=(--test "$n") ;;
+            esac
+        done
+        # Check at the default features, which .github/scripts/atomesh/build_mesh.sh ships; test with atom-engine, as CI does.
+        # Integration tests run one test at a time until #7: routing_tests' PD tests race for ports in parallel.
+        cargo fmt --check && cargo check --all-targets -q -j 16 \
+            && cargo test --features atom-engine --lib -q -j 16 \
+            && cargo test --features atom-engine "${ITESTS[@]}" -q -j 16 -- --test-threads=1
     ) || fail=1
 fi
 

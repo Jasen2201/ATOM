@@ -3,6 +3,7 @@ repo: Jasen2201/ATOM
 integration_branch: jasen/atom-grpc
 never_touch: ROCm/ATOM
 gate_task: bash .claude/agent-team/gate.sh
+gate_post_land: bash .claude/agent-team/post_land.sh
 design_entry: docs/architecture_guide.md
 new_tests_dir: tests
 import_check: PYTHONPATH=. /share_nfs/yajizhan/venv-cpu-test/bin/python -c "import atom, os; print(os.path.dirname(os.path.abspath(atom.__file__)))"
@@ -13,8 +14,8 @@ test_files: tests/*,*/tests/*,test_*,*/test_*,*_test.*,*/tests.rs,*/test_support
 
 # ATOM gRPC line (jasen/atom-grpc)
 
-Requirement: `.claude/agent-team/requirement-atom-grpc.md`. Tracking lives in
-wuhuikx/LLM-Booster#651 (sub-issues #660 to #670); agents do not write there.
+Requirement: the umbrella issue #2. Tracking lives in wuhuikx/LLM-Booster#651
+and its sub-issues; agents do not write there.
 
 ## Project rules
 
