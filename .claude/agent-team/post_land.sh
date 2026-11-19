@@ -1,5 +1,5 @@
 #!/bin/bash
-# agent-team gate_post_land for jasen/atom-grpc: CI's CPU test scope and every mesh test target.
+# agent-team gate_post_land for jasen/atom-grpc: CI's CPU test scope and every mesh test target (ext-proc ones checked only, as CI does).
 # Red is judged against the tip before the run's first landing; only new failures count.
 set -uo pipefail
 
@@ -16,13 +16,14 @@ TMPDIR=$SCR PYTHONPATH=. "$PY" -m pytest -q -p no:cacheprovider --basetemp="$SCR
     tests/ --ignore=tests/plugin --ignore=tests/entrypoints/test_openai_server.py \
     --ignore=tests/test_atomesh_mooncake_store.py || fail=1
 
-echo "== mesh: all test targets with atom-engine, then the mocker harness"
+echo "== mesh: test targets with atom-engine, CI's ext-proc check, then the mocker harness"
 (
     . "$RUST_ENV"
     export CARGO_TARGET_DIR=/dev/shm/yajizhan-rust/target-$NAME-post
     cd atom/mesh || exit 1
     rc=0
     cargo test --features atom-engine --lib --tests --no-fail-fast -q -j 16 || rc=1
+    cargo check --features ext-proc --tests -q -j 16 || rc=1  # --tests above skips the ext-proc-only targets
     cargo test --manifest-path mocker/Cargo.toml --release -q -j 16 test_atomesh_harness || rc=1
     exit $rc
 ) || fail=1
