@@ -27,7 +27,7 @@ if ((${#PYFILES[@]})); then
     echo "== ruff (${#PYFILES[@]} changed files)"
     "$RUFF" check "${PYFILES[@]}" || fail=1
     echo "== black 26"
-    "$BLACK" --check -q "${PYFILES[@]}" || fail=1
+    "$BLACK" --check "${PYFILES[@]}" || fail=1
 fi
 
 # tests/entrypoints always, plus every changed or new test file elsewhere under tests/.
