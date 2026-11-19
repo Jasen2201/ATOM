@@ -22,7 +22,8 @@ echo "== mesh: test targets with atom-engine, CI's ext-proc check, then the mock
     export CARGO_TARGET_DIR=/dev/shm/yajizhan-rust/target-$NAME-post
     cd atom/mesh || exit 1
     rc=0
-    cargo test --features atom-engine --lib --tests --no-fail-fast -q -j 16 || rc=1
+    # One test at a time until #7: routing_tests' PD tests race for ports in parallel.
+    cargo test --features atom-engine --lib --tests --no-fail-fast -q -j 16 -- --test-threads=1 || rc=1
     cargo check --features ext-proc --tests -q -j 16 || rc=1  # --tests above skips the ext-proc-only targets
     cargo test --manifest-path mocker/Cargo.toml --release -q -j 16 test_atomesh_harness || rc=1
     exit $rc

@@ -46,7 +46,7 @@ TMPDIR=$SCR PYTHONPATH=. "$PY" -m pytest -q -p no:cacheprovider --basetemp="$SCR
 # mesh: only when the change touches atom/mesh or a .proto file.
 if [ -n "$(changed 'atom/mesh/*' '*.proto')" ]; then
     [ -f "$RUST_ENV" ] || { echo "gate: $RUST_ENV missing (see the overlay body)"; exit 2; }
-    echo "== mesh: cargo fmt --check, cargo check --all-targets at the default features, cargo test --features atom-engine --lib and the integration tests"
+    echo "== mesh: cargo fmt --check; cargo check --all-targets (default features); cargo test --features atom-engine --lib, then the integration tests one test at a time"
     (
         . "$RUST_ENV"
         export CARGO_TARGET_DIR=/dev/shm/yajizhan-rust/target-$NAME
@@ -61,8 +61,10 @@ if [ -n "$(changed 'atom/mesh/*' '*.proto')" ]; then
             esac
         done
         # Check at the default features, which .github/scripts/atomesh/build_mesh.sh ships; test with atom-engine, as CI does.
+        # Integration tests run one test at a time until #7: routing_tests' PD tests race for ports in parallel.
         cargo fmt --check && cargo check --all-targets -q -j 16 \
-            && cargo test --features atom-engine --lib "${ITESTS[@]}" -q -j 16
+            && cargo test --features atom-engine --lib -q -j 16 \
+            && cargo test --features atom-engine "${ITESTS[@]}" -q -j 16 -- --test-threads=1
     ) || fail=1
 fi
 
