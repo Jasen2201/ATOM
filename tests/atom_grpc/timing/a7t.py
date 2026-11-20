@@ -62,7 +62,7 @@ def thread_ticks(pid: int) -> dict[int, tuple[str, int]]:
             threads[int(tid)] = stat_ticks(
                 Path(f"/proc/{pid}/task/{tid}/stat").read_text()
             )
-        except FileNotFoundError:  # it ended since the listing
+        except (FileNotFoundError, ProcessLookupError):  # it ended since the listing
             pass
     return threads
 
@@ -103,10 +103,8 @@ def mesh_steps(log: Path) -> list[tuple[int, list[int]]]:
     """Each StreamBatch atomesh's Session reader read, from its JSON log: (at, seq ids)."""
     text, steps = log.read_text(errors="replace"), []
     for line in text[: text.rfind("\n") + 1].splitlines():
-        if (
-            STEP_ARRIVAL in line
-            and (event := json.loads(line))["target"] == STEP_ARRIVAL
-        ):
+        event = json.loads(line) if STEP_ARRIVAL in line else {}
+        if event.get("target") == STEP_ARRIVAL:
             steps.append((event["at"], json.loads(event["seq_ids"])))
     return steps
 
@@ -159,7 +157,7 @@ async def drive(url: str, model: str, concurrency: int, vocab: int, stop) -> lis
                 try:
                     async with client.post(f"{url}/generate", json=body) as reply:
                         ended.append(outcome(reply.status, await reply.text()))
-                except aiohttp.ClientError as error:
+                except Exception as error:  # noqa: BLE001 - counted as failed
                     ended.append(repr(error))
 
         tasks = [asyncio.create_task(requests(worker)) for worker in range(concurrency)]

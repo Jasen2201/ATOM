@@ -2,10 +2,13 @@
 """The a7t timing case's measures: thread CPU from /proc, and each step handed to gRPC
 matched to atomesh's read of it, on a DP4 instance under load over both Sessions."""
 
+import asyncio
 import os
+import socket
 import time
 
 import pytest
+from aiohttp import web
 
 from atom.entrypoints.grpc.server import StepOutputs
 from atom.entrypoints.grpc.session import SEQ_IDS
@@ -49,6 +52,42 @@ def test_steps_match_by_seq_ids_across_ranks_and_count_from_the_window():
 def test_p99_is_the_nearest_rank():
     assert a7t.p99(list(range(1, 201))) == 198
     assert a7t.p99([5]) == 5
+
+
+def test_a_request_that_fails_counts_as_failed_and_its_worker_sends_the_next(
+    monkeypatch,
+):
+    monkeypatch.setattr(a7t, "RAMP_S", 0)
+    bodies = []
+
+    async def generate(request):
+        bodies.append(await request.json())
+        return web.Response(text="not json")
+
+    async def serve_and_drive():
+        app = web.Application()
+        app.router.add_post("/generate", generate)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        await web.SockSite(runner, listener).start()
+        stop = asyncio.Event()
+        url = f"http://127.0.0.1:{listener.getsockname()[1]}"
+        driving = asyncio.create_task(a7t.drive(url, "m", 2, 116, stop))
+        while len(bodies) < 6:  # three or more a worker: none stops at its failure
+            await asyncio.sleep(0.01)
+        stop.set()
+        ended = await driving
+        await runner.cleanup()
+        return ended
+
+    ended = asyncio.run(asyncio.wait_for(serve_and_drive(), 60))
+    assert len(ended) >= 4 and all("JSONDecodeError" in e for e in ended), ended
+    sampling = {"max_new_tokens": a7t.OUTPUT, "ignore_eos": True, "temperature": 0}
+    for body in bodies:
+        assert (body["model"], body["sampling_params"]) == ("m", sampling)
+        assert len(body["input_ids"]) == a7t.PROMPT
 
 
 def test_the_grpc_stamp_patches_nothing_unless_its_env_names_a_file(monkeypatch):
