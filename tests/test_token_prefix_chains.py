@@ -3,6 +3,7 @@
 the most leading tokens with (`TokenPrefixChains`)."""
 
 from concurrent.futures import ThreadPoolExecutor
+from itertools import pairwise
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -118,6 +119,43 @@ def test_each_turn_ships_a_full_recompute_hashing_only_unshared_blocks(block):
     assert served(proc)["prompts"] == len(prompts)
 
 
+def test_each_conversation_finds_its_own_turn_among_many_sharing_a_start():
+    # 40 conversations share a 6,000-token system prompt; each one's next turn,
+    # oldest first, reuses every block it shares with its own stored turn.
+    proc, rng = processor(16), np.random.default_rng(3)
+    system = tokens(rng, 6000)
+    firsts = [system + tokens(rng, rng.integers(500, 1500)) + GEN for _ in range(40)]
+    for prompt in firsts:
+        proc.preprocess_fanout(prompt, SamplingParams())
+    for first in firsts:
+        prompt = first[: -len(GEN)] + [5] + tokens(rng, 300) + GEN
+        before = served(proc)["blocks_reused"]
+        [seq] = proc.preprocess_fanout(prompt, SamplingParams())
+        assert list(seq.prompt_hash_chain.hashes) == full_chain(prompt, 16)
+        assert served(proc)["blocks_reused"] - before == (len(first) - len(GEN)) // 16
+
+
+def test_reuse_is_sized_by_a_token_compare_from_the_first():
+    # Past the first-uses check, stored prompts that sort next to a new one and
+    # differ from it only at its first token, or inside a block, size its reuse.
+    proc, rng = processor(16), np.random.default_rng(4)
+    prompt = tokens(rng, 2000)
+    for _ in range(1 + pb._VERIFY_FIRST):
+        proc.preprocess_fanout(prompt, SamplingParams())
+        prompt = prompt + tokens(rng, 100)
+    stored, cut = prompt[:-100], 37 * 16 + 5
+    for edit, reused in ((0, 0), (cut, cut // 16)):
+        new = list(stored)
+        new[edit] += 1
+        new += tokens(rng, 50)
+        before = served(proc)
+        [seq] = proc.preprocess_fanout(new, SamplingParams())
+        assert list(seq.prompt_hash_chain.hashes) == full_chain(new, 16)
+        after = served(proc)
+        assert after["blocks_reused"] - before["blocks_reused"] == reused
+        assert after["blocks_rehashed"] == before["blocks_rehashed"]
+
+
 @pytest.mark.parametrize(
     "env, kept",
     [
@@ -188,4 +226,6 @@ def test_concurrent_forks_each_ship_a_full_recompute():
     stats, chains = served(proc), proc.token_prefix_chains
     assert stats["enabled"] and stats["prompts"] == 49 and stats["blocks_reused"]
     assert chains._lru.bytes <= chains._lru.budget
-    assert all(rid in chains._lru for ids in chains._index.values() for rid in ids)
+    order = chains._order
+    assert len(order) == len(chains._lru) and all(r.rid in chains._lru for r in order)
+    assert all(a.tokens <= b.tokens for a, b in pairwise(order))

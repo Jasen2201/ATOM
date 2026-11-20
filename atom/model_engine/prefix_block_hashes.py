@@ -8,32 +8,28 @@ tokenizer's matched cut -- can take those blocks' hashes from the cached record
 and hash only the blocks after them. These are content hashes: they say nothing
 about whether a block's KV is still resident (BlockManager decides that).
 
-A record lives inside the tokenizer cache's stored prefix, under its byte
-budget, and refers to no earlier record, so evicting an old turn frees it.
+A text prompt's record lives in the tokenizer cache's stored prefix, a token-id
+prompt's in `TokenPrefixChains`' own ByteLRU; each counts toward its store's
+byte budget and refers to no earlier record, so evicting an old turn frees it.
 """
 
 import array
 import logging
 import sys
 import threading
+from bisect import bisect_left, insort
 from dataclasses import dataclass
-from itertools import islice
+from operator import attrgetter
 from typing import NamedTuple
 
 import numpy as np
-import xxhash
 
 from atom.model_engine.byte_lru import ByteLRU
 
 logger = logging.getLogger("atom")
 
-# A stored token-id prompt is found by the xxh64 of its first tokens: one block,
-# doubling up to _KEY_SPAN tokens, then every _KEY_SPAN tokens.
-_KEY_SPAN = 4096
 # Reuses checked against a full `chained_block_hashes` before reuse is trusted.
 _VERIFY_FIRST = 4
-# Stored prompts compared past the deepest key a prompt shares with them.
-_CANDIDATES = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,11 +107,11 @@ def extend_block_hashes(tokens, block_size, seed=-1, *, base=None, shared_tokens
 
 
 class _TokenRecord(NamedTuple):
-    """A stored token-id prompt: its tokens, its chain and its lookup keys."""
+    """A stored token-id prompt: its int32 tokens as bytes, its chain, its LRU key."""
 
-    tokens: np.ndarray  # int32, owns its data
+    tokens: bytes
     hashes: PrefixBlockHashes
-    keys: array.array  # "Q", `_prefix_keys`
+    rid: int
 
     @property
     def payload_bytes(self) -> int:
@@ -123,27 +119,16 @@ class _TokenRecord(NamedTuple):
             sys.getsizeof(self)
             + sys.getsizeof(self.tokens)
             + self.hashes.payload_bytes
-            + sys.getsizeof(self.keys)
+            + sys.getsizeof(self.rid)
         )
 
 
-def _prefix_keys(tokens: np.ndarray, block_size: int):
-    """`(ends, keys)`: the xxh64 of `tokens[:end]` at each lookup boundary."""
-    ends, end = [], block_size
-    while end <= len(tokens):
-        ends.append(end)
-        end = end * 2 if end < _KEY_SPAN else end + _KEY_SPAN
-    h, start, keys = xxhash.xxh64(), 0, array.array("Q")
-    for end in ends:
-        h.update(tokens[start:end])
-        keys.append(h.intdigest())
-        start = end
-    return ends, keys
+_TOKENS = attrgetter("tokens")
 
 
-def _shared_tokens(a: np.ndarray, b: np.ndarray, start: int = 0) -> int:
-    """Length of the common prefix of `a` and `b`, which agree before `start`."""
-    n, step = min(len(a), len(b)), 4096
+def _shared_tokens(a: np.ndarray, b: np.ndarray) -> int:
+    """Length of the common prefix of `a` and `b`."""
+    n, start, step = min(len(a), len(b)), 0, 4096
     while start < n:
         end = min(start + step, n)
         diff = np.flatnonzero(a[start:end] != b[start:end])
@@ -161,8 +146,10 @@ class TokenPrefixChains:
         self.block_size = block_size
         self.enabled = enabled and budget_bytes > 0
         self._lock = threading.Lock()
-        self._lru = ByteLRU(budget_bytes, on_evict=self._unindex)
-        self._index: dict[int, dict[int, None]] = {}  # key -> record ids, oldest first
+        self._lru = ByteLRU(budget_bytes, on_evict=self._unlist)
+        # Stored records in their tokens' bytes order, which is lexicographic: the
+        # one sharing the most leading tokens with a prompt sorts beside the prompt.
+        self._order: list[_TokenRecord] = []
         self._next_id = 0
         self._verified = 0
         self._counts = dict.fromkeys(
@@ -180,12 +167,12 @@ class TokenPrefixChains:
         only those past what it shares with a stored prompt."""
         from atom.model_engine.prefix_hash import chained_block_hashes
 
-        bs, toks = self.block_size, np.array(tokens, dtype=np.int32)
+        bs, raw = self.block_size, np.asarray(tokens, dtype=np.int32).tobytes()
+        toks = np.frombuffer(raw, dtype=np.int32)
         n = len(toks) // bs
         with self._lock:
             enabled, verify = self.enabled, self._verified < _VERIFY_FIRST
-        ends, keys = _prefix_keys(toks, bs) if enabled else ([], array.array("Q"))
-        rid, base, shared = self._find(toks, ends, keys)
+        base, shared = self._find(raw, toks) if enabled and n else (None, 0)
         chain = extend_block_hashes(
             toks, bs, base=None if base is None else base.hashes, shared_tokens=shared
         )
@@ -203,7 +190,7 @@ class TokenPrefixChains:
                 self._verified += 1
             if enabled and self.enabled and n:
                 whole = reused and reused == base.hashes.num_blocks
-                self._store(_TokenRecord(toks, chain, keys), rid if whole else None)
+                self._store(raw, chain, base if whole else None)
             counts = self._counts
             counts["prompts"] += 1
             counts["blocks_hashed"] += n - reused
@@ -211,47 +198,40 @@ class TokenPrefixChains:
             counts["blocks_rehashed"] += n if rehash else 0
         return chain
 
-    def _find(self, toks, ends, keys):
-        """`(id, record, shared tokens)` of the stored prompt sharing the most
-        leading tokens with `toks`, or `(None, None, 0)`."""
+    def _find(self, raw: bytes, toks: np.ndarray):
+        """`(record, shared tokens)` of the stored prompt sharing the most leading
+        tokens with `toks`, one of the two `raw` sorts between; `(None, 0)` if none."""
         with self._lock:
-            j = next(
-                (j for j in reversed(range(len(keys))) if keys[j] in self._index), -1
-            )
-            if j < 0:
-                return None, None, 0
-            ids = islice(reversed(self._index[keys[j]]), _CANDIDATES)
-            found = [(rid, self._lru.peek(rid)) for rid in ids]
-        rid, record = max(
-            found, key=lambda f: _shared_tokens(toks, f[1].tokens, ends[j])
-        )
-        shared = _shared_tokens(toks, record.tokens)  # from the first token: exact
-        with self._lock:
-            self._lru.get(rid)
-        return rid, record, shared
+            i = bisect_left(self._order, raw, key=_TOKENS)
+            near = self._order[max(i - 1, 0) : i + 1]
+        best, shared = None, 0
+        for record in near:
+            count = _shared_tokens(toks, np.frombuffer(record.tokens, dtype=np.int32))
+            if count > shared:
+                best, shared = record, count
+        if best is not None:
+            with self._lock:
+                self._lru.get(best.rid)
+        return best, shared
 
-    def _store(self, record, replaces) -> None:
-        """Keep `record`, in place of the record `replaces` whose every block it
-        reused (lock held)."""
-        if replaces is not None:
-            old = self._lru.pop(replaces)
-            if old is not None:
-                self._unindex(replaces, old)
-        rid, self._next_id = self._next_id, self._next_id + 1
-        self._lru.put(rid, record, record.payload_bytes)
-        if rid in self._lru:  # not larger than the whole budget
-            for key in record.keys:
-                self._index.setdefault(key, {})[rid] = None
+    def _store(self, raw: bytes, chain, replaces) -> None:
+        """Keep `raw` and its chain, in place of `replaces`, a record whose every
+        block it reused (lock held)."""
+        if replaces is not None and self._lru.pop(replaces.rid) is not None:
+            self._unlist(replaces.rid, replaces)
+        record = _TokenRecord(raw, chain, self._next_id)
+        self._next_id += 1
+        self._lru.put(record.rid, record, record.payload_bytes)
+        if record.rid in self._lru:  # not larger than the whole budget
+            insort(self._order, record, key=_TOKENS)
 
-    def _unindex(self, rid, record) -> None:
-        """Drop `rid` from the lookup keys (lock held; also ByteLRU's eviction
+    def _unlist(self, _rid, record) -> None:
+        """Drop `record` from the bytes order (lock held; also ByteLRU's eviction
         callback)."""
-        for key in record.keys:
-            ids = self._index.get(key)
-            if ids is not None:
-                ids.pop(rid, None)
-                if not ids:
-                    del self._index[key]
+        i = bisect_left(self._order, record.tokens, key=_TOKENS)
+        while self._order[i] is not record:
+            i += 1
+        del self._order[i]
 
     def _turn_off(self) -> None:
         """A reused chain differed from a full rehash: stop reusing (lock held)."""
@@ -262,4 +242,4 @@ class TokenPrefixChains:
             )
         self.enabled = False
         self._lru.clear()
-        self._index.clear()
+        self._order.clear()
