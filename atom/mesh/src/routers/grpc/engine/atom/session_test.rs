@@ -499,18 +499,21 @@ async fn a_ready_of_another_protocol_version_is_refused() {
 #[test]
 fn seq_ids_stay_below_2_24_and_skip_those_open_requests_hold() {
     let mut routes = Routes {
-        next_seq_id: SEQ_IDS - 1,
+        next_seq_id: SEQ_IDS - 2,
         ..Default::default()
     };
-    let (tx, _rx) = mpsc::unbounded_channel();
-    let held = Route {
-        tx,
-        stream: false,
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        cached_tokens: 0,
-    };
-    routes.open.insert(0, held);
+    for held in [SEQ_IDS - 1, 0] {
+        let (tx, _) = mpsc::unbounded_channel();
+        let route = Route {
+            tx,
+            stream: false,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            cached_tokens: 0,
+        };
+        routes.open.insert(held, route);
+    }
+    // The second search passes the held 2^24 - 1 and 0, wrapping below 2^24.
     let ids = [routes.free_seq_id(), routes.free_seq_id()];
-    assert_eq!(ids, [Some(SEQ_IDS - 1), Some(1)]);
+    assert_eq!(ids, [Some(SEQ_IDS - 2), Some(1)]);
 }
