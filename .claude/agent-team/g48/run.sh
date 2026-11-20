@@ -23,9 +23,10 @@ ARGS=(--rm --init --name "$NAME" --cpus 16 --tmpfs /dev/shm:rw,exec,size=32g,mod
 CMD='umask 002 && mkdir -p "$HOME" && { bash "$1" || exit 2; } && exec bash "$2"'
 SSH=(ssh -n -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 "$HOST")
 trap '"${SSH[@]}" docker stop "$NAME" >/dev/null 2>&1; kill ${pid:-} 2>/dev/null' INT TERM HUP
-# /tmp is shared, so a directory or link someone else made under that name is refused.
+BUILD="docker image inspect $IMAGE >/dev/null 2>&1 || docker build -q -t $IMAGE - <$(printf %q "$DIR/Dockerfile")"
+# /tmp is shared, so a directory or link someone else made under that name is refused; runs build the image one at a time.
 "${SSH[@]}" "mkdir -p -m 700 $RDIR && [ ! -L $RDIR ] && [ -O $RDIR ] || { echo 'gate: $RDIR on $HOST is not ours'; exit 2; }
-    docker image inspect $IMAGE >/dev/null 2>&1 || docker build -q -t $IMAGE - <$(printf %q "$DIR/Dockerfile") || exit 2
+    flock $RDIR/.image.lock bash -c $(printf %q "$BUILD") || exit 2
     $(printf '%q ' docker run "${ARGS[@]}" "$IMAGE" bash -c "$CMD" gate "$DIR/rust.sh" "$1")" &
 pid=$!
 wait $pid
