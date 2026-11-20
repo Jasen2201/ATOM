@@ -156,7 +156,7 @@ class FakeRunner:
         self.pending = None  # deferred output: the last output step's (output, end)
         self.dp_rank = config.parallel_config.data_parallel_rank
         self.dp_size = config.parallel_config.data_parallel_size
-        self.dp_group = None  # this TP rank's DP group, ModelRunner's on CPU
+        self.dp_group = None  # this TP rank's DP group, as ModelRunner's CPU one
         if self.dp_size > 1:
             store = managed_store_client(config)
             torch.distributed.init_process_group(
@@ -296,7 +296,8 @@ class FakeRunner:
         rows = zip(batch.num_scheduled_tokens.tolist(), batch.context_lens.tolist())
         requests = tuple((q, c, i >= prefill) for i, (q, c) in enumerate(rows))
         dummy, prefills = not requests, sync.any_rank_has_prefill
-        if dummy:  # a prefill token beside a prefilling peer, else a verify's width
+        # A prefill token while a peer prefills, else a decode of the spec width.
+        if dummy:
             q = batch.num_spec_step + 1
             requests = ((1, 1, False),) if prefills else ((q, q, True),)
         group = None

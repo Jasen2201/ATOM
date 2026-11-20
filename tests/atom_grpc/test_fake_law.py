@@ -135,8 +135,7 @@ def test_a_dp2_ranks_dummies_cost_the_row_they_run_at_the_groups_phase_and_rung(
 
     forwards = EngineRecord(dp2.record).forwards
     busy, idle = ([f for f in forwards if f.dp_rank == rank] for rank in (0, 1))
-    assert len(busy) == len(idle)  # each group step is one forward on each rank
-    for step, dummy in zip(busy, idle):
+    for step, dummy in zip(busy, idle):  # each group step is one forward a rank
         assert dummy.requests[0][0] is None and dummy.samples
         if step.requests[0][3]:  # rank 0 decodes: a decode row of 4 at the group's rung
             assert (dummy.requests, dummy.rung) == ([[None, 4, 4, True]], step.rung)
@@ -145,7 +144,8 @@ def test_a_dp2_ranks_dummies_cost_the_row_they_run_at_the_groups_phase_and_rung(
             assert [row[1] for row in step.requests] == [40]
             assert (dummy.requests, dummy.rung) == ([[None, 1, 1, False]], None)
             assert dummy.price == pytest.approx(DUMMY_PREFILL, rel=EXACT)
-    assert {step.rung for step in busy} == {None, 1, 2}
+    kinds = {(dummy.requests[0][3], dummy.rung) for dummy in idle}
+    assert kinds == {(False, None), (True, 1), (True, 2)}  # beside each step kind
 
 
 def test_the_port_prices_padded_decode_rows_and_two_finishing_prompts_by_hand():
