@@ -11,7 +11,10 @@ from typing import NamedTuple
 
 import tomllib
 
-MAX_LOAD = 32.0  # a run refuses to start at this 1-minute load average or above
+# A run refuses to start at this 1-minute load average or above, less the host's kernel
+# threads in uninterruptible sleep: each counts in the load average and runs nothing.
+MAX_LOAD = 32.0
+KTHREADS_ENV = "ATOM_TIMING_D_KTHREADS"  # run.sh's count of those threads on the host
 IMAGE_ENV = "ATOM_TIMING_IMAGE"  # run.sh's image: its name and id
 COMMIT_ENV = "ATOM_TIMING_COMMIT"  # run.sh's tree: its commit, and whether it is dirty
 
@@ -21,17 +24,19 @@ def load_average(loadavg: str) -> float:
     return float(loadavg.split()[0])
 
 
-def refuses(load: float) -> bool:
-    return load >= MAX_LOAD
+def refuses(load: float, kthreads: int) -> bool:
+    return load - kthreads >= MAX_LOAD
 
 
-def header(case: str, load: float, cores: dict[str, list[int]]) -> list[str]:
+def header(case: str, load: float, kthreads: int, cores: dict) -> list[str]:
     """A report's first lines: the image, commit, load average at start and cores."""
+    sleeping = f"less {kthreads} kernel threads in uninterruptible sleep"
     lines = [
         f"timing case {case} on {socket.gethostname()}",
         f"image: {os.environ.get(IMAGE_ENV, 'unknown')}",
         f"commit: {os.environ.get(COMMIT_ENV, 'unknown')}",
-        f"load average (1 min) at start: {load:.2f}; a run refuses at {MAX_LOAD:g}",
+        f"load average (1 min) at start: {load:.2f}, {sleeping}: {load - kthreads:.2f};"
+        + f" a run refuses at {MAX_LOAD:g}",
     ]
     return lines + [f"cores, {name}: {sorted(cpus)}" for name, cpus in cores.items()]
 

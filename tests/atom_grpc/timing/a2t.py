@@ -84,9 +84,10 @@ def measure(compass: Path, scratch: Path) -> int:
         cores |= {f"{name} rank {r}": cpus for r, cpus in enumerate(sets["ranks"])}
     cores |= {"atomesh": [mesh], "client": [client]}
     load_average = tools.load_average(Path("/proc/loadavg").read_text())
-    print("\n".join(tools.header("a2t", load_average, cores)), flush=True)
-    if tools.refuses(load_average):
-        print(f"refused: the load average is {tools.MAX_LOAD:g} or more")
+    kthreads = int(os.environ.get(tools.KTHREADS_ENV, "0"))
+    print("\n".join(tools.header("a2t", load_average, kthreads, cores)), flush=True)
+    if tools.refuses(load_average, kthreads):
+        print(f"refused: the load less those threads is {tools.MAX_LOAD:g} or more")
         return 2
 
     os.sched_setaffinity(0, launcher)  # inherited by the launcher, which pins from it

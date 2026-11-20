@@ -12,11 +12,12 @@ from tests.atom_grpc.harness.topologies import TOPOLOGIES
 from tests.atom_grpc.timing import tools
 
 
-def test_a_run_refuses_at_a_load_average_of_32_or_more():
-    assert tools.load_average("31.99 40.00 41.00 3/2048 12345\n") == 31.99
-    assert not tools.refuses(31.99)
-    assert tools.refuses(32.0)
-    assert tools.refuses(tools.load_average("80.50 2.00 1.00 1/9 7\n"))
+def test_a_run_refuses_at_32_on_the_load_average_less_sleeping_kernel_threads():
+    assert tools.load_average("47.12 40.00 41.00 3/2048 12345\n") == 47.12
+    assert not tools.refuses(47.12, 32)  # 15.12 past g48's 32 timer threads
+    assert tools.refuses(64.0, 32)
+    assert not tools.refuses(31.99, 0)
+    assert tools.refuses(32.0, 0)
 
 
 def test_the_header_names_the_image_the_commit_the_load_average_and_each_core_set(
@@ -25,10 +26,11 @@ def test_the_header_names_the_image_the_commit_the_load_average_and_each_core_se
     monkeypatch.setenv(tools.IMAGE_ENV, "rocm/atom-dev:latest sha256:ad25")
     monkeypatch.setenv(tools.COMMIT_ENV, "283b60e4d")
     cores = {"container": [7, 4, 5, 6], "single rank 0": [5], "client": [7]}
-    lines = tools.header("a2t", 12.5, cores)
+    lines = tools.header("a2t", 47.5, 32, cores)
     assert "image: rocm/atom-dev:latest sha256:ad25" in lines
     assert "commit: 283b60e4d" in lines
-    assert any("12.50" in line for line in lines if line.startswith("load average"))
+    (load,) = [line for line in lines if line.startswith("load average")]
+    assert "47.50, less 32 kernel threads" in load and ": 15.50;" in load
     assert lines[-3:] == [
         "cores, container: [4, 5, 6, 7]",
         "cores, single rank 0: [5]",

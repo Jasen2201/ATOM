@@ -44,10 +44,13 @@ built=$(docker run --rm --init --name "$WHO-timing-build-$NAME-$(date +%s%N)" --
 
 COMMIT=$(git -C "$TREE" rev-parse HEAD)
 [ -z "$(git -C "$TREE" --no-optional-locks status --porcelain)" ] || COMMIT+=" with uncommitted changes"
+# The host's kernel threads in uninterruptible sleep: each counts in its load average and runs nothing, and the
+# container cannot see them. The case's refusal takes them off the load average.
+KTHREADS=$(ps -eo ppid=,stat= | awk '$1 == 2 && $2 ~ /^D/' | wc -l)
 exec docker run --rm --init --name "$WHO-timing-$CASE-$NAME-$(date +%s%N)" --hostname "$(hostname -s)" \
     --cpuset-cpus "$CPUS" --tmpfs /dev/shm:rw,exec,size=16g,mode=1777 --ulimit nofile=1048576 \
     --user "$(id -u):$(id -g)" -e HOME=/dev/shm/home -e "USER=$(id -un)" -e "LOGNAME=$(id -un)" -e TMPDIR=/dev/shm \
-    -e PYTHONPATH="$TREE" -e ATOMESH_BIN="$RUST/target-$NAME/ci/atomesh" \
+    -e PYTHONPATH="$TREE" -e ATOMESH_BIN="$RUST/target-$NAME/ci/atomesh" -e ATOM_TIMING_D_KTHREADS="$KTHREADS" \
     -e ATOM_TIMING_IMAGE="$IMAGE $ID" -e ATOM_TIMING_COMMIT="$COMMIT" \
     -v /share_nfs:/share_nfs:ro -v "$VOL:$RUST:ro" -w "$TREE" "$IMAGE" \
     bash -c 'mkdir -p "$HOME" && exec python3 -m "tests.atom_grpc.timing.$1" --compass "$2"' timing "$CASE" "$COMPASS"
