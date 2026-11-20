@@ -25,7 +25,7 @@ import tomllib
 
 from tests.atom_grpc.fake.record import RECORD
 from tests.atom_grpc.fake.serve import COUNTS_ENV, LEAN_ENV
-from tests.atom_grpc.harness.atomesh import ATOMESH_BIN, atomesh_bin
+from tests.atom_grpc.harness.atomesh import ATOMESH_BIN
 from tests.atom_grpc.harness.launch import core_sets, load
 from tests.atom_grpc.harness.topologies import TOPOLOGIES, Topology
 from tests.atom_grpc.timing import tools
@@ -151,16 +151,6 @@ def plan_cores(cpus: list[int], specs) -> dict[str, list[int]]:
     edges = [0, pinned, pinned + ATOMESH_CORES, pinned + ATOMESH_CORES + AIPERF_CORES]
     names = ("instances", "atomesh", "aiperf", "driver")
     return {name: cpus[a:b] for name, a, b in zip(names, edges, [*edges[1:], None])}
-
-
-def pinned_atomesh(cores: list[int], scratch: Path) -> Path:
-    """`ATOMESH_BIN`'s binary on `cores` from its first instruction, so that it sizes its
-    runtime and preparation pool to them."""
-    script = scratch / "atomesh"
-    cpus = ",".join(map(str, cores))
-    script.write_text(f'#!/bin/sh\nexec taskset -c {cpus} {atomesh_bin()} "$@"\n')
-    script.chmod(0o755)
-    return script
 
 
 def front_ends(instance) -> list[int]:
@@ -550,7 +540,7 @@ def measure(law: str, scratch: Path) -> int:
         return 2
     os.sched_setaffinity(0, plan["driver"])
     hub_cache(TRACE, scratch / "hf" / "hub")
-    os.environ[ATOMESH_BIN] = str(pinned_atomesh(plan["atomesh"], scratch))
+    os.environ[ATOMESH_BIN] = str(tools.pinned_atomesh(plan["atomesh"], scratch))
     runs = defaultdict(list)
 
     order = list(PATHS)  # then HTTP and each gRPC path whose extra TTFT is close to it

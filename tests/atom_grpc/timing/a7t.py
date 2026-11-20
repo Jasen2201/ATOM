@@ -19,13 +19,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 import aiohttp
-import psutil
 
 from atom.entrypoints.grpc.server import THREAD_NAME
 from atom.entrypoints.grpc.session import SEQ_IDS
 from tests.atom_grpc.fake.record import grpc_steps
 from tests.atom_grpc.fake.serve import STAMPS_ENV
-from tests.atom_grpc.harness.atomesh import LOG
+from tests.atom_grpc.harness.atomesh import ATOMESH_BIN, LOG
 from tests.atom_grpc.harness.launch import core_sets, load
 from tests.atom_grpc.harness.topologies import TOPOLOGIES, Topology
 from tests.atom_grpc.timing import tools
@@ -41,10 +40,13 @@ WINDOW_S, SETTLE_S = 60, 2  # the window, then the load past it
 # The server's thread and those it starts, which keep its name, then grpcio's own threads.
 GRPC_THREADS = (THREAD_NAME, "event_engine", "grpc_global_tim", "lifeguard")
 CPU_BOUND = 0.05  # of one core
-LAG_BOUND_NS = 2_000_000  # p99
+# p99 by DP: at DP4 the ranks' output threads hold the front end's GIL before gRPC sees a step.
+LAG_BOUND_NS = {1: 2_000_000, 4: 4_000_000}
 SPLIT_BOUND_NS = 1_000_000  # p99
 STEP_ARRIVAL = "atom_session_step"  # the target of atomesh's event per StreamBatch read
 SPLIT = "routers::grpc::engine::atom::session::tests::split_one_step_of_1024_requests"
+# atomesh's own cores, from its start: three for its runtime and three for its preparation pool.
+ATOMESH_CORES = 6
 
 
 def stat_ticks(stat: str) -> tuple[str, int]:
@@ -209,8 +211,6 @@ def run(dp: int, concurrency: int, stamped: bool, scratch: Path, cores: dict) ->
     try:
         topology.wait_ready()
         router, (instance,) = topology.routers["mesh"], topology.instances.values()
-        for thread in psutil.Process(router.pid).threads():
-            os.sched_setaffinity(thread.id, cores["atomesh"])
         (spec,), _ = load(path)
         config = json.loads((TOPOLOGIES / spec.model / "config.json").read_text())
         args = router, concurrency, config["vocab_size"], instance.pid
@@ -224,6 +224,14 @@ def run(dp: int, concurrency: int, stamped: bool, scratch: Path, cores: dict) ->
         return measured, [], []
     mesh = workdir / "mesh" / LOG
     return measured, grpc_steps(workdir / "grpc_steps.jsonl"), mesh_steps(mesh)
+
+
+def plan_cores(cpus: list[int]) -> dict[str, list[int]]:
+    """The launcher's cores for the instance, then atomesh's own, then the client's one."""
+    if len(cpus) < ATOMESH_CORES + 2:
+        raise ValueError(f"{len(cpus)} CPUs leave none to the launcher")
+    mesh = len(cpus) - 1 - ATOMESH_CORES
+    return {"launcher": cpus[:mesh], "atomesh": cpus[mesh:-1], "client": cpus[-1:]}
 
 
 def ended(outcomes: list[str]) -> tuple[str, bool]:
@@ -240,14 +248,14 @@ def ms(ns: float) -> str:
 def measure(bench: Path, scratch: Path) -> int:
     """The case: 0 when every bound holds, 1 when one does not, 2 when the load average
     refuses the run."""
-    *launcher, mesh, client = sorted(os.sched_getaffinity(0))
-    cores = {"container": [*launcher, mesh, client]}
+    cpus = sorted(os.sched_getaffinity(0))
+    pinned, cores = plan_cores(cpus), {"container": cpus}
     for dp in DPS:
         specs, _ = load(TOPOLOGIES / f"a7t_dp{dp}.toml")
-        for name, sets in core_sets(specs, launcher).items():
+        for name, sets in core_sets(specs, pinned["launcher"]).items():
             cores[f"{name} front end"] = sets["front_end"]
             cores |= {f"{name} rank {r}": cpus for r, cpus in enumerate(sets["ranks"])}
-    cores |= {"atomesh": [mesh], "client": [client]}
+    cores |= {"atomesh": pinned["atomesh"], "client": pinned["client"]}
     load_average = tools.load_average(Path("/proc/loadavg").read_text())
     kthreads = int(os.environ.get(tools.KTHREADS_ENV, "0"))
     print("\n".join(tools.header("a7t", load_average, kthreads, cores)), flush=True)
@@ -261,12 +269,12 @@ def measure(bench: Path, scratch: Path) -> int:
         verdicts.append(ok)
         print(f"{case}: {text}: {'pass' if ok else 'FAIL'}", flush=True)
 
-    os.sched_setaffinity(0, [mesh])
+    os.sched_setaffinity(0, pinned["atomesh"][:1])
     p50, worst = split_ns(bench)
     text = f"p50 {ms(p50)}, p99 {ms(worst)}; bound {ms(SPLIT_BOUND_NS)}"
     print()
     report("split of one 1024-request StreamBatch", text, worst < SPLIT_BOUND_NS)
-    pinned = {"launcher": launcher, "atomesh": [mesh], "client": [client]}
+    os.environ[ATOMESH_BIN] = str(tools.pinned_atomesh(pinned["atomesh"], scratch))
     tick = os.sysconf("SC_CLK_TCK")
     for dp in DPS:
         cpu, *_ = run(dp, CPU_LOAD, False, scratch, pinned)
@@ -285,9 +293,9 @@ def measure(bench: Path, scratch: Path) -> int:
         rate = len(found) / ((lag.end - lag.start) / 1e9)
         requests, served = ended(lag.ended)
         text = f"{len(found)} steps reached atomesh ({rate:.1f}/s), {missed} did not; "
-        text += f"lag p50 {ms(median)}, p99 {ms(worst)}; bound {ms(LAG_BOUND_NS)}; "
+        text += f"lag p50 {ms(median)}, p99 {ms(worst)}; bound {ms(LAG_BOUND_NS[dp])}; "
         text += requests
-        good = bool(found) and not missed and worst <= LAG_BOUND_NS and served
+        good = bool(found) and not missed and worst <= LAG_BOUND_NS[dp] and served
         report(f"DP{dp} c{LAG_LOAD}", text, good)
     print(f"\n{'pass' if all(verdicts) else 'FAIL'}")
     return 0 if all(verdicts) else 1

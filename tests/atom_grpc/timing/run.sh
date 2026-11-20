@@ -5,7 +5,7 @@ set -euo pipefail
 CASE=${1:-}
 case $CASE in
     a2t) CPUS=${ATOM_TIMING_CPUS:-112-115} ;;  # a front end, a rank, atomesh and the client
-    a7t) CPUS=${ATOM_TIMING_CPUS:-112-118} ;;  # a front end, up to four ranks, atomesh and the client
+    a7t) CPUS=${ATOM_TIMING_CPUS:-112-123} ;;  # a front end, up to four ranks, atomesh's six and the client
     a8) CPUS=${ATOM_TIMING_CPUS:-37-127} ;;  # 57 for the instances, 16 for atomesh, 16 for aiperf, 2 for the driver
     *) echo "usage: run.sh a2t|a7t|a8" >&2; exit 2 ;;
 esac

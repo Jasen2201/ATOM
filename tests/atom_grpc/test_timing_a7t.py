@@ -14,6 +14,7 @@ from atom.entrypoints.grpc.server import StepOutputs
 from atom.entrypoints.grpc.session import SEQ_IDS
 from tests.atom_grpc.fake.record import stamp_grpc_steps
 from tests.atom_grpc.fake.serve import STAMPS_ENV
+from tests.atom_grpc.harness.launch import core_sets, load
 from tests.atom_grpc.timing import a7t
 
 
@@ -52,6 +53,20 @@ def test_steps_match_by_seq_ids_across_ranks_and_count_from_the_window():
 def test_p99_is_the_nearest_rank():
     assert a7t.p99(list(range(1, 201))) == 198
     assert a7t.p99([5]) == 5
+
+
+def test_atomesh_has_six_cores_of_its_own_beside_the_dp4_instances_and_the_client():
+    plan = a7t.plan_cores(list(range(112, 124)))
+    assert plan == {
+        "launcher": [112, 113, 114, 115, 116],
+        "atomesh": [117, 118, 119, 120, 121, 122],
+        "client": [123],
+    }
+    specs, _ = load(a7t.TOPOLOGIES / "a7t_dp4.toml")
+    ranks = core_sets(specs, plan["launcher"])["dp4"]["ranks"]
+    assert ranks == [[113], [114], [115], [116]]
+    with pytest.raises(ValueError, match="none to the launcher"):
+        a7t.plan_cores(list(range(7)))
 
 
 def test_a_request_that_fails_counts_as_failed_and_its_worker_sends_the_next(
