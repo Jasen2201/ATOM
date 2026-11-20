@@ -22,6 +22,7 @@ import contextlib
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 from asyncio import AbstractEventLoop
@@ -3522,14 +3523,21 @@ async def list_models():
     ).model_dump(exclude_none=True)
 
 
+def health_problem() -> str | None:
+    """/health's 503 detail, or None while it answers 200; HealthCheck reads it too."""
+    if engine is None or not engine.core_mgr.is_healthy():
+        return "Engine workers unavailable"
+    dead = _frontend_hub.dead_workers() if _frontend_hub is not None else []
+    if dead:
+        return f"Front-end workers {dead} exited"
+    return None
+
+
 @_engine_route("/health")
 async def health():
     """Report readiness of all engine workers, not just the HTTP process."""
-    if engine is None or not engine.core_mgr.is_healthy():
-        raise HTTPException(status_code=503, detail="Engine workers unavailable")
-    dead = _frontend_hub.dead_workers() if _frontend_hub is not None else []
-    if dead:
-        raise HTTPException(status_code=503, detail=f"Front-end workers {dead} exited")
+    if (problem := health_problem()) is not None:
+        raise HTTPException(status_code=503, detail=problem)
     return {"status": "ok"}
 
 
@@ -3620,6 +3628,11 @@ def _resolve_kv_transfer_role(kv_cfg: dict) -> tuple[str | None, int]:
 
 @_engine_route("/kv_transfer_info")
 async def kv_transfer_info():
+    return kv_transfer_info_body()
+
+
+def kv_transfer_info_body() -> dict:
+    """/kv_transfer_info's body, which gRPC's GetServerInfo also carries."""
     cfg = engine.config
     kv_cfg = cfg.kv_transfer_config or {}
     kv_role, handshake_port = _resolve_kv_transfer_role(kv_cfg)
@@ -3664,6 +3677,11 @@ async def server_info():
     per-DP-rank worker set and enable cache-aware routing to the rank that
     holds a request's prefix.
     """
+    return server_info_body()
+
+
+def server_info_body() -> dict:
+    """/server_info's body, which gRPC's GetServerInfo also carries."""
     cfg = engine.config
     return {
         "model_id": model_name,
@@ -3779,6 +3797,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--grpc-port",
+        type=int,
+        default=None,
+        help=(
+            "Also serve ATOM's gRPC service, atom.grpc.v1.AtomEngine (token ids "
+            "in, token ids out), on this port, from the process that owns the "
+            "engine. Needs --api-server-count 1."
+        ),
+    )
+    parser.add_argument(
         "--request-log",
         type=str,
         default=None,
@@ -3787,6 +3815,8 @@ def main():
     args = parser.parse_args()
     if args.api_server_count < 1:
         parser.error("--api-server-count must be at least 1")
+    if args.grpc_port is not None and args.api_server_count > 1:
+        parser.error("--grpc-port needs --api-server-count 1")
 
     _setup_frontend(args)
 
@@ -3823,6 +3853,14 @@ def main():
     engine.core_mgr._flush_stream_batch_fn = flush_stream_batch
     if args.api_server_count > 1:
         _start_frontend_workers(args)
+    if args.grpc_port is not None:
+        from atom.entrypoints.grpc.server import start_grpc_server
+
+        try:  # the module main() runs in: `__main__` under `python -m` on this file
+            start_grpc_server(sys.modules[__name__], args)
+        except Exception:
+            engine.close()  # its processes would keep the failed launch alive
+            raise
     _serve(args)
 
 
