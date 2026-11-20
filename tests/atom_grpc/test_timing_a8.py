@@ -45,9 +45,9 @@ def test_each_path_runs_p_three_times_and_d_four_under_its_own_router(tmp_path):
             assert spec.fake == template.fake | {"law": "law", "env": env}
             assert (spec.dp, spec.cores) == (template.dp, template.cores)
             assert spec.grpc != http
-            ports = [a for a in spec.args if "handshake_port" not in a]
+            args = [a for a in spec.args if "handshake_port" not in a]
             want = [a for a in template.args if "handshake_port" not in a]
-            assert ports == want + http * ["--api-server-count", "4"]
+            assert args == want + http * ["--api-server-count", "4"]
     plan = a8.plan_cores(list(range(37, 128)), specs)
     assert [len(plan[k]) for k in ("instances", "atomesh", "aiperf")] == [57, 16, 16]
     assert plan["driver"] == [126, 127]
@@ -57,9 +57,7 @@ def test_each_path_runs_p_three_times_and_d_four_under_its_own_router(tmp_path):
 
 def record(meta: dict, metrics: dict, error=None) -> str:
     units = {"time_to_first_token": "ms", "inter_token_latency": "ms"}
-    shown = {
-        k: {"value": v, "unit": units.get(k, "tokens")} for k, v in metrics.items()
-    }
+    shown = {k: {"value": v, "unit": units.get(k, "tokens")} for k, v in metrics.items()}  # fmt: skip
     meta = {"benchmark_phase": "profiling", "was_cancelled": False} | meta
     return json.dumps({"metadata": meta, "metrics": shown, "error": error}) + "\n"
 
@@ -80,14 +78,13 @@ def test_aiperf_records_give_profiled_requests_and_their_outcomes(tmp_path):
     assert found[0] == pytest.approx(a8.Client(1.0, 3.0, 0.25, 0.0075, 640, 20, "ok"))
     outcomes = [client.outcome for client in found]
     assert outcomes == ["ok", "cancelled", "refused", "503 prepare_queue_full"]
-    assert found[-1].detail.startswith("m ")
 
 
 def test_extra_times_take_p_and_d_time_off_and_leave_out_unsure_matches():
     client = a8.Client(100.0, 110.0, 3.0, 0.010, 640, 21, "ok")
     kv = {"remote_handshake_port": 17310, "transfer_id": 5}
-    p = a8.Seq(100.1, 640, 1, {}, 101.1, 101.1)  # 1 s in P
-    d = a8.Seq(101.5, 640, 21, kv, 102.0, 102.1)  # 0.5 s to D's first step
+    p = a8.Seq(100.1, 640, 1, {}, 101.1, 101.1, None)  # 1 s in P
+    d = a8.Seq(101.5, 640, 21, kv, 102.0, 102.1, True)  # 0.5 s to D's first step
     prefills = {(17310, 5): p}
     ttfts, itls, left = a8.extras([client], prefills, [d])
     assert ttfts == [pytest.approx(1.5)] and left == 0  # 3 s less 1 s and 0.5 s
@@ -116,7 +113,7 @@ def run(path: str, ttft: tuple, **fields) -> a8.Run:
     base = {
         "atomesh": 4.0, "stages": {}, "queue_timeouts": 0.0, "front_ends": {"p0 0": 0.5},
         "messages": {}, "itl": (0.0, 0.0), "completed": 10, "left_out": 0,
-        "slices": [100.0] * 6, "outcomes": Counter(ok=10), "failures": {}, "prompt": 1000.0,
+        "slices": [100.0] * 6, "outcomes": Counter(ok=10), "failed_receives": [], "prompt": 1000.0,
     }  # fmt: skip
     return a8.Run(path, ttft=ttft, **(base | fields))
 
@@ -151,14 +148,8 @@ def counted(tmp_path_factory):
     workdir = tmp_path_factory.mktemp("counted")
     counts, port = workdir / "grpc_counts.jsonl", free_port()
     fake = {"step_s": 0.001, "env": {LEAN_ENV: "1", COUNTS_ENV: str(counts)}}
-    args = [
-        "--method",
-        "mtp",
-        "--num-speculative-tokens",
-        "3",
-        "--grpc-port",
-        str(port),
-    ]
+    args = ["--method", "mtp", "--num-speculative-tokens", "3"]
+    args += ["--grpc-port", str(port)]
     instance = FakeInstance(workdir, FIXTURE, args, fake)
     try:
         instance.start()
@@ -168,9 +159,7 @@ def counted(tmp_path_factory):
         instance.stop()
 
 
-def test_the_grpc_messages_counted_are_those_sent_and_the_record_holds_no_prompt(
-    counted,
-):
+def test_grpc_messages_are_counted_as_sent_and_a_lean_record_has_no_prompt(counted):
     instance, target, counts = counted
     streamed, sessioned = prompt_ids(70), prompt_ids(71)
     with grpc.insecure_channel(target) as channel:
@@ -181,8 +170,7 @@ def test_the_grpc_messages_counted_are_those_sent_and_the_record_holds_no_prompt
         session.send(submit({3: (sessioned, {"max_tokens": 9} | GREEDY)}))
         session.until_ended([3])
         session.end()
-        rest = list(session.call)
-        read = 1 + len(session.batches) + 1 + len(rest)  # Ready, the Completions
+        read = 2 + len(session.batches) + len(list(session.call))  # Ready, Completions
     want = {"generate_in": 1, "generate_out": len(replies), "session_in": 1}
     want["session_out"] = read
 

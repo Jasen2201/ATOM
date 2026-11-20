@@ -43,6 +43,7 @@ COPIES = {"prefill": 3, "decode": 4}  # instances of a8.toml's P and D
 API_SERVERS = 4  # the HTTP path's --api-server-count
 ATOMESH_CORES = AIPERF_CORES = 16
 CONCURRENCY, WINDOW_S, SLICE_S = 1228, 1800, 300
+BLOCK = 128  # tokens, the recipe's --block-size
 SAMPLE_S = 5.0  # how often CPU ticks and atomesh's metrics are read
 CPU_SHARE = 0.8  # of atomesh's cores, and of one core for each ATOM front-end process
 CLOSE = 0.05  # an extra-TTFT percentile this near the HTTP path's: both paths run again
@@ -51,13 +52,8 @@ PROMPT_SPREAD = 0.02  # a mean prompt length's distance from HTTP's
 STAGES, ERRORS = "mesh_prepare_stage_seconds", "mesh_prepare_errors_total"
 QUEUE_TIMEOUT = f'{ERRORS}{{reason="prepare_queue_timeout"}}'
 SECONDS = {"ns": 1e-9, "us": 1e-6, "ms": 1e-3, "sec": 1.0, "s": 1.0}  # aiperf's units
-TAGS = (
-    "time_to_first_token",
-    "inter_token_latency",
-)  # in aiperf's records, then lengths
-TAGS += ("input_sequence_length", "output_sequence_length")
-# The recipe's aiperf environment.
-AIPERF_ENV = {
+TAGS = ("time_to_first_token", "inter_token_latency", "input_sequence_length", "output_sequence_length")  # fmt: skip
+AIPERF_ENV = {  # the recipe's
     "AIPERF_DATASET_WEKA_LIVE_ASSISTANT_RESPONSES": "0",
     "AIPERF_HTTP_X_DYNAMO_SESSION_ID_FROM_CORRELATION_ID": "true",
     "AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID": "true",
@@ -94,8 +90,7 @@ def model_dir(tokenizer: Path, out: Path) -> Path:
     text = source.get("text_config", source)
     ids = {name: source[name] for name in ("bos_token_id", "eos_token_id")}
     config = json.loads((FIXTURE / "config.json").read_text()) | ids
-    config["vocab_size"] = text["vocab_size"]
-    config["max_position_embeddings"] = text["max_position_embeddings"]
+    config |= {name: text[name] for name in ("vocab_size", "max_position_embeddings")}
     out.mkdir(parents=True)
     (out / "config.json").write_text(json.dumps(config))
     (out / "generation_config.json").write_text(json.dumps(ids))
@@ -153,13 +148,9 @@ def plan_cores(cpus: list[int], specs) -> dict[str, list[int]]:
     pinned = sum(s.cores["front_end"] + s.dp * s.cores["rank"] for s in specs)
     if pinned + ATOMESH_CORES + AIPERF_CORES >= len(cpus):
         raise ValueError(f"{len(cpus)} CPUs leave none to the driver beside {pinned}")
-    atomesh = pinned + ATOMESH_CORES
-    return {
-        "instances": cpus[:pinned],
-        "atomesh": cpus[pinned:atomesh],
-        "aiperf": cpus[atomesh : atomesh + AIPERF_CORES],
-        "driver": cpus[atomesh + AIPERF_CORES :],
-    }
+    edges = [0, pinned, pinned + ATOMESH_CORES, pinned + ATOMESH_CORES + AIPERF_CORES]
+    names = ("instances", "atomesh", "aiperf", "driver")
+    return {name: cpus[a:b] for name, a, b in zip(names, edges, [*edges[1:], None])}
 
 
 def pinned_atomesh(cores: list[int], scratch: Path) -> Path:
@@ -197,10 +188,8 @@ class Sampler(threading.Thread):
 
     def __init__(self, pids: list[int], metrics_url: str):
         super().__init__(name="a8-sampler", daemon=True)
-        self.pids, self.url = pids, metrics_url
-        self.ticks: list[tuple[float, dict[int, int]]] = []
-        self.metrics: list[tuple[float, dict[str, float]]] = []
-        self.done = threading.Event()
+        self.pids, self.url, self.done = pids, metrics_url, threading.Event()
+        self.ticks, self.metrics = [], []  # (wall time, ticks by pid or metrics)
 
     def run(self) -> None:
         while True:
@@ -261,7 +250,6 @@ class Client(NamedTuple):
     isl: int | None
     osl: int | None
     outcome: str  # "ok", "cancelled", "refused" or its error's code and type
-    detail: str = ""  # its error's message
 
 
 def clients(export: Path) -> list[Client]:
@@ -275,7 +263,7 @@ def clients(export: Path) -> list[Client]:
                 continue
             values = [metrics.get(tag) for tag in TAGS]
             values = [v and v["value"] * SECONDS.get(v["unit"], 1) for v in values]
-            outcome, error = "ok", record.get("error") or {}
+            outcome, error = "ok", record.get("error")
             if meta.get("was_cancelled"):
                 outcome = "cancelled"
             elif meta.get("context_overflow_skip"):
@@ -283,8 +271,7 @@ def clients(export: Path) -> list[Client]:
             elif error:
                 outcome = f"{error.get('code')} {error.get('type')}"
             ends = meta["request_start_ns"] / 1e9, meta["request_end_ns"] / 1e9
-            detail = f"{error.get('message')} {error.get('cause') or ''}"[:300]
-            found.append(Client(*ends, *values, outcome, detail if error else ""))
+            found.append(Client(*ends, *values, outcome))
     return found
 
 
@@ -297,6 +284,7 @@ class Seq(NamedTuple):
     kv: dict
     first: float | None  # its first step with ids
     last: float | None  # its step reaching max_tokens less one: a D's first id is P's
+    received: bool | None  # whether a D's KV receive succeeded; None, none reported
 
 
 def _events(record: Path, kind: str):
@@ -310,6 +298,7 @@ def _events(record: Path, kind: str):
 def engine_seqs(record: Path) -> dict[int, Seq]:
     """Each sequence of an instance's lean record, by seq id."""
     admits = {event["seq_id"]: event for event in _events(record, "admit")}
+    received = {event["seq_id"]: event["ok"] for event in _events(record, "receive")}
     first, last, count = {}, {}, Counter()
     for step in _events(record, "step"):
         for seq_id, ids in step["rows"]:
@@ -327,6 +316,7 @@ def engine_seqs(record: Path) -> dict[int, Seq]:
             event["kv_transfer_params"] or {},
             first.get(seq_id),
             last.get(seq_id),
+            received.get(seq_id),
         )
         for seq_id, event in admits.items()
     }
@@ -390,7 +380,7 @@ class Run(NamedTuple):
     left_out: int  # completed requests matched to no engine request
     slices: list[float]  # output tokens a second
     outcomes: Counter  # profiled requests by outcome
-    failures: dict[str, str]  # each failed outcome's first message
+    failed_receives: list[int]  # prompt lengths of D's failed KV receives in the window
     prompt: float  # mean prompt tokens of completed requests
 
 
@@ -429,7 +419,7 @@ def measured(path: str, topology, sampler, fronts: dict, ports: dict, export) ->
         left,
         slices(done, start),
         Counter(client.outcome for client in profiled),
-        {c.outcome: c.detail for c in reversed(profiled) if c.detail},
+        [s.prompt for s in decodes if s.received is False and start <= s.admit <= end],
         sum(client.isl for client in done) / len(done),
     )
 
@@ -504,7 +494,7 @@ def report(run: Run, attempt: int) -> list[str]:
         f"  extra TTFT p50 {ms(run.ttft[0])}, p90 {ms(run.ttft[1])}; extra ITL p50 {ms(run.itl[0])}, p90 {ms(run.itl[1])}; over {run.completed} completed, {run.left_out} matching no engine request",
         f"  output tokens/s per {SLICE_S} s: " + ", ".join(f"{s:.0f}" for s in run.slices),
         f"  requests: {', '.join(f'{k} {n}' for k, n in run.outcomes.most_common())}; mean prompt {run.prompt:.0f} tokens",
-        *(f"  first {k}: {detail}" for k, detail in run.failures.items()),
+        f"  D's failed KV receives: {len(run.failed_receives)}, {sum(n % BLOCK == 0 for n in run.failed_receives)} of prompts of whole {BLOCK}-token blocks",
     ]  # fmt: skip
 
 
@@ -557,11 +547,9 @@ def measure(law: str, scratch: Path) -> int:
     if tools.refuses(load_average, kthreads):
         print(f"refused: the load less those threads is {tools.MAX_LOAD:g} or more")
         return 2
-    version = subprocess.run(
-        ["agentx", "--version"], capture_output=True, text=True, check=False
-    )
-    if version.stdout.strip() != HARNESS:
-        print(f"refused: agentx-harness {version.stdout.strip()!r}, not {HARNESS}")
+    version = subprocess.check_output(["agentx", "--version"], text=True).strip()
+    if version != HARNESS:
+        print(f"refused: agentx-harness {version!r}, not {HARNESS}")
         return 2
     os.sched_setaffinity(0, plan["driver"])
     hub_cache(TRACE, scratch / "hf" / "hub")
