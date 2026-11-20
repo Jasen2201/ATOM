@@ -25,7 +25,7 @@ import tomllib
 
 from tests.atom_grpc.fake.record import RECORD
 from tests.atom_grpc.fake.serve import COUNTS_ENV, LEAN_ENV
-from tests.atom_grpc.harness.atomesh import ATOMESH_BIN
+from tests.atom_grpc.harness.atomesh import ATOMESH_BIN, LOG
 from tests.atom_grpc.harness.launch import core_sets, load
 from tests.atom_grpc.harness.topologies import TOPOLOGIES, Topology
 from tests.atom_grpc.timing import tools
@@ -65,6 +65,7 @@ AIPERF_ENV = {  # the recipe's
     "AIPERF_HTTP_TCP_USER_TIMEOUT": "900000",
     "TOKENIZERS_PARALLELISM": "false",
     "OMP_NUM_THREADS": "4",
+    "AIPERF_DATASET_MMAP_CACHE_ENABLED": "false",  # each path builds it, as the first does
 }
 
 
@@ -455,8 +456,9 @@ def run_path(
     export = out / "profile_export.jsonl"
     profiled = clients(export) if export.exists() else []
     if not profiled:
-        tail = (run / "aiperf.log").read_text(errors="replace")[-8000:]
-        raise RuntimeError(f"aiperf exit {code} profiled no request:\n{tail}")
+        logs = (run / "aiperf.log", run / path / LOG)  # aiperf's, then atomesh's
+        tails = "\n".join(log.read_text(errors="replace")[-6000:] for log in logs)
+        raise RuntimeError(f"aiperf exit {code} profiled no request:\n{tails}")
     measure = measured(path, topology, sampler, fronts, ports, profiled)
     shutil.rmtree(run)  # its engine records: gigabytes of /dev/shm
     return measure
