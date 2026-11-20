@@ -22,3 +22,13 @@ args = [
 ]
 fake = {}
 grpc = true
+
+# atomesh over each instance's gRPC server, one router per instance.
+
+[[router]]
+name = "k3-mesh"
+workers = ["k3"]
+
+[[router]]
+name = "v41-mesh"
+workers = ["v41"]
