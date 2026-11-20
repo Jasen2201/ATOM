@@ -20,7 +20,7 @@ def test_committed_modules_are_what_generate_writes():
         )
 
 
-def test_atom_engine_has_the_six_rpcs():
+def test_atom_engine_rpcs_and_their_streaming():
     service = atom_grpc_pb2.DESCRIPTOR.services_by_name["AtomEngine"]
     shapes = [(m.name, m.client_streaming, m.server_streaming) for m in service.methods]
     assert shapes == [
