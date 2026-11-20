@@ -68,17 +68,14 @@ def client_times(sent: float, chunks: list[tuple[float, int]]) -> tuple[float, f
     return first - sent, (last - first) / sum(tokens for _, tokens in chunks[1:])
 
 
-def law_times(
-    steps: list[tuple[float, bool]], tokens: list[int]
-) -> tuple[float, float]:
-    """TTFT and ITL as `client_times` takes them, from the prices of one request's
-    `steps`, (price, samples) in order, whose sampling steps carried chunks of `tokens`.
-    """
+def law_times(steps: list, tokens: list[int], host: float) -> tuple[float, float]:
+    """TTFT and ITL as `client_times` takes them, from one request's priced `steps`,
+    (price, samples) in order, its chunks of `tokens`, and `host`, seconds TTFT adds."""
     first = next(i for i, (_, samples) in enumerate(steps) if samples)
     later = [price for price, samples in steps[first + 1 :] if samples]
     if len(later) < len(tokens) - 1:
         raise ValueError(f"{len(tokens)} chunks, {len(later) + 1} sampling steps")
-    ttft = sum(price for price, _ in steps[: first + 1])
+    ttft = host + sum(price for price, _ in steps[: first + 1])
     return ttft, sum(later[: len(tokens) - 1]) / sum(tokens[1:])
 
 

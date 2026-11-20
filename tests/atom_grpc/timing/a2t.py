@@ -61,9 +61,9 @@ def send(stub, ids: list[int]) -> tuple[float, list[tuple[float, list[int]]]]:
     return sent, chunks
 
 
-def compass_prices(compass: Path, record: Path, out: Path) -> list[float]:
-    """Compass's price of each step in `record`, from a process with only `compass` on
-    its path."""
+def compass_prices(compass: Path, record: Path, out: Path) -> dict:
+    """Compass's price of each step in `record`, and the law's host hops, from a process
+    with only `compass` on its path."""
     command = [sys.executable, str(PRICES), str(compass / LAW), str(record), str(out)]
     subprocess.run(command, env={**os.environ, "PYTHONPATH": str(compass)}, check=True)
     return json.loads(out.read_text())
@@ -115,7 +115,8 @@ def measure(compass: Path, scratch: Path) -> int:
         raise RuntimeError(f"launch exit {code}, left {left}:\n{topology.tail()}")
 
     record = EngineRecord(instance.workdir / RECORD)
-    prices = compass_prices(compass, instance.workdir / RECORD, scratch / "prices.json")
+    priced = compass_prices(compass, instance.workdir / RECORD, scratch / "prices.json")
+    prices, host = priced["steps"], sum(priced["hops"].values())
     if len(prices) != len(record.forwards):
         raise RuntimeError(f"{len(prices)} prices for {len(record.forwards)} steps")
     times = {length: ([], []) for length in PROMPTS}  # measured, then predicted
@@ -135,10 +136,12 @@ def measure(compass: Path, scratch: Path) -> int:
         tokens = [(arrival, len(chunk)) for arrival, chunk in chunks]
         measured, predicted = times[len(ids)]
         measured.append(tools.client_times(sent, tokens))
-        predicted.append(tools.law_times(steps, [n for _, n in tokens]))
+        predicted.append(tools.law_times(steps, [n for _, n in tokens], host))
 
     ok = True
-    print(f"\n{'prompt':>6} metric {'median':>10} {'law':>10}  error  runs (ms)")
+    hops = ", ".join(f"{hop} {s * 1e3:.3f}" for hop, s in priced["hops"].items())
+    print(f"\nTTFT's prediction adds the law's host hops, {host * 1e3:.3f} ms: {hops}")
+    print(f"{'prompt':>6} metric {'median':>10} {'law':>10}  error  runs (ms)")
     for length, (measured, predicted) in times.items():
         for i, metric in enumerate(("TTFT", "ITL")):
             ms = [m[i] for m in measured]

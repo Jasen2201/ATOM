@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""The timing cases' shared logic: the load-average refusal, the report header, a topology
-under a step law, client and law times, and a median held to its bound."""
+"""The timing cases' shared logic: the load-average refusal, the report header, a
+topology under a step law, client and law times, and a median held to its bound."""
 
 import dataclasses
 from pathlib import Path
@@ -62,11 +62,11 @@ def test_law_times_price_through_the_first_sample_then_each_later_chunks_step():
     # A middle chunk, the final one (the first token), two decodes the client saw and
     # one more the engine ran after the request's last token.
     steps = [(0.16, False), (0.18, True), (0.008, True), (0.009, True), (0.007, True)]
-    ttft, itl = tools.law_times(steps, [1, 4, 3])
-    assert ttft == pytest.approx(0.34)
+    ttft, itl = tools.law_times(steps, [1, 4, 3], 0.0013)
+    assert ttft == pytest.approx(0.3413)  # the host hops ride on TTFT alone
     assert itl == pytest.approx(0.017 / 7)
     with pytest.raises(ValueError, match="4 chunks, 2 sampling steps"):
-        tools.law_times(steps[:3], [1, 4, 3, 4])
+        tools.law_times(steps[:3], [1, 4, 3, 4], 0.0013)
 
 
 @pytest.mark.parametrize(
