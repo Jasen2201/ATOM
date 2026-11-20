@@ -22,7 +22,7 @@ use crate::{
         generate_response, AbortRequest, AbortResponse, Frames, GenerateComplete, GenerateRequest,
         GenerateResponse, GetModelInfoRequest, GetModelInfoResponse, GetServerInfoRequest,
         GetServerInfoResponse, HealthCheckRequest, HealthCheckResponse,
-        PrepareStructuredOutputRequest, PrepareStructuredOutputResponse,
+        PrepareStructuredOutputRequest, PrepareStructuredOutputResponse, ProtocolVersion,
     },
     core::{
         placement::PlacementPlan, steps::WorkflowEngines, worker::RuntimeType, JobQueue,
@@ -40,6 +40,9 @@ use crate::{
 };
 
 type Empty<T> = tokio_stream::Empty<Result<T, Status>>;
+
+/// The atom.grpc.v1 protocol version this router speaks.
+const CURRENT: u32 = ProtocolVersion::Current as u32;
 
 /// An ATOM instance as registration sees it: its model info, protocol version and DP
 /// size. Each Generate records its DP rank and completes.
@@ -255,7 +258,7 @@ async fn render(ctx: &AppContext, model: &str, kwargs: Value) -> String {
 #[tokio::test]
 async fn an_atom_worker_registers_as_atom_with_its_model_info_labels() {
     let info = model_info("atom-labels", "label: {{ messages[0].content }}", "{}");
-    let url = serve_atom(info, 1).await;
+    let url = serve_atom(info, CURRENT).await;
     let ctx = context();
     register(&ctx, json!({ "url": url })).await.unwrap();
 
@@ -278,18 +281,19 @@ async fn an_atom_worker_registers_as_atom_with_its_model_info_labels() {
 
 #[tokio::test]
 async fn an_atom_worker_with_another_protocol_version_is_refused() {
-    let url = serve_atom(model_info("atom-v2", "", "{}"), 2).await;
+    let url = serve_atom(model_info("atom-v2", "", "{}"), CURRENT + 1).await;
     let ctx = context();
     let error = register(&ctx, json!({ "url": url })).await.unwrap_err();
 
-    assert!(error.contains("protocol version is 2"), "{error}");
+    let refused = format!("protocol version is {}", CURRENT + 1);
+    assert!(error.contains(&refused), "{error}");
     assert!(ctx.worker_registry.get_by_url(&url).is_none());
 }
 
 #[tokio::test]
 async fn the_tokenizer_job_renders_with_the_label_template_without_a_flag() {
     let info = model_info("atom-template", "label: {{ messages[0].content }}", "{}");
-    let url = serve_atom(info, 1).await;
+    let url = serve_atom(info, CURRENT).await;
     let ctx = context();
     register(&ctx, json!({ "url": url })).await.unwrap();
 
@@ -304,7 +308,7 @@ async fn an_explicit_chat_template_wins_over_the_label() {
     let flag = dir.path().join("flag.jinja");
     std::fs::write(&flag, "flag: {{ messages[0].content }}").unwrap();
     let info = model_info("atom-flag", "label: {{ messages[0].content }}", "{}");
-    let url = serve_atom(info, 1).await;
+    let url = serve_atom(info, CURRENT).await;
     let ctx = context();
     register(&ctx, json!({ "url": url, "chat_template": flag }))
         .await
@@ -317,7 +321,7 @@ async fn an_explicit_chat_template_wins_over_the_label() {
 async fn default_template_kwargs_join_the_request_kwargs_the_request_winning() {
     let template = "{{ greeting }} {{ flag }}: {{ messages[0].content }}";
     let defaults = r#"{"greeting": "hello", "flag": "default"}"#;
-    let url = serve_atom(model_info("atom-kwargs", template, defaults), 1).await;
+    let url = serve_atom(model_info("atom-kwargs", template, defaults), CURRENT).await;
     let ctx = context();
     register(&ctx, json!({ "url": url })).await.unwrap();
 
@@ -344,7 +348,7 @@ async fn a_vllm_worker_is_still_detected_as_vllm() {
 async fn an_atom_worker_reporting_dp_size_4_registers_four_ranks_each_sending_its_own() {
     let fake = Arc::new(FakeAtom {
         info: model_info("atom-dp", "", "{}"),
-        protocol_version: 1,
+        protocol_version: CURRENT,
         dp_size: 4,
         ..Default::default()
     });
