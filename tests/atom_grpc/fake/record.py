@@ -56,6 +56,7 @@ def _lines(events) -> bytes:
 
 def _admission(seq, arrival: float) -> dict:
     sampling = {name: getattr(seq, name) for name in SAMPLING}
+    chain = getattr(seq, "prompt_hash_chain", None)  # it rides beside the seq
     return {
         "kind": "admit",
         "time": arrival,
@@ -66,6 +67,7 @@ def _admission(seq, arrival: float) -> dict:
         "stop_token_sequences": seq.stop_token_sequences,
         "kv_transfer_params": seq.kv_transfer_params,
         "data_parallel_rank": seq.data_parallel_rank,
+        "prompt_hash_chain": None if chain is None else chain.hashes,
     }
 
 
@@ -173,6 +175,7 @@ class Request:
     stop_token_sequences: list[list[int]]
     kv_transfer_params: dict | None
     data_parallel_rank: int | None
+    prompt_hash_chain: list[int] | None = None  # the block hashes the frontend shipped
     steps: list[Step] = field(default_factory=list)
     receive: dict | None = None  # its KV receive's report, on a P/D decode instance
 
