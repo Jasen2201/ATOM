@@ -10,13 +10,24 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 import numpy as np
+import torch
 
-from atom.kv_transfer.disaggregation import KVConnectorFactory, KVConnectorOutput
+from atom.kv_transfer.disaggregation import (
+    KVConnectorFactory,
+    KVConnectorOutput,
+    kv_config_has_producer,
+)
 from atom.model_engine.kv_block import STATE_SLOT_CLASS
-from atom.model_engine.scheduler import ScheduledBatchOutput, defers_output
+from atom.model_engine.scheduler import (
+    ScheduledBatch,
+    ScheduledBatchOutput,
+    defers_output,
+)
 from atom.model_engine.state_runtime import StateRuntime
+from atom.model_engine.tp_multinode import managed_store_client
+from atom.utils.forward_context import ForwardMode
 from tests.atom_grpc.fake.ids import IdLaw, fingerprint
-from tests.atom_grpc.fake.law import ConstantLaw, Shape, StepLaw
+from tests.atom_grpc.fake.law import ConstantLaw, Group, Shape, StepLaw
 from tests.atom_grpc.fake.record import Recorder
 from tests.atom_grpc.fake.serve import CONFIG_ENV
 
@@ -136,23 +147,34 @@ class FakeRunner:
         self.id_law = IdLaw.for_model(config.model, stop)
         self.step_law = ConstantLaw(self.fake.step_s)
         if self.fake.law:
-            if config.parallel_config.data_parallel_size > 1:
-                raise ValueError(
-                    "a step law prices DP 1 steps; a DP dummy has no price"
-                )
             self.step_law = StepLaw.load(self.fake.law)
         # The ladder a decode's rung comes from, narrowed as ModelRunner narrows it.
         top = min(
             config.max_num_seqs, config.max_num_batched_tokens // (self.mtp_k + 1)
         )
         captured = [size for size in config.capture_sizes if size <= top]
-        self.ladder = [] if config.enforce_eager else sorted(captured)
+        self.ladder = np.asarray(sorted(captured), np.int32)
         self.clock = CLOCKS[self.fake.clock]()
         self.gpu = SerialGpu(self.clock)
         self.kv = np.zeros(0, np.int32)  # the token id each KV slot holds
         self.requests: dict[int, _Request] = {}
         self.pending = None  # deferred output: the last output step's (output, end)
         self.dp_rank = config.parallel_config.data_parallel_rank
+        self.dp_size = config.parallel_config.data_parallel_size
+        self.dp_group = None  # this TP rank's DP group, as ModelRunner's CPU one
+        if self.dp_size > 1:
+            store = managed_store_client(config)
+            torch.distributed.init_process_group(
+                "gloo",
+                store=torch.distributed.PrefixStore(f"fake-dp-tp{rank}", store),
+                rank=self.dp_rank,
+                world_size=self.dp_size,
+            )
+            self.dp_group = torch.distributed.group.WORLD
+        self.running_tokens = np.zeros(self.dp_size, np.int32)  # `decide` fills it
+        # A P/D producer never speculates, so its DP dummy verifies no draft.
+        producer = kv_config_has_producer(config.kv_transfer_config)
+        self.dummy_spec_step = 0 if producer else self.mtp_k
         pc = config.parallel_config  # the engine's output is its last PP stage's
         last = pc.pipeline_parallel_rank == config.pipeline_parallel_size - 1
         self.record = Recorder.from_env() if rank == 0 and last else None
@@ -241,8 +263,14 @@ class FakeRunner:
         pass
 
     def dummy_execution(self) -> ScheduledBatchOutput:
-        _, _, end = self.gpu.run(self.fake.step_s)  # DP only, where the law is constant
-        return self._hand_back(self._output([], [], [], []), end)
+        """ModelRunner's: a step of no request, at its DP group's phase and width."""
+        batch = ScheduledBatch(
+            seqs={},
+            num_scheduled_tokens=[],
+            total_tokens_num=0,
+            num_spec_step=self.dummy_spec_step,
+        )
+        return self.forward(batch)
 
     def forward(self, batch) -> ScheduledBatchOutput:
         shape = self._shape(batch)
@@ -251,6 +279,7 @@ class FakeRunner:
         output, emitted = self._step(batch)
         if self.record is not None:
             offset = self.clock.offset()  # one offset for the step's three times
+            ids = batch.req_ids or [None]  # a DP dummy's row is no request's
             self.record.step(
                 self.dp_rank,
                 emitted,
@@ -258,7 +287,7 @@ class FakeRunner:
                 called=called + offset,
                 start=start + offset,
                 price=price,
-                requests=[[r, *row] for r, row in zip(batch.req_ids, shape.requests)],
+                requests=[[r, *row] for r, row in zip(ids, shape.requests)],
                 rung=shape.rung,
                 samples=shape.samples,
             )
@@ -267,15 +296,35 @@ class FakeRunner:
         return self._hand_back(output, end)
 
     def _shape(self, batch) -> Shape:
-        """What a law prices `batch` by; a decode's rung is the narrowest captured size
-        holding its requests, as `ForwardMode.decide` picks one at DP 1."""
-        prefill = batch.total_seqs_num_prefill
+        """What a law prices `batch` by, in the shape `ForwardMode.decide` settles over
+        the DP group; a DP dummy runs Compass's one row, of its group's phase."""
+        mode = ForwardMode.decide(
+            batch=batch,
+            dp_size=self.dp_size,
+            dp_group=self.dp_group,
+            enforce_eager=self.config.enforce_eager,
+            step_needs_eager=False,
+            capture_sizes=self.ladder,
+            is_block_drafter=False,
+            tbo_on=False,
+            local_tbo=(False, False, 0, 0),
+            max_seqlen_q=batch.num_spec_step + 1,
+            running_tokens_per_dp_rank=self.running_tokens,
+        )
+        sync, prefill = mode.sync, batch.total_seqs_num_prefill
         rows = zip(batch.num_scheduled_tokens.tolist(), batch.context_lens.tolist())
         requests = tuple((q, c, i >= prefill) for i, (q, c) in enumerate(rows))
-        rung = None
-        if not prefill:
-            rung = next((size for size in self.ladder if size >= len(requests)), None)
-        return Shape(requests, rung, batch.produces_output())
+        dummy, prefills = not requests, sync.any_rank_has_prefill
+        # A prefill token while a peer prefills, else a decode of the spec width.
+        if dummy:
+            q = batch.num_spec_step + 1
+            requests = ((1, 1, False),) if prefills else ((q, q, True),)
+        group = None
+        if self.dp_size > 1:
+            tokens = sync.scheduled_tokens_per_dp_rank
+            group = Group(int(tokens.max()), dummy, prefills, not tokens.any())
+        rung = mode.running_bs if mode.use_cudagraph else None
+        return Shape(requests, rung, batch.produces_output(), group)
 
     def _hand_back(self, output, end: float) -> ScheduledBatchOutput:
         """The output a step returns once it is ready: deferred, the step before's."""

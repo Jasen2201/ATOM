@@ -22,13 +22,24 @@ PER_REQUEST = ("step", "seqs")  # the draft's propose and draft-KV passes
 UNPRICED = ("short_propose", "forward")  # law forms this port refuses
 
 
+class Group(NamedTuple):
+    """A DP rank's step in its group: the most tokens a rank scheduled, and whether this
+    rank runs a dummy, some rank prefills and every rank runs a dummy."""
+
+    peak: int
+    dummy: bool
+    prefills: bool
+    idle: bool
+
+
 class Shape(NamedTuple):
     """A step as a law prices it: (query tokens, context tokens, decode) per request,
-    the capture rung its decode replays (None for none) and whether it samples."""
+    the rung its decode replays (None for none), whether it samples, its DP `Group`."""
 
     requests: tuple
     rung: int | None
     samples: bool
+    group: Group | None = None  # None on one rank
 
 
 class Vector:
@@ -85,6 +96,8 @@ class StepLaw:
     def price(self, shape: Shape) -> float:
         """The step's seconds, its terms folded left in Compass's order, which `sum`'s
         compensated float sum would not reproduce bit for bit."""
+        if self._free(shape):
+            return 0.0
         terms, kv = self._terms(shape)
         drafts = []
         if self.draft:
@@ -95,11 +108,23 @@ class StepLaw:
             total += seconds
         return total
 
+    def _free(self, shape: Shape) -> bool:
+        """Compass's 0 s DP decodes, at a rung with no vector: one replaying no graph as
+        a dummy or beside a prefilling peer, and a dummy of an idle group."""
+        group = shape.group
+        if group is None or not all(decode for _, _, decode in shape.requests):
+            return False
+        eager = shape.rung is None
+        free = (group.dummy or group.prefills) if eager else group.idle
+        return free and shape.rung not in self.decode
+
     def _terms(self, shape: Shape) -> tuple[list, list]:
         """This law's terms for `shape` and, apart, its draft-KV pass's: the target's."""
         rows = [(q, c) for q, c, decode in shape.requests if not decode]
         if rows and len(rows) < len(shape.requests):
             raise ValueError("a step mixing prefill and decode rows")
+        group = shape.group
+        dummy = group is not None and group.dummy  # which runs no draft-KV pass
         per_request = {"step": 1, "seqs": len(shape.requests)}
         if not rows:
             vector = self.decode.get(shape.rung)
@@ -109,11 +134,12 @@ class StepLaw:
             context = [c for _, c, _ in shape.requests]
             padding = shape.rung * max(context) - sum(context) if shape.rung else 0
             counts = {"step": 1, "context": sum(context), "graph_padding": padding}
-            kv = self.draft_kv.price(per_request) if self.draft_kv else []
+            kv = self.draft_kv.price(per_request) if self.draft_kv and not dummy else []
             return vector.price(counts), kv
         if not self.prefill:
             raise ValueError(f"no {self.name}prefill vector")
         tokens, samples = sum(q for q, _ in rows), shape.samples
+        peak = tokens if group is None else group.peak  # what the token graph holds
         counts = {
             "step": 1,
             "tokens": tokens,
@@ -122,13 +148,11 @@ class StepLaw:
             "history": sum(c for _, c in rows) - tokens,
             "seqs": len(rows) if samples else 0,
             "out": int(samples),
-            "padding": next(
-                (b - tokens for b in self.prefill.buckets if b >= tokens), 0
-            ),
+            "padding": next((b - tokens for b in self.prefill.buckets if b >= peak), 0),
         }
         terms, kv = self.prefill.price(counts), []
         if self.output_prefill_kv and samples:
-            terms, kv = [], terms
+            terms, kv = [], ([] if dummy else terms)
         if self.propose and samples:
             terms += self.propose.price(per_request)
         return terms, kv

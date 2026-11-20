@@ -157,7 +157,7 @@ class Step(NamedTuple):
 
 class Forward(NamedTuple):
     """One step the fake GPU ran, at wall-clock times, and what its law priced: per
-    request [seq_id, query tokens, context tokens, decode], its rung and sampling."""
+    request [seq_id (None for a DP dummy), query, context, decode], rung, sampling."""
 
     dp_rank: int
     called: float  # when `forward` was called
