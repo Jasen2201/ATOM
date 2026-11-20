@@ -56,7 +56,7 @@ def _lines(events) -> bytes:
 
 def _admission(seq, arrival: float) -> dict:
     sampling = {name: getattr(seq, name) for name in SAMPLING}
-    chain = getattr(seq, "prompt_hash_chain", None)  # it rides beside the seq
+    chain = getattr(seq, "prompt_hash_chain", None)  # add_request ships it beside seq
     return {
         "kind": "admit",
         "time": arrival,
