@@ -1,15 +1,25 @@
-# One P and one D (DP 2) over fake Mooncake: a block moves in 0.1 s, P's handshake port
-# names only its fake socket, and D fails rank 1's receives of prompts starting [3, 3, 3].
+# One P, chunking its transfers, and one D (DP 2) over fake Mooncake; atomesh P/D over
+# their HTTP and over their gRPC servers. P's handshake port names only its fake socket.
 
 [[instance]]
 name = "p"
 model = "../fixtures/deepseek_v3_mtp"
 args = [
     "--method", "mtp", "--num-speculative-tokens", "3",
+    # P's decode rungs and batch kept to those its law prices
+    "--cudagraph-capture-sizes", "[1,2,4]", "--max-num-seqs", "4",
     "--kv-transfer-config",
     '{"kv_connector": "mooncake", "kv_role": "kv_producer", "enable_chunked_transfer": true}',
 ]
-fake = { step_s = 0.001, block_bytes = 100_000_000, bandwidth_gb_s = 1.0, transfer_timeout_s = 6.0 }
+grpc = true
+
+[instance.fake]
+# From the repository root; under it a prefill of 16001 tokens takes about 2.7 s.
+law = "tests/atom_grpc/fixtures/laws/test.json"
+num_kvcache_blocks = 2304  # below D's pool: P refuses a prompt that D takes
+block_bytes = 2_000_000  # a block moves in 2 ms
+bandwidth_gb_s = 1.0
+transfer_timeout_s = 6.0
 
 [[instance]]
 name = "d"
@@ -19,9 +29,35 @@ args = [
     "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_consumer"}',
 ]
 dp = 2
+grpc = true
 
 [instance.fake]
 acceptance_length = 3.51
 step_s = 0.001
-faults = [{ fault = "fail", dp_rank = 1, prompt_prefix = [3, 3, 3] }]
+# Rank 1 fails receives of prompts starting [3, 3, 3]; every rank fails "zo zo zo ..."
+# and times out "zu zu zu ...": atomesh replaces D's params, so no request tags a fault.
+faults = [
+    { fault = "fail", dp_rank = 1, prompt_prefix = [3, 3, 3] },
+    { fault = "fail", prompt_prefix = [106, 106, 106] },
+    { fault = "timeout", prompt_prefix = [107, 107, 107] },
+]
 env = { ATOM_PD_FAILED_WRITE_HOLD_S = "2" }
+
+[[router]]
+name = "http"
+prefill = ["p"]
+decode = ["d"]
+grpc = false
+args = ["--backend", "atom"]  # ATOM's flow in atomesh's HTTP P/D router
+
+[[router]]
+name = "grpc"
+prefill = ["p"]
+decode = ["d"]
+
+# The gRPC router, with every request on P's and D's Sessions
+[[router]]
+name = "session"
+prefill = ["p"]
+decode = ["d"]
+args = ["--atom-grpc-session"]

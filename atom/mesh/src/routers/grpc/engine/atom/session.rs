@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 use serde_json::Value as Json;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
-use tracing::warn;
+use tracing::{debug, warn, Level};
 
 use super::{pair::atom_client, AtomClient};
 use crate::atom_engine::grpc::{
@@ -29,6 +29,10 @@ use crate::routers::token_handle::engine_error::EngineError;
 
 /// A Session's seq ids stay below 2^24, the window ATOM maps each Session's ids into.
 const SEQ_IDS: u64 = 1 << 24;
+
+/// The reader's debug event per StreamBatch: its arrival on CLOCK_MONOTONIC and its seq_ids.
+/// Off unless RUST_LOG enables it: atomesh's own filter covers only `mesh` targets.
+const STEP_ARRIVAL: &str = "atom_session_step";
 
 type Output = Result<GenerateResponse, Status>;
 
@@ -198,7 +202,14 @@ async fn read(mut inbound: Streaming<Frames>, routes: Arc<Mutex<Routes>>, url: S
     let status = loop {
         match inbound.message().await {
             Ok(Some(message)) => {
-                let routed = Inbound::decode(message.frames).and_then(|m| routes.lock().route(&m));
+                let arrived =
+                    tracing::enabled!(target: STEP_ARRIVAL, Level::DEBUG).then(monotonic_ns);
+                let routed = Inbound::decode(message.frames).and_then(|m| {
+                    if let (Some(at), Body::Stream(batch)) = (arrived, &m.body) {
+                        debug!(target: STEP_ARRIVAL, at, seq_ids = ?batch.seq_ids, "StreamBatch arrived");
+                    }
+                    routes.lock().route(&m)
+                });
                 if let Err(e) = routed {
                     break Status::internal(format!("ATOM Session: {e}"));
                 }
@@ -209,6 +220,17 @@ async fn read(mut inbound: Streaming<Frames>, routes: Arc<Mutex<Routes>>, url: S
     };
     warn!(url = %url, %status, "ATOM Session failed");
     routes.lock().fail(&status);
+}
+
+/// CLOCK_MONOTONIC in nanoseconds, as Python's `time.monotonic_ns` reads it.
+fn monotonic_ns() -> u64 {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock_gettime writes one timespec through a pointer to a live one.
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+    now.tv_sec as u64 * 1_000_000_000 + now.tv_nsec as u64
 }
 
 #[derive(Default)]

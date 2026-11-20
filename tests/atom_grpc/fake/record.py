@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from tests.atom_grpc.fake.serve import RECORD_ENV
+from tests.atom_grpc.fake.serve import RECORD_ENV, STAMPS_ENV
 
 RECORD = "engine_record.jsonl"  # its name in an instance's workdir
 # SamplingParams' fields as a Sequence holds them (`logprobs` as `return_logprobs`).
@@ -56,6 +56,7 @@ def _lines(events) -> bytes:
 
 def _admission(seq, arrival: float) -> dict:
     sampling = {name: getattr(seq, name) for name in SAMPLING}
+    chain = getattr(seq, "prompt_hash_chain", None)  # add_request ships it beside seq
     return {
         "kind": "admit",
         "time": arrival,
@@ -66,6 +67,7 @@ def _admission(seq, arrival: float) -> dict:
         "stop_token_sequences": seq.stop_token_sequences,
         "kv_transfer_params": seq.kv_transfer_params,
         "data_parallel_rank": seq.data_parallel_rank,
+        "prompt_hash_chain": None if chain is None else chain.hashes,
     }
 
 
@@ -118,8 +120,8 @@ class Recorder:
 
 
 def record_api_process() -> None:
-    """When `RECORD_ENV` is set, record what this API process admits to its engine and
-    every tokenizer call it makes."""
+    """When `RECORD_ENV` is set, record what this API process admits to its engine, each
+    abort it asks of the engine and every tokenizer call it makes."""
     recorder = Recorder.from_env()
     if recorder is None:
         return
@@ -127,6 +129,7 @@ def record_api_process() -> None:
     from atom.model_engine.engine_core_mgr import CoreManager
 
     add_request, load_tokenizer = CoreManager.add_request, api_server.load_tokenizer
+    abort_request = CoreManager.abort_request
 
     def recorded_add_request(manager, seqs):
         now = time.time()
@@ -134,11 +137,47 @@ def record_api_process() -> None:
         add_request(manager, seqs)
         recorder.write(lines)
 
+    def recorded_abort_request(manager, seq_id):
+        recorder.write(
+            _lines([{"kind": "abort", "time": time.time(), "seq_id": seq_id}])
+        )
+        abort_request(manager, seq_id)
+
     def recorded_tokenizer(*args, **kwargs):
         return recorder.watch(load_tokenizer(*args, **kwargs))
 
     CoreManager.add_request = recorded_add_request
+    CoreManager.abort_request = recorded_abort_request
     api_server.load_tokenizer = recorded_tokenizer
+
+
+def stamp_grpc_steps() -> None:
+    """When `STAMPS_ENV` names a file, append to it each step handed to gRPC: when, in
+    CLOCK_MONOTONIC ns, and the engine seq ids of its outputs that carry tokens."""
+    path = os.environ.get(STAMPS_ENV)
+    if not path:
+        return
+    from atom.entrypoints.grpc.server import StepOutputs
+
+    recorder, flush = Recorder(path), StepOutputs.flush
+
+    def stamped(steps: StepOutputs) -> None:
+        at = time.monotonic_ns()
+        buffered = getattr(steps._local, "step", None) or {}
+        outputs = (output for step in buffered.values() for *_, output in step)
+        seq_ids = [output.request_id for output in outputs if output.output_tokens]
+        flush(steps)
+        if seq_ids:
+            recorder.write(_lines([{"at": at, "seq_ids": seq_ids}]))
+
+    StepOutputs.flush = stamped
+
+
+def grpc_steps(path: Path) -> list[tuple[int, list[int]]]:
+    """The steps `stamp_grpc_steps` wrote to `path`, as written: (at, seq ids)."""
+    text = path.read_text()
+    lines = text[: text.rfind("\n") + 1].splitlines()  # a process may be mid-write
+    return [(step["at"], step["seq_ids"]) for step in map(json.loads, lines)]
 
 
 class Step(NamedTuple):
@@ -173,8 +212,10 @@ class Request:
     stop_token_sequences: list[list[int]]
     kv_transfer_params: dict | None
     data_parallel_rank: int | None
+    prompt_hash_chain: list[int] | None = None  # the block hashes the frontend shipped
     steps: list[Step] = field(default_factory=list)
     receive: dict | None = None  # its KV receive's report, on a P/D decode instance
+    aborted: float | None = None  # when the API first asked the engine to abort it
 
     @property
     def output_ids(self) -> list[int]:
@@ -190,7 +231,7 @@ class EngineRecord:
         text = path.read_text()
         whole = text[: text.rfind("\n") + 1]  # a process may be mid-write
         events = [json.loads(line) for line in whole.splitlines()]
-        steps, receives = defaultdict(list), {}
+        steps, receives, aborts = defaultdict(list), {}, {}
         self.forwards: list[Forward] = []
         for event in events:
             if event["kind"] == "step":
@@ -199,6 +240,8 @@ class EngineRecord:
                     steps[seq_id].append(Step(event["time"], event["dp_rank"], ids))
             elif event["kind"] == "receive":
                 receives[event["seq_id"]] = event
+            elif event["kind"] == "abort":
+                aborts.setdefault(event["seq_id"], event["time"])
         self.requests: dict[int, Request] = {}
         self.tokenizer: list[dict] = []
         for event in events:
@@ -208,6 +251,7 @@ class EngineRecord:
                     **fields,
                     steps=steps[event["seq_id"]],
                     receive=receives.get(event["seq_id"]),
+                    aborted=aborts.get(event["seq_id"]),
                 )
             elif event["kind"] in ("encode", "decode"):
                 self.tokenizer.append(event)

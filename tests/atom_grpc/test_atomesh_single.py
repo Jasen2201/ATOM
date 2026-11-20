@@ -26,6 +26,7 @@ from tests.atom_grpc.harness.topologies import TOPOLOGIES, Topology, group_membe
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "deepseek_v3_mtp"
 ROUTES = {"chat": "/v1/chat/completions", "completions": "/v1/completions"}
+TRANSPORTS = {"generate": "mesh", "session": "mesh-session"}  # each one's router
 # atomesh's own tokenizer, template and runtime flags, which no router here is given
 FLAGS = (
     "--model-path",
@@ -167,13 +168,16 @@ def test_atomesh_finds_atom_over_grpc_and_takes_its_tokenizer_and_template(topol
 
 
 @pytest.mark.topology("single")
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("stream", [False, True], ids=["unary", "stream"])
 @pytest.mark.parametrize("route", ROUTES)
 def test_atom_gets_what_atomesh_renders_and_the_client_every_token_once_in_order(
-    topology, tokenizer, route, stream
+    topology, tokenizer, route, stream, transport
 ):
-    router, instance = topology.routers["mesh"], topology.instances["single"]
-    info, content = model_info(instance), words(16, lead=2 * [*ROUTES].index(route))
+    router = topology.routers[TRANSPORTS[transport]]
+    instance = topology.instances["single"]
+    lead = 2 * [*ROUTES].index(route) + 10 * [*TRANSPORTS].index(transport)
+    info, content = model_info(instance), words(16, lead)
     content += " Hello" if stream else " world"  # one prompt per case
     request = body(route, info.served_model_name, content, max_tokens=24, stream=stream)
     status, replies = send(router, route, request)
@@ -208,13 +212,16 @@ def open_request(router, route: str, request: dict) -> http.client.HTTPConnectio
 
 
 @pytest.mark.topology("single")
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("stream", [False, True], ids=["unary", "stream"])
 @pytest.mark.parametrize("route", ROUTES)
 def test_a_client_disconnect_aborts_the_request_at_atom_and_atomesh_load_returns_to_0(
-    topology, tokenizer, route, stream
+    topology, tokenizer, route, stream, transport
 ):
-    router, instance = topology.routers["mesh"], topology.instances["single"]
-    info, content = model_info(instance), words(16, lead=4 + [*ROUTES].index(route))
+    router = topology.routers[TRANSPORTS[transport]]
+    instance = topology.instances["single"]
+    lead = 4 + [*ROUTES].index(route) + 10 * [*TRANSPORTS].index(transport)
+    info, content = model_info(instance), words(16, lead)
     content += " Hello" if stream else " world"  # one prompt per case
     wait_for(lambda: idle(instance, router), "idle instance and router")
     request = body(route, info.served_model_name, content, max_tokens=MAX_TOKENS)
@@ -258,10 +265,14 @@ REFUSALS = {  # what ATOM's HTTP route says, and the prompt's words and fields
 
 
 @pytest.mark.topology("single")
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("route", ROUTES)
 @pytest.mark.parametrize("case", REFUSALS)
-def test_atomesh_refuses_with_the_status_atom_http_routes_answer(topology, route, case):
-    router, instance = topology.routers["mesh"], topology.instances["single"]
+def test_atomesh_refuses_with_the_status_atom_http_routes_answer(
+    topology, route, case, transport
+):
+    router = topology.routers[TRANSPORTS[transport]]
+    instance = topology.instances["single"]
     info = model_info(instance)
     says, build = REFUSALS[case]
     count, fields = build(info.max_context_length)
@@ -269,6 +280,27 @@ def test_atomesh_refuses_with_the_status_atom_http_routes_answer(topology, route
     status, reply = instance.post(ROUTES[route], request)
     assert status == 400 and says in reply, reply
     assert router.post(ROUTES[route], request)[0] == status
+
+
+@pytest.mark.topology("single")
+@pytest.mark.parametrize("stream", [False, True], ids=["unary", "stream"])
+def test_a_repeated_chat_reports_the_prefix_cache_hit_the_http_chat_reports(
+    topology, stream
+):
+    router, instance = topology.routers["mesh"], topology.instances["single"]
+    info, content = model_info(instance), words(40, lead=6)
+    content += " Hello" if stream else " world"  # one prompt per case
+    request = body("chat", info.served_model_name, content, max_tokens=4, stream=stream)
+
+    def details(target) -> dict | None:
+        status, replies = send(target, "chat", request)
+        assert status == 200, replies
+        return answer("chat", replies)[2].get("prompt_tokens_details")
+
+    details(instance)  # the prompt's full blocks enter ATOM's prefix cache
+    over_http = details(instance)
+    assert over_http["cached_tokens"] > 0
+    assert details(router) == over_http
 
 
 def test_a_router_gets_its_instances_urls_and_waits_for_each_url_at_rank(tmp_path):

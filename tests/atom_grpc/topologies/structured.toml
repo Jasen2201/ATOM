@@ -32,3 +32,14 @@ workers = ["k3"]
 [[router]]
 name = "v41-mesh"
 workers = ["v41"]
+
+# A second router per instance, with every request on the instance's Session
+[[router]]
+name = "k3-session"
+workers = ["k3"]
+args = ["--atom-grpc-session"]
+
+[[router]]
+name = "v41-session"
+workers = ["v41"]
+args = ["--atom-grpc-session"]
