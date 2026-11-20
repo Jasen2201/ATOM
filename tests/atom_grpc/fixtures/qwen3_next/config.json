@@ -1,0 +1,8 @@
+{
+  "architectures": ["Qwen3NextForCausalLM"],
+  "model_type": "qwen3_next",
+  "vocab_size": 116,
+  "max_position_embeddings": 163840,
+  "bos_token_id": 1,
+  "eos_token_id": 2
+}
