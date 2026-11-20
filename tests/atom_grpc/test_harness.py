@@ -129,6 +129,12 @@ def test_the_session_fixture_runs_one_topology_at_a_time(monkeypatch):
     assert events == ["start single", "stop single", "start 1p1d", "stop 1p1d"]
 
 
+def test_from_conftest_still_imports_the_tests_conftest():
+    import conftest  # as tests/test_*.py do, once this package's conftest has loaded
+
+    assert Path(conftest.__file__).samefile(Path(__file__).parents[1] / "conftest.py")
+
+
 @pytest.mark.topology("single")
 def test_the_single_topology_serves_a_completion(topology):
     (instance,) = topology.instances.values()
