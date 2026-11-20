@@ -1,0 +1,27 @@
+# One P and one D (DP 2) over fake Mooncake, relay or chunked; P's handshake port only
+# names its fake socket. D fails rank 1's receives of prompts starting [3, 3, 3].
+
+[[instance]]
+name = "p"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "--method", "mtp", "--num-speculative-tokens", "3",
+    "--kv-transfer-config",
+    '{"kv_connector": "mooncake", "kv_role": "kv_producer", "enable_chunked_transfer": true}',
+]
+fake = { step_s = 0.001, block_bytes = 1000000, bandwidth_gb_s = 1.0, transfer_timeout_s = 6.0 }
+
+[[instance]]
+name = "d"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "2", "--enable-dp-attention", "--method", "mtp", "--num-speculative-tokens", "3",
+    "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_consumer"}',
+]
+dp = 2
+
+[instance.fake]
+acceptance_length = 3.51
+step_s = 0.001
+faults = [{ fault = "fail", dp_rank = 1, prompt_prefix = [3, 3, 3] }]
+env = { ATOM_PD_FAILED_WRITE_HOLD_S = "2" }

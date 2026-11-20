@@ -89,6 +89,11 @@ class Recorder:
         event = {"kind": "step", "time": end, "dp_rank": dp_rank, "rows": rows}
         self.write(_lines([event]))
 
+    def receive(self, seq_id: int, **transfer) -> None:
+        """D's KV receive for `seq_id` as it reported it: the transfer P scheduled."""
+        event = {"kind": "receive", "time": time.time(), "seq_id": seq_id, **transfer}
+        self.write(_lines([event]))
+
     def watch(self, tokenizer):
         """Record every encode and decode of `tokenizer`'s backend; returns it."""
         backend = tokenizer._tokenizer
@@ -154,6 +159,7 @@ class Request:
     kv_transfer_params: dict | None
     data_parallel_rank: int | None
     steps: list[Step] = field(default_factory=list)
+    receive: dict | None = None  # its KV receive's report, on a P/D decode instance
 
     @property
     def output_ids(self) -> list[int]:
@@ -169,20 +175,24 @@ class EngineRecord:
         text = path.read_text()
         whole = text[: text.rfind("\n") + 1]  # a process may be mid-write
         events = [json.loads(line) for line in whole.splitlines()]
-        steps = defaultdict(list)
+        steps, receives = defaultdict(list), {}
         for event in events:
             if event["kind"] == "step":
                 for seq_id, ids in event["rows"]:
                     steps[seq_id].append(Step(event["time"], event["dp_rank"], ids))
+            elif event["kind"] == "receive":
+                receives[event["seq_id"]] = event
         self.requests: dict[int, Request] = {}
         self.tokenizer: list[dict] = []
         for event in events:
             if event["kind"] == "admit":
                 fields = {k: v for k, v in event.items() if k != "kind"}
                 self.requests[event["seq_id"]] = Request(
-                    **fields, steps=steps[event["seq_id"]]
+                    **fields,
+                    steps=steps[event["seq_id"]],
+                    receive=receives.get(event["seq_id"]),
                 )
-            elif event["kind"] != "step":
+            elif event["kind"] in ("encode", "decode"):
                 self.tokenizer.append(event)
 
     def with_prompt(self, prompt_ids: list[int]) -> list[Request]:
