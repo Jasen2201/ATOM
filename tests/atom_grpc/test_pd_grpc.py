@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""ATOM's P/D flow through atomesh's gRPC mode on a fake 1P1D, each case against its HTTP
-P/D mode over the same P and D: what P and D are given, and how each request ends."""
+"""ATOM's P/D flow through atomesh's gRPC mode on a fake 1P1D, each case against its
+HTTP P/D mode over the same P and D: what P and D are given, how each request ends."""
 
 import concurrent.futures
 import http.client
@@ -142,7 +142,7 @@ def answer(reply: Reply) -> tuple[list[str], str | None]:
 
 
 def admitted(instance, prompt: list[int]) -> list:
-    """The instance's admissions of `prompt`, in order, as its engine record holds them."""
+    """The instance's admissions of `prompt` in its engine record, in order."""
     return EngineRecord(instance.workdir / RECORD).with_prompt(prompt)
 
 
@@ -191,6 +191,11 @@ def quiet(d) -> bool:
 
 def unloaded(topology) -> bool:
     return not any(any(loads(topology.routers[path]).values()) for path in PATHS)
+
+
+def settled(p) -> bool:
+    """P's fake GPU has ended every step given it; until then P's gauges are stale."""
+    return all(f.time < time.time() for f in EngineRecord(p.workdir / RECORD).forwards)
 
 
 @pytest.mark.topology("1p1d_relay")
@@ -412,7 +417,7 @@ def cancel_while_d_decodes(topology, tokenizer, path: str, lead: int) -> None:
     p_url, d_url = router.workers  # its prefill worker, then its decode worker
     assert loads(router) == {p_url: 0, d_url: 1}  # P's load ended with its prefill
     close(client)
-    wait_for(lambda: metrics(d)["atom:requests_running"] == 0, "D stopping")
+    wait_for(lambda: admitted(d, prompt)[0].aborted, "the cancel at D")
     (prefill,), (decode,) = admitted(p, prompt), admitted(d, prompt)
     assert prefill.aborted is None and decode.aborted is not None
     assert len(decode.output_ids) < MAX_TOKENS
@@ -473,7 +478,7 @@ def cancel_while_p_prefills(topology, tokenizer, path: str, lead: int) -> list:
     p, d = topology.instances["p"], topology.instances["d"]
     text = words(LONG, lead)
     prompt = tokenizer.encode(text, add_special_tokens=False)
-    wait_for(lambda: metrics(p)["atom:requests_running"] == 0, "P idle")
+    wait_for(lambda: settled(p), "P's steps to end")
     body = completion(model_info(p).served_model_name, text, 8, stream=True)
     client = start(topology.routers[path], body)
     wait_for(lambda: admitted(p, prompt), "P's admission")
@@ -485,6 +490,7 @@ def cancel_while_p_prefills(topology, tokenizer, path: str, lead: int) -> list:
     assert prefill.steps == [] or prefill.aborted < prefill.steps[0].time
     decodes = admitted(d, prompt)
     assert all(r.aborted is not None and r.steps == [] for r in decodes)
+    wait_for(lambda: settled(p), "P's steps to end")
     return decodes
 
 

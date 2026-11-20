@@ -1,4 +1,4 @@
-# 1p1d.toml with a P that relays: atomesh chunks every transfer from a P that publishes a
+# 1p1d.toml with a P that relays: atomesh chunks every transfer from a P publishing a
 # chunked-transfer template, so relay through atomesh needs a P without one.
 
 [[instance]]
@@ -6,13 +6,15 @@ name = "p"
 model = "../fixtures/deepseek_v3_mtp"
 args = [
     "--method", "mtp", "--num-speculative-tokens", "3",
-    "--cudagraph-capture-sizes", "[1,2,4]", "--max-num-seqs", "4",  # the law's decode rungs
+    # P's decode rungs and batch kept to those its law prices
+    "--cudagraph-capture-sizes", "[1,2,4]", "--max-num-seqs", "4",
     "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_producer"}',
 ]
 grpc = true
 
 [instance.fake]
-law = "tests/atom_grpc/fixtures/laws/test.json"  # from the repository root: a long prefill takes seconds
+# From the repository root; under it a prefill of 16001 tokens takes about 2.7 s.
+law = "tests/atom_grpc/fixtures/laws/test.json"
 num_kvcache_blocks = 2304  # below D's pool: P refuses a prompt that D takes
 block_bytes = 2_000_000  # a block moves in 2 ms
 bandwidth_gb_s = 1.0
