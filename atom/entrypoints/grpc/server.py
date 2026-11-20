@@ -74,8 +74,8 @@ def _run(address: str, servicer: AtomEngineServicer, listening: Future) -> None:
 
 
 async def _serve(address: str, servicer: AtomEngineServicer, listening: Future) -> None:
-    try:
-        server = grpc.aio.server()
+    try:  # without SO_REUSEPORT: a second server on the port fails, not shares it
+        server = grpc.aio.server(options=[("grpc.so_reuseport", 0)])
         pb_grpc.add_AtomEngineServicer_to_server(servicer, server)
         server.add_insecure_port(address)  # raises when the port is taken
         await server.start()
