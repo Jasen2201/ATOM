@@ -2091,6 +2091,46 @@ async def _configure_structured_output(
         raise ValueError(f"strict function tools: {exc}") from exc
 
 
+async def _configure_chat_structured_output(
+    sampling_params,
+    schema,
+    channel,
+    *,
+    tools,
+    all_tools,
+    tool_choice,
+    strict_schemas=None,
+    kv_transfer=None,
+    multimodal=False,
+):
+    """A chat's grammar: its response format or strict tools, else its tool calls
+    held to `all_tools`, the top-level tools and those its messages declare."""
+    await _configure_structured_output(
+        sampling_params,
+        schema,
+        channel,
+        tools=tools,
+        tool_choice=tool_choice,
+        strict_schemas=strict_schemas,
+        kv_transfer=kv_transfer,
+        multimodal=multimodal,
+    )
+    if schema is None and not strict_schemas and tool_call_parser_cls is not None:
+        await configure_tool_call_grammar(
+            engine,
+            _get_engine_config(),
+            sampling_params,
+            channel,
+            parser_cls=tool_call_parser_cls,
+            tools=all_tools,
+            tool_choice=tool_choice,
+            kv_transfer=kv_transfer,
+            multimodal=multimodal,
+            relaxed_mtp=envs.ATOM_ENABLE_RELAXED_MTP,
+            synthetic=synthetic_token_text is not None,
+        )
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest, raw_request: Request):
     """Handle chat completion requests (OpenAI-compatible)."""
@@ -2271,30 +2311,17 @@ async def _chat_completions(
                 prompt_or_tokens, assistant_prefix, _reasoning
             )
 
-        await _configure_structured_output(
+        await _configure_chat_structured_output(
             sampling_params,
             schema,
             _reasoning,
             tools=request.tools,
+            all_tools=request_tools(request),
             tool_choice=request.tool_choice,
             strict_schemas=strict_schemas,
             kv_transfer=request.kv_transfer_params,
             multimodal=_has_multimodal_content(messages),
         )
-        if schema is None and not strict_schemas and tool_call_parser_cls is not None:
-            await configure_tool_call_grammar(
-                engine,
-                _get_engine_config(),
-                sampling_params,
-                _reasoning,
-                parser_cls=tool_call_parser_cls,
-                tools=request_tools(request),
-                tool_choice=request.tool_choice,
-                kv_transfer=request.kv_transfer_params,
-                multimodal=_has_multimodal_content(messages),
-                relaxed_mtp=envs.ATOM_ENABLE_RELAXED_MTP,
-                synthetic=synthetic_token_text is not None,
-            )
 
         _reasoning = structured_response_channel(
             _reasoning, schema, bool(strict_schemas)
