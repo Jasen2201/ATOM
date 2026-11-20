@@ -62,7 +62,7 @@ logger = logging.getLogger("atom")
 KV_IDLE_DRAIN_INTERVAL_S = 0.001
 # How long a busy loop that finds its engine held sleeps before it looks again.
 HELD_POLL_S = 0.01
-# How long an idle busy loop waits for input before its periodic work runs again.
+# Longest an idle busy loop waits for input before its periodic work runs again.
 IDLE_WAIT_S = 0.01
 
 # Upper bound on the drain that runs after the loop exits. A peer that died
