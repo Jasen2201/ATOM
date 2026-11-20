@@ -5,6 +5,6 @@ import enum
 
 
 class QuantType(enum.Enum):
-    """aiter's quantization granularity, with the one member ATOM's config reads."""
+    """aiter's quantization granularity, with the members ATOM's config reads."""
 
     No = 0

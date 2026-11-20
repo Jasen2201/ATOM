@@ -20,7 +20,7 @@ from tests.atom_grpc.fake.instance import FakeInstance
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "deepseek_v3_mtp"
 LENGTH = 3.51  # the deployment recipe's mean tokens per verify step
-STARTUP_S = 1500  # one deadline for both; a loaded host takes minutes per instance
+STARTUP_S = 1500  # one deadline for every instance; a loaded host takes minutes each
 INSTANCES = {
     "mtp": ["--method", "mtp", "--num-speculative-tokens", "3"],
     "dp2": ["-tp", "2", "--enable-dp-attention"],
