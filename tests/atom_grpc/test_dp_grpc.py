@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from functools import partial
 from pathlib import Path
 
 import grpc
@@ -28,6 +29,7 @@ INSTANCES, ROUTERS = load(TOPOLOGIES / "dp.toml")
 (FAULT,) = next(spec.fake["faults"] for spec in INSTANCES if spec.name == "d")
 SIZES = {"prelay": (2, 1), "pchunked": (2, 1), "d": (4, 1)}  # (dp_size, tp_size)
 SYLLABLES = [c + v for c in "bcdfghjklmnprstvwxyz" for v in "aeiou"]  # fixture words
+XFER = re.compile(r"xfer-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")  # a chunked id
 WAIT_S = 120
 # Each request's session and the (P, D) ranks a mapping's routers pick: P round-robin,
 # D a new rank per new session; idx2idx moves P to D's rank where P has that rank.
@@ -85,16 +87,6 @@ def idle(router) -> bool:
     return not any(loads(router).values())
 
 
-def blocks_used(instance) -> float:
-    """The KV blocks the instance's DP ranks hold, from /metrics."""
-    with urllib.request.urlopen(instance.url + "/metrics", timeout=60) as reply:
-        lines = reply.read().decode().splitlines()
-    (used,) = (
-        s.split()[1] for s in lines if s.startswith("atom:kv_cache_blocks_used ")
-    )
-    return float(used)
-
-
 def wait_for(condition, what: str) -> None:
     deadline = time.monotonic() + WAIT_S
     while not condition():
@@ -115,14 +107,15 @@ def rank(request) -> int:
 
 
 def by_form(kv: dict) -> dict:
-    """`kv` with its transfer id as its form: an xfer id, or relay's P request id."""
-    if "transfer_id" not in kv:
-        return kv
-    transfer_id = str(kv["transfer_id"])
-    chunked = re.fullmatch(
-        r"xfer-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", transfer_id
-    )
-    return kv | {"transfer_id": "xfer" if chunked else type(kv["transfer_id"]).__name__}
+    """`kv` with what P assigns each request as its form: the transfer id (an xfer id,
+    or relay's P request id) and relay's block ids."""
+    form = dict(kv)
+    if "transfer_id" in kv:
+        chunked = XFER.fullmatch(str(kv["transfer_id"]))
+        form["transfer_id"] = "xfer" if chunked else type(kv["transfer_id"]).__name__
+    if "remote_block_ids" in kv:
+        form["remote_block_ids"] = len(kv["remote_block_ids"])
+    return form
 
 
 @pytest.mark.topology("dp")
@@ -168,9 +161,9 @@ def test_each_request_runs_on_the_ranks_atomesh_picks_and_gets_what_http_gives(
     paths = [topology.routers[f"{path}{mapping}_{mode}"] for path in ("http_", "")]
     lead = 10 * [*RANKS].index(mapping) + 5 * (mode == "chunked")
     for k, (session, ranks) in enumerate(zip(SESSIONS, RANKS[mapping])):
-        prompt = words(8, lead + k)  # fills no KV block, so P caches none of it
-        for router in paths:  # each from the same P state, so P allocates alike
-            wait_for(lambda: blocks_used(p) == 0, "P free of every block")
+        prompt = words(8, lead + k)  # under one KV block: no run hits P's prefix cache
+        for router in paths:
+            wait_for(partial(idle, router), "an idle router")
             status, reply = complete(router, prompt, f"{mapping}-{mode}-{session}")
             assert status == 200, reply
         ids = tokenizer.encode(prompt)
@@ -196,12 +189,12 @@ def test_each_url_at_rank_load_returns_to_0_after_a_completion_cancel_or_error(
 ):
     router, d = topology.routers["cache"], topology.instances["d"]
     prompt = words(8, 30 + ["completion", "cancel", "error"].index(outcome))
-    wait_for(lambda: idle(router), "an idle router")
+    wait_for(partial(idle, router), "an idle router")
     if outcome == "error":
         status, reply = complete(router, prompt, top_p=0.0)
         assert status == 400, reply
     else:
-        call = request(router, prompt, stream=True, max_tokens=5000)
+        call = request(router, prompt, stream=True, max_tokens=500)
         address = urllib.parse.urlsplit(call.full_url)
         connection = http.client.HTTPConnection(address.hostname, address.port, 60)
         connection.request("POST", address.path, call.data, dict(call.header_items()))
@@ -214,7 +207,7 @@ def test_each_url_at_rank_load_returns_to_0_after_a_completion_cancel_or_error(
         else:
             assert b"data: [DONE]" in reply.read()
         connection.close()
-    wait_for(lambda: idle(router), "every url@rank load back to 0")
+    wait_for(partial(idle, router), "every url@rank load back to 0")
 
 
 @pytest.mark.topology("dp")
@@ -235,7 +228,7 @@ def test_a_fault_on_one_d_rank_fails_only_the_requests_it_runs(topology, tokeniz
         tokens.setdefault(request.data_parallel_rank, set()).add(count)
     assert tokens.pop(faulted, None) == {0}, tokens
     assert tokens and all(counts == {4} for counts in tokens.values()), tokens
-    wait_for(lambda: idle(router), "every url@rank load back to 0")
+    wait_for(partial(idle, router), "every url@rank load back to 0")
 
 
 @pytest.mark.topology("dp")
@@ -246,7 +239,7 @@ def test_a_repeated_prefix_goes_back_to_the_ranks_that_served_it(topology, token
         prefix, placed = words(8, lead), []
         for more in range(3):  # the prefix alone, then with one and two more words
             prompt = f"{prefix} {words(more, lead + 8)}".strip()
-            wait_for(lambda: idle(router), "equal loads")
+            wait_for(partial(idle, router), "equal loads")
             status, reply = complete(router, prompt)
             assert status == 200, reply
             ids = tokenizer.encode(prompt)

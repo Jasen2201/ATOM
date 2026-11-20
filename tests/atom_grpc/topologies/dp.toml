@@ -1,7 +1,5 @@
-# P DP2 and D DP4 under DP attention over fake Mooncake: `prelay` relays, `pchunked` transfers
-# in chunks, and D fails rank 2's receives of prompts starting "zu zo zu" one second late.
-# Each mapping and mode has a gRPC router and its HTTP twin; their P round-robins and their D
-# keeps a session's rank, so both place the same request alike. `cache` routes cache-aware.
+# P DP2 (`prelay` relays, `pchunked` sends chunks) and D DP4 over fake Mooncake; D fails
+# rank 2's receives of prompts starting "zu zo zu", reported a second later.
 
 [[instance]]
 name = "prelay"
@@ -39,6 +37,8 @@ grpc = true
 faults = [{ fault = "fail", dp_rank = 2, prompt_prefix = [107, 106, 107] }]
 env = { ATOM_PD_FAILED_WRITE_HOLD_S = "1" }
 
+# Per mapping and mode, a gRPC router and its HTTP twin: P round-robin, D one rank a
+# session, so both place the same requests alike.
 [[router]]
 name = "none_relay"
 prefill = ["prelay"]
@@ -111,6 +111,7 @@ args = [
     "--atom-pd-rank-mapping-policy", "idx2idx",
 ]
 
+# Cache-aware P and D, rank mapping none.
 [[router]]
 name = "cache"
 prefill = ["prelay"]
