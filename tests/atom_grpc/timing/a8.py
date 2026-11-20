@@ -36,7 +36,6 @@ FIXTURE = TOPOLOGIES.parent / "fixtures" / "deepseek_v3_mtp"
 # The AgentX trace at revision 23f152f6 in HF's hub cache layout, and the recipe's model files.
 TRACE = Path("/share_nfs/models/datasets--semianalysisai--cc-traces-weka-062126")
 TOKENIZER = Path("/share_nfs/models/deepseek-ai/DeepSeek-V4.1-Flash")
-TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json", "chat_template.jinja")
 HARNESS = "1.0.9"  # agentx-harness, CI's
 PATHS, GRPC_PATHS = ("http", "grpc", "session"), ("grpc", "session")
 COPIES = {"prefill": 3, "decode": 4}  # instances of a8.toml's P and D
@@ -94,7 +93,7 @@ def model_dir(tokenizer: Path, out: Path) -> Path:
     out.mkdir(parents=True)
     (out / "config.json").write_text(json.dumps(config))
     (out / "generation_config.json").write_text(json.dumps(ids))
-    for name in TOKENIZER_FILES:
+    for name in ("tokenizer.json", "tokenizer_config.json", "chat_template.jinja"):
         shutil.copyfile(tokenizer / name, out / name)
     return out
 
@@ -102,12 +101,8 @@ def model_dir(tokenizer: Path, out: Path) -> Path:
 def hub_cache(trace: Path, hub: Path) -> None:
     """A writable copy of the trace's hub cache, its blobs as files: `datasets` loads it
     online, downloading nothing, and writes beside it."""
-    out = hub / trace.name
-    for part in ("refs", "snapshots", ".no_exist"):
-        shutil.copytree(trace / part, out / part, symlinks=True)
-    (out / "blobs").mkdir()
-    for blob in (trace / "blobs").iterdir():
-        shutil.copyfile(blob, out / "blobs" / blob.name)
+    for part in ("refs", "snapshots", ".no_exist", "blobs"):  # blobs copied as files
+        shutil.copytree(trace / part, hub / trace.name / part, symlinks=part != "blobs")
 
 
 def path_topology(path: str, run: Path, model: Path, law: str) -> tuple[Path, dict]:
@@ -166,12 +161,7 @@ def pinned_atomesh(cores: list[int], scratch: Path) -> Path:
 def front_ends(instance) -> list[int]:
     """The API server and the front-end workers it spawned, which keep its core set."""
     api, cores = psutil.Process(instance.pid), set(instance.cores["front_end"])
-    workers = [
-        child.pid
-        for child in api.children(recursive=True)
-        if set(child.cpu_affinity()) == cores
-        and "resource_tracker" not in " ".join(child.cmdline())
-    ]
+    workers = [c.pid for c in api.children(recursive=True) if set(c.cpu_affinity()) == cores and "resource_tracker" not in " ".join(c.cmdline())]  # fmt: skip
     return [api.pid, *sorted(workers)]
 
 
@@ -308,18 +298,11 @@ def engine_seqs(record: Path) -> dict[int, Seq]:
             count[seq_id] += len(ids)
             if count[seq_id] >= admits[seq_id]["sampling"]["max_tokens"] - 1:
                 last[seq_id] = step["time"]
-    return {
-        seq_id: Seq(
-            event["time"],
-            event["num_prompt_tokens"],
-            event["sampling"]["max_tokens"],
-            event["kv_transfer_params"] or {},
-            first.get(seq_id),
-            last.get(seq_id),
-            received.get(seq_id),
-        )
-        for seq_id, event in admits.items()
-    }
+    seqs = {}
+    for i, e in admits.items():
+        times = first.get(i), last.get(i), received.get(i)
+        seqs[i] = Seq(e["time"], e["num_prompt_tokens"], e["sampling"]["max_tokens"], e["kv_transfer_params"] or {}, *times)  # fmt: skip
+    return seqs
 
 
 def extras(done: list[Client], prefills: dict, decodes: list[Seq]) -> tuple:
@@ -330,11 +313,7 @@ def extras(done: list[Client], prefills: dict, decodes: list[Seq]) -> tuple:
         by_lengths[seq.prompt, seq.max_tokens].append(seq)
     ttfts, itls, left = [], [], 0
     for client in done:
-        found = [
-            seq
-            for seq in by_lengths[client.isl, client.osl]
-            if client.start <= seq.admit <= client.start + client.ttft
-        ]
+        found = [s for s in by_lengths[client.isl, client.osl] if client.start <= s.admit <= client.start + client.ttft]  # fmt: skip
         decode = found[0] if len(found) == 1 else None
         kv = decode.kv if decode else {}
         prefill = prefills.get((kv.get("remote_handshake_port"), kv.get("transfer_id")))
@@ -351,6 +330,18 @@ def extras(done: list[Client], prefills: dict, decodes: list[Seq]) -> tuple:
 def p50_p90(values: list[float]) -> tuple[float, float]:
     deciles = statistics.quantiles(values, n=10, method="inclusive")
     return deciles[4], deciles[8]
+
+
+def relay_failures(failed: list[Client], lost: list[float]) -> int:
+    """Failed requests whose D lost its KV receive on a prompt of whole blocks, #71's relay
+    failure; `lost` holds those receives' admissions, each matched once."""
+    count = 0
+    for client in failed:
+        hit = next((at for at in lost if client.start <= at <= client.end), None)
+        if hit is not None:
+            lost.remove(hit)
+            count += 1
+    return count
 
 
 def slices(done: list[Client], start: float) -> list[float]:
@@ -380,13 +371,12 @@ class Run(NamedTuple):
     left_out: int  # completed requests matched to no engine request
     slices: list[float]  # output tokens a second
     outcomes: Counter  # profiled requests by outcome
-    failed_receives: list[int]  # prompt lengths of D's failed KV receives in the window
+    relay_failed: int  # failures of #71's class: D lost a whole-block prompt's KV
     prompt: float  # mean prompt tokens of completed requests
 
 
-def measured(path: str, topology, sampler, fronts: dict, ports: dict, export) -> Run:
+def measured(path: str, topology, sampler, fronts: dict, ports: dict, profiled) -> Run:
     """A finished run, from aiperf's records, the engine records and the samples."""
-    profiled = clients(export)
     start = min(client.start for client in profiled)
     end = start + WINDOW_S
     done = [c for c in profiled if c.outcome == "ok" and c.ttft is not None]
@@ -419,7 +409,10 @@ def measured(path: str, topology, sampler, fronts: dict, ports: dict, export) ->
         left,
         slices(done, start),
         Counter(client.outcome for client in profiled),
-        [s.prompt for s in decodes if s.received is False and start <= s.admit <= end],
+        relay_failures(
+            [c for c in profiled if c.outcome not in ("ok", "refused")],
+            [s.admit for s in decodes if s.received is False and s.prompt % BLOCK == 0],
+        ),
         sum(client.isl for client in done) / len(done),
     )
 
@@ -465,10 +458,11 @@ def run_path(
         code = topology.proc.returncode
         raise RuntimeError(f"launch exit {code}, left {left}:\n{topology.tail()}")
     export = out / "profile_export.jsonl"
-    if not export.exists():
+    profiled = clients(export) if export.exists() else []
+    if not profiled:
         tail = (run / "aiperf.log").read_text(errors="replace")[-8000:]
-        raise RuntimeError(f"aiperf exit {code} wrote no records:\n{tail}")
-    measure = measured(path, topology, sampler, fronts, ports, export)
+        raise RuntimeError(f"aiperf exit {code} profiled no request:\n{tail}")
+    measure = measured(path, topology, sampler, fronts, ports, profiled)
     shutil.rmtree(run)  # its engine records: gigabytes of /dev/shm
     return measure
 
@@ -478,14 +472,9 @@ def ms(seconds: float) -> str:
 
 
 def report(run: Run, attempt: int) -> list[str]:
-    stages = ", ".join(
-        f"{s} {ms(mean)} over {n:.0f}" for s, (n, mean) in run.stages.items()
-    )
+    stages = ", ".join(f"{s} {ms(mean)} over {n:.0f}" for s, (n, mean) in run.stages.items())  # fmt: skip
     fronts = ", ".join(f"{name} {share:.0%}" for name, share in run.front_ends.items())
-    messages = ", ".join(
-        f"{n} {m['generate_in'] + m['session_in']} in, {m['generate_out'] + m['session_out']} out"
-        for n, m in run.messages.items()
-    )
+    messages = ", ".join(f"{n} {m['generate_in'] + m['session_in']} in, {m['generate_out'] + m['session_out']} out" for n, m in run.messages.items())  # fmt: skip
     return [
         f"\n{run.path} run {attempt}:",
         f"  atomesh CPU {run.atomesh / ATOMESH_CORES:.1%} of its {ATOMESH_CORES} cores; prepare stages: {stages or 'none'}; prepare-queue timeouts {run.queue_timeouts:.0f}",
@@ -494,7 +483,7 @@ def report(run: Run, attempt: int) -> list[str]:
         f"  extra TTFT p50 {ms(run.ttft[0])}, p90 {ms(run.ttft[1])}; extra ITL p50 {ms(run.itl[0])}, p90 {ms(run.itl[1])}; over {run.completed} completed, {run.left_out} matching no engine request",
         f"  output tokens/s per {SLICE_S} s: " + ", ".join(f"{s:.0f}" for s in run.slices),
         f"  requests: {', '.join(f'{k} {n}' for k, n in run.outcomes.most_common())}; mean prompt {run.prompt:.0f} tokens",
-        f"  D's failed KV receives: {len(run.failed_receives)}, {sum(n % BLOCK == 0 for n in run.failed_receives)} of prompts of whole {BLOCK}-token blocks",
+        f"  of the failures, #71's (D lost the KV of a prompt of whole {BLOCK}-token blocks): {run.relay_failed}",
     ]  # fmt: skip
 
 
@@ -507,12 +496,13 @@ def verdicts(runs: dict[str, list[Run]]) -> list[tuple[str, bool]]:
         for k, r in enumerate(runs[path], 1):
             name = f"{path} run {k}"
             atomesh = r.atomesh < CPU_SHARE * ATOMESH_CORES and r.queue_timeouts == 0
-            refused = set(r.outcomes) <= {"ok", "refused"}
+            failed = sum(n for k, n in r.outcomes.items() if k not in ("ok", "refused"))
+            refused = failed == r.relay_failed  # every failure ATOM's or #71's
             found += [
                 (f"{name}: atomesh's CPU and its prepare queue", atomesh),
                 (f"{name}: each ATOM front-end process's CPU", max(r.front_ends.values()) < CPU_SHARE),
                 (f"{name}: the last slice's throughput", r.slices[-1] >= FLOOR * r.slices[0]),
-                (f"{name}: no failure or cancel but ATOM's refusals", refused),
+                (f"{name}: no failure or cancel but ATOM's refusals and #71's", refused),
                 (f"{name}: mean prompt length", abs(r.prompt - prompt) <= PROMPT_SPREAD * prompt),
             ]  # fmt: skip
         for i, p in enumerate((50, 90)):
