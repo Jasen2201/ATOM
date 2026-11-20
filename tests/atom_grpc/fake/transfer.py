@@ -242,8 +242,8 @@ class FakeMooncakeWorker(KVConnectorBase):
                         sock.send_multipart([item[0], msgpack.dumps(reply)])
 
     def _serve(self, request: dict, arrived: float) -> dict | None:
-        """P: the reply to D's request, None while its source is not ready; an orphan
-        fails after Mooncake's lookup timeout, as do a cancelled prefill and a fault."""
+        """P: the reply to D's request, None while its source is not ready; it fails for
+        a fault, a cancelled prefill, or an orphan past Mooncake's lookup timeout."""
         transfer_id, now = request["transfer_id"], time.monotonic()
         if transfer_id in self.admissions:  # this D lets its chunked P allocate
             self.admitted.add(transfer_id)

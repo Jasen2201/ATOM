@@ -38,18 +38,15 @@ def law_text(tokenizer, prompt: list[int], count: int) -> str:
     return tokenizer.decode(law.ids(fingerprint(prompt), 0, count))
 
 
-def completion(prompt: list[int], max_tokens: int, rank: int = 0) -> dict:
-    body = {"prompt_token_ids": prompt, "max_tokens": max_tokens, "temperature": 0}
-    return body | {"data_parallel_rank": rank}
-
-
-def tagged(kv: dict, fault: str | None) -> dict:
-    return kv if fault is None else kv | {"fake_fault": fault}
+def completion(prompt: list[int], max_tokens: int) -> dict:
+    return {"prompt_token_ids": prompt, "max_tokens": max_tokens, "temperature": 0}
 
 
 class PD:
-    """The topology's P and D, sent a request as `AtomAdapter` and atomesh's HTTP P/D
-    router send it; `fault` tags D's kv_transfer_params."""
+    """The topology's P and D, sent a request as `AtomAdapter` and atomesh's DP-aware
+    HTTP P/D router send it: D on DP rank `rank`, `fault` tagging D's params."""
+
+    P_RANK = 0  # P's one DP rank
 
     def __init__(self, topology):
         self.p, self.d = topology.instances["p"], topology.instances["d"]
@@ -60,35 +57,40 @@ class PD:
         if transfer_id is not None:
             kv |= {"chunked_transfer": True, "transfer_id": transfer_id}
         body = body | {"stream": False, "max_tokens": 1, "return_token_ids": True}
-        return body | {"kv_transfer_params": kv}
+        return body | {"kv_transfer_params": kv, "data_parallel_rank": self.P_RANK}
 
-    def enrich(self, kv: dict) -> dict:
+    def decode(self, body: dict, kv: dict, fault: str | None, rank: int) -> dict:
         kv = kv | {"remote_dp_size": self.info["dp_size"]}
         kv["remote_tp_size"] = self.info["tp_size"]
-        if "dp_rank" in kv:
-            kv["remote_dp_rank"] = kv["dp_rank"]
-        return kv
+        kv["remote_dp_rank"] = kv.get("dp_rank", self.P_RANK)
+        if fault is not None:
+            kv["fake_fault"] = fault
+        return body | {"kv_transfer_params": kv, "data_parallel_rank": rank}
 
-    def relayed(self, body: dict, fault: str | None = None) -> dict:
+    def relayed(self, body: dict, fault: str | None = None, rank: int = 0) -> dict:
         """D's body, once P answered the prefill."""
         status, reply = self.p.post("/v1/completions", self.prefill(body))
         assert status == 200, reply
-        kv = self.enrich(reply["kv_transfer_params"])
+        kv = reply["kv_transfer_params"]
         kv["prompt_token_ids"] = reply["prompt_token_ids"]
-        return body | {"kv_transfer_params": tagged(kv, fault)}
+        return self.decode(body, kv, fault, rank)
 
-    def relay(self, body: dict, fault: str | None = None) -> tuple[int, dict]:
-        return self.d.post("/v1/completions", self.relayed(body, fault))
+    def relay(
+        self, body: dict, fault: str | None = None, rank: int = 0
+    ) -> tuple[int, dict]:
+        return self.d.post("/v1/completions", self.relayed(body, fault, rank))
 
-    def chunked(self, body: dict, fault: str | None = None) -> tuple[int, dict]:
+    def chunked(
+        self, body: dict, fault: str | None = None, rank: int = 0
+    ) -> tuple[int, dict]:
         transfer_id = f"xfer-{uuid.uuid4()}"
         kv = self.info["chunked_transfer"] | {"chunked_transfer": True}
         kv |= {"do_remote_prefill": True, "do_remote_decode": False}
-        kv = self.enrich(kv | {"transfer_id": transfer_id})
+        kv |= {"transfer_id": transfer_id}
         with concurrent.futures.ThreadPoolExecutor(2) as pool:
             prefill = self.prefill(body, transfer_id)
             p = pool.submit(self.p.post, "/v1/completions", prefill)
-            decode = body | {"kv_transfer_params": tagged(kv, fault)}
+            decode = self.decode(body, kv, fault, rank)
             d = pool.submit(self.d.post, "/v1/completions", decode)
             assert p.result()[0] == 200, p.result()
             return d.result()
@@ -186,7 +188,7 @@ def test_a_rule_naming_one_dp_rank_fails_only_that_ranks_receives(topology, toke
     prompt = [*rule["prompt_prefix"], *range(70, 90)]
     texts = {}
     for rank in (other, ruled):
-        status, reply = pd.relay(completion(prompt, 8, rank))
+        status, reply = pd.relay(completion(prompt, 8), rank=rank)
         assert status == 200, reply
         texts[rank] = reply["choices"][0]["text"]
     assert texts == {other: law_text(tokenizer, prompt, 8), ruled: ""}
