@@ -22,14 +22,22 @@ ARGS=(--rm --init --name "$NAME" --cpus 16 --tmpfs /dev/shm:rw,exec,size=32g,mod
 # The umask is the dev host's; a failed toolchain install is an environment failure, exit 2, as in the gate.
 CMD='umask 002 && mkdir -p "$HOME" && { bash "$1" || exit 2; } && exec bash "$2"'
 SSH=(ssh -n -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 "$HOST")
-trap '"${SSH[@]}" docker stop "$NAME" >/dev/null 2>&1; kill ${pid:-} 2>/dev/null' INT TERM HUP
+# On a signal, stop the container until ssh ($!) exits: the container may not exist yet, and the remote run outlives ssh.
+stop_run() {
+    while kill -0 "${!:-}" 2>/dev/null; do "${SSH[@]}" docker stop "$NAME" >/dev/null 2>&1 || sleep 1; done
+    echo "gate: stopped by a signal"
+    exit "$1"
+}
+trap 'stop_run 130' INT
+trap 'stop_run 143' TERM
+trap 'stop_run 129' HUP
 BUILD="docker image inspect $IMAGE >/dev/null 2>&1 || docker build -q -t $IMAGE - <$(printf %q "$DIR/Dockerfile")"
 # /tmp is shared, so a directory or link someone else made under that name is refused; runs build the image one at a time.
-"${SSH[@]}" "mkdir -p -m 700 $RDIR && [ ! -L $RDIR ] && [ -O $RDIR ] || { echo 'gate: $RDIR on $HOST is not ours'; exit 2; }
+# ssh ignores the signals, a process group's included, so only the end of the remote run ends it.
+(trap '' INT TERM HUP && exec "${SSH[@]}" "mkdir -p -m 700 $RDIR && [ ! -L $RDIR ] && [ -O $RDIR ] || { echo 'gate: $RDIR on $HOST is not ours'; exit 2; }
     flock $RDIR/.image.lock bash -c $(printf %q "$BUILD") || exit 2
-    $(printf '%q ' docker run "${ARGS[@]}" "$IMAGE" bash -c "$CMD" gate "$DIR/rust.sh" "$1")" &
-pid=$!
-wait $pid
+    $(printf '%q ' docker run "${ARGS[@]}" "$IMAGE" bash -c "$CMD" gate "$DIR/rust.sh" "$1")") &
+wait $!
 rc=$?
 case $rc in
     0 | 1 | 2) ;;
