@@ -39,8 +39,9 @@ and its sub-issues; agents do not write there.
   mounts `/share_nfs` at its own path (`.claude/agent-team/g48/run.sh`), so
   every tree they gate, a detached one included, must be under `/share_nfs`,
   such as in `<worktree_root>`. Their Rust toolchain and per-tree cargo targets
-  live in g48's `/tmp/yajizhan-gate-rust`; remove a tree's `target-<tree name>*`
-  there with the tree. `ATOM_GATE_LOCAL=1` runs them on the dev host.
+  live in g48's `/tmp/yajizhan-gate-rust`; remove a tree's `target-<tree name>`
+  and `target-<tree name>-post` there with the tree. `ATOM_GATE_LOCAL=1` runs
+  them on the dev host.
 - Python tests: `/share_nfs/yajizhan/venv-cpu-test/bin/python -m pytest`
   (CPU torch, grpcio 1.78.0, protobuf 6.33, matching the ATOM image's
   `protobuf<7`). Set `TMPDIR` under `/dev/shm`: `/share_nfs` rejects `:` in
