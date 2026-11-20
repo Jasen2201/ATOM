@@ -13,6 +13,7 @@ SELECT=$(dirname "$0")/select_tests.py
 TREE=$(pwd)
 NAME=$(basename "$TREE")
 SCR=/dev/shm/yajizhan-gate/$NAME-targeted
+TARGET=/dev/shm/yajizhan-rust/target-$NAME  # this tree's cargo target directory, as in gate.sh
 mkdir -p "$SCR"
 
 FORK=$(git remote -v | awk '$2 ~ /Jasen2201\/ATOM(\.git)?$/ && $3 == "(fetch)" {print $1; exit}')
@@ -43,6 +44,17 @@ mapfile -t TESTS < <(printf '%s\n' "${PYFILES[@]}" | grep -E '^tests/(.*/)?test_
 [ -d tests/atom_grpc ] && TESTS+=(tests/atom_grpc)
 "$PY" "$SELECT" pytest "$BASE" tests/entrypoints "${TESTS[@]}" >"$SCR/pytest.txt" || { echo "gate: select_tests.py failed"; exit 2; }
 mapfile -t PICKED <"$SCR/pytest.txt"
+# Tests under tests/atom_grpc start atomesh: build it first, as CI's unit-test job does.
+unset ATOMESH_BIN
+if [[ " ${PICKED[*]} " == *" tests/atom_grpc/"* ]]; then
+    [ -f "$RUST_ENV" ] || { echo "gate: $RUST_ENV missing (see the overlay body)"; exit 2; }
+    echo "== atomesh: cargo build --profile ci --bin atomesh"
+    if (. "$RUST_ENV" && cd atom/mesh && CARGO_TARGET_DIR=$TARGET cargo build --profile ci --bin atomesh -q -j 16); then
+        export ATOMESH_BIN=$TARGET/ci/atomesh
+    else
+        fail=1
+    fi
+fi
 if ((${#PICKED[@]})); then
     echo "== pytest ${PICKED[*]}"
     TMPDIR=$SCR PYTHONPATH=. "$PY" -m pytest -q -p no:cacheprovider --basetemp="$SCR/bt" "${PICKED[@]}"
@@ -68,7 +80,7 @@ if [ -n "$(changed "$BASE" 'atom/mesh/*' '*.proto')" ]; then
     echo "== mesh: cargo fmt --check, then ${MESH[*]:-no test target}"
     (
         . "$RUST_ENV"
-        export CARGO_TARGET_DIR=/dev/shm/yajizhan-rust/target-$NAME
+        export CARGO_TARGET_DIR=$TARGET
         cd atom/mesh
         cargo fmt --check || exit 1
         if [ "${MESH[*]}" = all ]; then
