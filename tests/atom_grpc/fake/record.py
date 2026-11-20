@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from tests.atom_grpc.fake.serve import RECORD_ENV
+from tests.atom_grpc.fake.serve import RECORD_ENV, STAMPS_ENV
 
 RECORD = "engine_record.jsonl"  # its name in an instance's workdir
 # SamplingParams' fields as a Sequence holds them (`logprobs` as `return_logprobs`).
@@ -139,6 +139,35 @@ def record_api_process() -> None:
 
     CoreManager.add_request = recorded_add_request
     api_server.load_tokenizer = recorded_tokenizer
+
+
+def stamp_grpc_steps() -> None:
+    """When `STAMPS_ENV` names a file, append to it each step handed to gRPC: when, in
+    CLOCK_MONOTONIC ns, and the engine seq ids of its outputs that carry tokens."""
+    path = os.environ.get(STAMPS_ENV)
+    if not path:
+        return
+    from atom.entrypoints.grpc.server import StepOutputs
+
+    recorder, flush = Recorder(path), StepOutputs.flush
+
+    def stamped(steps: StepOutputs) -> None:
+        at = time.monotonic_ns()
+        buffered = getattr(steps._local, "step", None) or {}
+        outputs = (output for step in buffered.values() for *_, output in step)
+        seq_ids = [output.request_id for output in outputs if output.output_tokens]
+        flush(steps)
+        if seq_ids:
+            recorder.write(_lines([{"at": at, "seq_ids": seq_ids}]))
+
+    StepOutputs.flush = stamped
+
+
+def grpc_steps(path: Path) -> list[tuple[int, list[int]]]:
+    """The steps `stamp_grpc_steps` wrote to `path`, as written: (at, seq ids)."""
+    text = path.read_text()
+    lines = text[: text.rfind("\n") + 1].splitlines()  # a process may be mid-write
+    return [(step["at"], step["seq_ids"]) for step in map(json.loads, lines)]
 
 
 class Step(NamedTuple):

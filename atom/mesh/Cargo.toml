@@ -85,6 +85,7 @@ wfaas = "=1.0.0"
 data-connector = "=1.0.0"
 openmetrics-parser = "0.4.4"
 arc-swap = "1.7.1"
+libc = "0.2"  # clock_gettime(CLOCK_MONOTONIC): a stamp Python processes read on the same clock
 
 # gRPC and Protobuf dependencies
 mesh_grpc = { package = "smg-grpc-client", version = "=1.0.0" }
