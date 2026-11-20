@@ -22,7 +22,10 @@ ARGS += ["--cudagraph-capture-sizes", "[1,2,4]", "--max-num-seqs", "8"]
 ARGS += ["--max-num-batched-tokens", "32"]  # a 40-token prompt prefills in two chunks
 # ARGS on two DP ranks, with a budget that prefills a 40-token prompt at once.
 DP2 = ["-tp", "2", "--enable-dp-attention", *ARGS[:-1], "64"]
+PRODUCER = [*DP2, "--kv-transfer-config"]  # DP2 as a P/D producer
+PRODUCER += [json.dumps({"kv_connector": "mooncake", "kv_role": "kv_producer"})]
 STARTUP_S = 1500  # a loaded host takes minutes
+WAIT_S = 120  # for a record line on a loaded host
 EXACT = 1e-12  # relative: the same terms, summed in another order
 # A DP dummy's prices, which run no draft-KV pass: a decode row of 4 at rung 1 or 2,
 # the target's terms then the draft's; one prefill token in bucket 64, then a propose.
@@ -51,6 +54,21 @@ def dp2(tmp_path_factory):
     fake = {"acceptance_length": 3.51, "law": str(LAW), "clock": "virtual"}
     workdir = tmp_path_factory.mktemp("dp2")
     started = FakeInstance(workdir, FIXTURES / "deepseek_v3_mtp", DP2, fake)
+    try:
+        started.start()
+        started.wait_ready(time.monotonic() + STARTUP_S)
+        yield started
+    finally:
+        started.stop()
+
+
+@pytest.fixture
+def producer(tmp_path_factory):
+    """One test's own: no D takes the KV it holds, so its group steps until it stops."""
+    fake = {"acceptance_length": 3.51, "law": str(LAW), "clock": "virtual"}
+    fake["block_bytes"] = 1  # what a P instance must set; no KV leaves this one
+    workdir = tmp_path_factory.mktemp("producer")
+    started = FakeInstance(workdir, FIXTURES / "deepseek_v3_mtp", PRODUCER, fake)
     try:
         started.start()
         started.wait_ready(time.monotonic() + STARTUP_S)
@@ -148,6 +166,37 @@ def test_a_dp2_ranks_dummies_cost_the_row_they_run_at_the_groups_phase_and_rung(
     assert kinds == {(False, None), (True, 1), (True, 2)}  # beside each step kind
 
 
+def test_a_dp2_producer_prices_its_eager_decode_and_idle_groups_dummies_at_0_s(
+    producer,
+):
+    prompt = [1, *range(8, 47)]
+    kv = {"do_remote_decode": True, "do_remote_prefill": False}
+    body = on_rank_0(prompt, 1) | {"kv_transfer_params": kv}
+    status, reply = producer.post("/v1/completions", body)
+    assert status == 200, reply
+    # Once its request leaves, its group runs dummies while the KV it holds waits.
+    deadline = time.monotonic() + WAIT_S
+    while True:
+        record = EngineRecord(producer.record)
+        busy, idle = ([f for f in record.forwards if f.dp_rank == r] for r in (0, 1))
+        if min(len(busy), len(idle)) > 2:
+            break
+        assert time.monotonic() < deadline, record.forwards
+        time.sleep(0.01)
+
+    (request,) = record.with_prompt(prompt)
+    (prefill, decode, *after), (prefill_dummy, *dummies) = busy, idle
+    assert prefill.requests == [[request.seq_id, 40, 40, False]]
+    assert prefill_dummy.price == pytest.approx(DUMMY_PREFILL, rel=EXACT)
+    # Deferred output decodes it once more, at q=1: eagerly, as its recordings hold q=4.
+    assert (decode.requests, decode.rung) == ([[request.seq_id, 1, 41, True]], None)
+    assert decode.price == 0.0
+    # Rank 1's dummy beside that decode, then the idle group's dummies.
+    for step in [*after, *dummies]:
+        assert step.requests == [[None, 1, 1, True]]
+        assert (step.rung, step.price) == (None, 0.0)
+
+
 def test_the_port_prices_padded_decode_rows_and_two_finishing_prompts_by_hand():
     law = StepLaw.load(str(LAW))
     # Rung 4 pads two decode rows to four of the widest context.
@@ -189,6 +238,16 @@ def test_the_port_prices_a_dp_ranks_step_by_its_group():
         kind["decode"]["eager"] = kind["decode"]["1"]
     price = 0.005 + 9 * 1e-6 + 5e-5 + 3e-6 + 6e-4 + 9 * 1e-8
     assert StepLaw(with_eager).price(beside) == pytest.approx(price, rel=EXACT)
+
+
+def test_the_port_prices_a_producers_eager_decode_at_0_s_or_by_an_eager_vector():
+    law = json.loads(LAW.read_text())
+    decode = Shape(((1, 41, True),), None, True, producer=True)  # one rank: no peer
+    assert StepLaw(law).price(decode) == 0.0
+    for kind in (law, law["draft"]):
+        kind["decode"]["eager"] = kind["decode"]["1"]
+    price = 0.005 + 41 * 1e-6 + 5e-5 + 3e-6 + 6e-4 + 41 * 1e-8
+    assert StepLaw(law).price(decode) == pytest.approx(price, rel=EXACT)
 
 
 @pytest.mark.parametrize(

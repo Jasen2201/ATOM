@@ -25,7 +25,7 @@ from atom.model_engine.scheduler import (
 )
 from atom.model_engine.state_runtime import StateRuntime
 from atom.model_engine.tp_multinode import managed_store_client
-from atom.utils.forward_context import ForwardMode
+from atom.utils.forward_context import ForwardMode, request_bucket
 from tests.atom_grpc.fake.ids import IdLaw, fingerprint
 from tests.atom_grpc.fake.law import ConstantLaw, Group, Shape, StepLaw
 from tests.atom_grpc.fake.record import Recorder
@@ -173,8 +173,15 @@ class FakeRunner:
             self.dp_group = torch.distributed.group.WORLD
         self.running_tokens = np.zeros(self.dp_size, np.int32)  # `decide` fills it
         # A P/D producer never speculates, so its DP dummy verifies no draft.
-        producer = kv_config_has_producer(config.kv_transfer_config)
-        self.dummy_spec_step = 0 if producer else self.mtp_k
+        self.is_pd_producer = kv_config_has_producer(config.kv_transfer_config)
+        self.dummy_spec_step = 0 if self.is_pd_producer else self.mtp_k
+        # The buckets a producer's capture records, at its drafter's q = mtp_k + 1,
+        # which its q=1 steps miss (`ModelRunner._producer_graph_shapes`).
+        self.graph_shapes = None
+        if self.is_pd_producer and self.mtp_k:
+            self.graph_shapes = {
+                request_bucket(int(size), self.mtp_k + 1) for size in self.ladder
+            }
         pc = config.parallel_config  # the engine's output is its last PP stage's
         last = pc.pipeline_parallel_rank == config.pipeline_parallel_size - 1
         self.record = Recorder.from_env() if rank == 0 and last else None
@@ -310,6 +317,7 @@ class FakeRunner:
             local_tbo=(False, False, 0, 0),
             max_seqlen_q=batch.num_spec_step + 1,
             running_tokens_per_dp_rank=self.running_tokens,
+            graph_shapes=self.graph_shapes,
         )
         sync, prefill = mode.sync, batch.total_seqs_num_prefill
         rows = zip(batch.num_scheduled_tokens.tolist(), batch.context_lens.tolist())
@@ -324,7 +332,8 @@ class FakeRunner:
             tokens = sync.scheduled_tokens_per_dp_rank
             group = Group(int(tokens.max()), dummy, prefills, not tokens.any())
         rung = mode.running_bs if mode.use_cudagraph else None
-        return Shape(requests, rung, batch.produces_output(), group)
+        samples = batch.produces_output()
+        return Shape(requests, rung, samples, group, self.is_pd_producer)
 
     def _hand_back(self, output, end: float) -> ScheduledBatchOutput:
         """The output a step returns once it is ready: deferred, the step before's."""
