@@ -14,8 +14,8 @@ import numpy as np
 from atom.model_engine.scheduler import ScheduledBatchOutput, defers_output
 from atom.model_engine.state_runtime import StateRuntime
 from tests.atom_grpc.fake.ids import IdLaw, fingerprint
-
-CONFIG_ENV = "FAKE_ENGINE_CONFIG"
+from tests.atom_grpc.fake.record import Recorder
+from tests.atom_grpc.fake.serve import CONFIG_ENV
 
 
 @dataclass(frozen=True)
@@ -71,6 +71,7 @@ class FakeRunner:
 
     def __init__(self, rank: int, config):
         self.rank = rank
+        self.config = config
         self.fake = FakeConfig.from_env()
         spec = config.speculative_config
         self.mtp_k = spec.num_speculative_tokens if spec is not None else 0
@@ -87,6 +88,9 @@ class FakeRunner:
         self.kv = np.zeros(0, np.int32)  # the token id each KV slot holds
         self.requests: dict[int, _Request] = {}
         self.pending = None  # deferred output: the last output step's (output, end)
+        self.dp_rank = config.parallel_config.data_parallel_rank
+        self.record = Recorder.from_env() if rank == 0 else None  # the engine's output
+        self.structured = None  # the reply to `prepare_structured_output`
 
     def get_num_blocks(self) -> dict:
         return {
@@ -110,6 +114,34 @@ class FakeRunner:
     def freeze_gc_heap(self) -> int:
         return 0
 
+    def prepare_structured_output(
+        self,
+        schema,
+        tool_format,
+        reasoning_end,
+        fingerprint,
+        vocab_size,
+        request_ids=(),
+    ) -> dict:
+        """A runner's reply, from the fixture's tokenizer and vocabulary. No grammar is
+        compiled: no fake step follows one."""
+        if self.structured is None:
+            from atom.model_engine.llm_engine import load_tokenizer
+            from atom.structured_output import (
+                structured_stop_token_ids,
+                tokenizer_fingerprint,
+            )
+
+            config, hf = self.config, self.config.hf_config
+            tokenizer = load_tokenizer(config.model, config.trust_remote_code)
+            stops = structured_stop_token_ids(config, tokenizer)
+            self.structured = {
+                "ready": True,
+                "fingerprint": tokenizer_fingerprint(tokenizer, stops),
+                "vocab_size": (getattr(hf, "text_config", None) or hf).vocab_size,
+            }
+        return self.structured
+
     def release_constraints(self, request_ids) -> None:
         pass
 
@@ -125,7 +157,10 @@ class FakeRunner:
 
     def forward(self, batch) -> ScheduledBatchOutput:
         end = self.gpu.run(self.fake.step_s)
-        output = self._step(batch)
+        output, emitted = self._step(batch)
+        if self.record is not None and emitted:
+            wall_end = time.time() + end - time.monotonic()
+            self.record.step(self.dp_rank, emitted, wall_end)
         if not batch.produces_output():
             return ScheduledBatchOutput(list(batch.req_ids), [], None, None, None)
         return self._hand_back(output, end)
@@ -138,11 +173,12 @@ class FakeRunner:
         _sleep_until(end)
         return output
 
-    def _step(self, batch) -> ScheduledBatchOutput:
-        """Write the step's KV, then emit each row's ids at their true positions."""
+    def _step(self, batch) -> tuple[ScheduledBatchOutput, list]:
+        """Write the step's KV, then emit each row's ids at their true positions;
+        returns the output and each row's (req_id, ids) but a middle chunk's filler."""
         k = batch.num_spec_step
         token_ends = np.cumsum(batch.num_scheduled_tokens)
-        rows, drafts, rejected = [], [], []
+        rows, drafts, rejected, emitted = [], [], [], []
         for i, req_id in enumerate(batch.req_ids):
             table, end = batch.block_tables[i], int(batch.context_lens[i])
             if i < batch.total_seqs_num_prefill:
@@ -170,7 +206,8 @@ class FakeRunner:
             rows.append(tuple(ids[:count]))
             drafts.append(ids[count:])
             rejected.append(reject)
-        return self._output(list(batch.req_ids), rows, drafts, rejected)
+            emitted.append((req_id, ids[:count]))
+        return self._output(list(batch.req_ids), rows, drafts, rejected), emitted
 
     def _admit(self, req_id: int, table, end: int) -> _Request:
         """A final prefill chunk: a new request's prompt is what its KV slots hold."""
