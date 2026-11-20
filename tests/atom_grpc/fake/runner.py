@@ -11,6 +11,7 @@ from fractions import Fraction
 
 import numpy as np
 
+from atom.kv_transfer.disaggregation import KVConnectorFactory, KVConnectorOutput
 from atom.model_engine.scheduler import ScheduledBatchOutput, defers_output
 from atom.model_engine.state_runtime import StateRuntime
 from tests.atom_grpc.fake.ids import IdLaw, fingerprint
@@ -25,6 +26,10 @@ class FakeConfig:
     acceptance_length: float = 3.51  # mean tokens per verify step
     step_s: float = 0.001  # the constant-step law: the price of every step
     num_kvcache_blocks: int = 4096
+    block_bytes: int = 0  # the KV bytes a block moves from P to D; a P instance sets it
+    bandwidth_gb_s: float = 20.0  # each P rank's one link to D
+    transfer_timeout_s: float = 30.0  # when a "timeout" fault fails, as Mooncake's 30 s
+    faults: tuple = ()  # a D's rules: {"fault", "dp_rank"?, "prompt_prefix"?}
 
     @classmethod
     def from_env(cls) -> "FakeConfig":
@@ -91,6 +96,9 @@ class FakeRunner:
         self.dp_rank = config.parallel_config.data_parallel_rank
         self.record = Recorder.from_env() if rank == 0 else None  # the engine's output
         self.structured = None  # the reply to `prepare_structured_output`
+        self.connector = None  # the worker half of the instance's KV connector
+        if config.kv_transfer_config:
+            self.connector = KVConnectorFactory.create_connector(config, "worker")
 
     def get_num_blocks(self) -> dict:
         return {
@@ -103,7 +111,15 @@ class FakeRunner:
 
     def allocate_kv_cache(self, num_kvcache_blocks: int) -> bool:
         self.kv = np.zeros(num_kvcache_blocks * self.block_size, np.int32)
+        if self.connector is not None:
+            self.connector.register_kv_caches({"token_ids": self.kv})
         return True
+
+    def process_kvconnector_output(self, metadata) -> None:
+        self.connector.start_load_kv(metadata)
+
+    def async_proc_aggregation(self) -> KVConnectorOutput:
+        return self.connector.get_finished()
 
     def capture_cudagraph(self):
         return 0.0, [], 0
@@ -194,7 +210,8 @@ class FakeRunner:
                     continue
                 req, first, count, reject = self._admit(req_id, table, end), end, 1, 0
             else:
-                req, first, count, reject = self._known(req_id), end, 1, 0
+                req = self._decoding(req_id, table, end - 1 - k)
+                first, count, reject = end, 1, 0
                 if k:
                     # The window ends where ModelRunner's `verify_ctx_lens` puts it.
                     first = end - k - (req.rejected if self.deferred else 1)
@@ -218,10 +235,17 @@ class FakeRunner:
         req.rejected = 0
         return req
 
-    def _known(self, req_id: int) -> _Request:
+    def _decoding(self, req_id: int, table, prompt_len: int) -> _Request:
+        """A decoding request; on D, one first seen decoding has its prompt in the KV
+        it received, ahead of P's first token and the drafts D verifies."""
         req = self.requests.get(req_id)
         if req is None:
-            raise RuntimeError(f"request {req_id} decodes with no prefill seen here")
+            if self.connector is None or self.connector.is_producer:
+                raise RuntimeError(
+                    f"request {req_id} decodes with no prefill seen here"
+                )
+            prompt = self.kv[self._slots(table, 0, prompt_len)].tolist()
+            req = self.requests[req_id] = _Request(fingerprint(prompt), prompt_len)
         return req
 
     def _ids(self, req: _Request, start: int, stop: int) -> list[int]:
