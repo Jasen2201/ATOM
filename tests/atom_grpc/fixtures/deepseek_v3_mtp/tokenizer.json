@@ -47,6 +47,42 @@
       "rstrip": false,
       "normalized": false,
       "special": true
+    },
+    {
+      "id": 108,
+      "content": "<|open|>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 109,
+      "content": "<|close|>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 110,
+      "content": "<|sep|>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 111,
+      "content": "<|end_of_msg|>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
     }
   ],
   "normalizer": null,
@@ -165,7 +201,15 @@
       "ze": 104,
       "zi": 105,
       "zo": 106,
-      "zu": 107
+      "zu": 107,
+      "<|open|>": 108,
+      "<|close|>": 109,
+      "<|sep|>": 110,
+      "<|end_of_msg|>": 111,
+      "tools": 112,
+      "response": 113,
+      "call": 114,
+      "tool=\"": 115
     },
     "unk_token": "<unk>"
   }

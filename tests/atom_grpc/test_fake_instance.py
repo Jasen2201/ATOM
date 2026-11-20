@@ -12,6 +12,8 @@ import pytest
 from transformers import AutoTokenizer, PretrainedConfig
 
 from atom.config import SpeculativeConfig
+from atom.entrypoints.openai.tool_parser.kimi_k3_tool_parser import KimiK3Parser
+from atom.entrypoints.openai.tool_parser.registry import required_call_channel
 from atom.model_engine.prefix_hash import prompt_fingerprint
 from tests.atom_grpc.fake.ids import stride
 from tests.atom_grpc.fake.instance import FakeInstance
@@ -98,6 +100,13 @@ def test_only_forced_acceptance_imports_the_triton_backed_rejection_sampler(
     assert mtp().synthetic_acceptance_rates is None
     with pytest.raises(ImportError, match="rejection_sampler"):
         mtp(synthetic_acceptance_length=3.0)
+
+
+def test_the_fixture_tokenizer_holds_the_kimi_k3_required_channel(tokenizer):
+    channel = required_call_channel(KimiK3Parser, tokenizer)
+    assert channel is not None
+    ids = (*channel.after, *channel.opening, *channel.end_ids)
+    assert tokenizer.unk_token_id not in ids
 
 
 def test_an_mtp_instance_emits_the_law_ids_through_accepted_and_rejected_drafts(
