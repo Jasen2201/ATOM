@@ -24,7 +24,7 @@ from atom.kv_transfer.disaggregation.types import ConnectorCompletion, KVConnect
 from atom.utils import envs
 from atom.utils.network import get_ip
 from tests.atom_grpc.fake.record import Recorder
-from tests.atom_grpc.fake.runner import FakeConfig
+from tests.atom_grpc.fake.runner import Clock, FakeConfig
 from tests.atom_grpc.fake.serve import LINKS_ENV
 
 FAULT = "fake_fault"  # in D's kv_transfer_params: "timeout", or any other value to fail
@@ -198,7 +198,7 @@ class FakeMooncakeWorker(KVConnectorBase):
             else:
                 out.failed_recving.add(req_id)
             if self.recorder is not None:
-                wall = time.time() - time.monotonic()
+                wall = Clock().offset()
                 self.recorder.receive(
                     req_id,
                     now + wall,

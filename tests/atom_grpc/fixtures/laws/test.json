@@ -1,0 +1,43 @@
+{
+  "provenance": "hand-written round coefficients for tests/atom_grpc/test_fake_law.py",
+  "prefill": {
+    "coefficients": {
+      "step": 0.004,
+      "tokens": 1e-05,
+      "query_square": 1e-08,
+      "query_cached": 2e-08,
+      "history": 3e-07,
+      "seqs": 0.0005,
+      "out": 0.002,
+      "padding": 4e-06
+    },
+    "buckets": [32, 64, 128]
+  },
+  "decode": {
+    "1": {"coefficients": {"step": 0.005, "context": 1e-06, "graph_padding": 2e-07}},
+    "2": {"coefficients": {"step": 0.006, "context": 1e-06, "graph_padding": 2e-07}},
+    "4": {"coefficients": {"step": 0.007, "context": 1e-06, "graph_padding": 2e-07}}
+  },
+  "draft": {
+    "provenance": "the drafter's terms of the same test law",
+    "prefill": {
+      "coefficients": {
+        "step": 0.0001,
+        "tokens": 2e-06,
+        "query_square": 0.0,
+        "query_cached": 0.0,
+        "history": 1e-07,
+        "seqs": 3e-05,
+        "out": 4e-05
+      }
+    },
+    "decode": {
+      "1": {"coefficients": {"step": 0.0006, "context": 1e-08, "graph_padding": 0.0}},
+      "2": {"coefficients": {"step": 0.0007, "context": 1e-08, "graph_padding": 0.0}},
+      "4": {"coefficients": {"step": 0.0008, "context": 1e-08, "graph_padding": 0.0}}
+    },
+    "propose": {"coefficients": {"step": 0.0007, "seqs": 8e-05}},
+    "draft_kv": {"coefficients": {"step": 5e-05, "seqs": 3e-06}},
+    "output_prefill_kv": true
+  }
+}
