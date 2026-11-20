@@ -84,7 +84,7 @@ jobs:
     name: Run non-GPU unit tests
     runs-on: ubuntu-latest
     steps:
-      # A 22-rank fake topology of tests/atom_grpc left under 1 GiB free on this runner, and one host type has no swap.
+      # tests/atom_grpc's fake topologies can leave under 1 GiB free on this runner, and one of its host types has no swap.
       - name: Enable a swap file
         run: |
           sudo fallocate -l 4G /unit-tests.swap
