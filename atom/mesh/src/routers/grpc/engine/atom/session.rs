@@ -88,8 +88,8 @@ enum Command {
 }
 
 impl Session {
-    /// Opens the call on a connection and thread of its own, which nothing else the router
-    /// runs can hold up; waits for ATOM's Ready, refusing one of another protocol version.
+    /// Opens the call on a connection and thread of its own, off the router's runtime;
+    /// waits for ATOM's Ready, refusing one of another protocol version.
     async fn open(url: &str) -> Result<Self, EngineError> {
         let (commands, queued) = mpsc::unbounded_channel();
         let routes = Arc::new(Mutex::new(Routes::default()));
