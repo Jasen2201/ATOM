@@ -58,16 +58,24 @@ def test_a_topology_repeating_an_instance_name_is_refused(tmp_path):
 
 
 def test_tests_are_grouped_by_topology_and_the_one_stopping_it_runs_last():
-    def item(name, topology=None, *fixtures):
+    def serves(topology): ...
+
+    def stops(topology, topologies): ...
+
+    def item(name, topology=None, function=serves):
         marker = topology and SimpleNamespace(args=(topology,))
+        closure = ("topology", "topologies") if topology else ()  # as pytest builds it
         return SimpleNamespace(
-            name=name, get_closest_marker=lambda _: marker, fixturenames=fixtures
+            name=name,
+            get_closest_marker=lambda _: marker,
+            fixturenames=closure,
+            function=function,
         )
 
     items = [
         item("a"),
         item("s1", "single"),
-        item("stop", "single", "topologies"),
+        item("stop", "single", stops),
         item("p1", "1p1d"),
         item("b"),
         item("s2", "single"),

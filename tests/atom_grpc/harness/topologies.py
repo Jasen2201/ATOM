@@ -3,6 +3,7 @@
 directory of its own, with at most one running at a time."""
 
 import contextlib
+import inspect
 import json
 import os
 import signal
@@ -139,7 +140,7 @@ class Topologies:
 
 def by_topology(items: list) -> list:
     """Tests marked `topology(name)` in one group per name, at its first test's place;
-    those taking `topologies` themselves run last in it. Others keep their places."""
+    those with a `topologies` argument run last in it. Others keep their places."""
     anchors: dict[str, int] = {}
     keys = []
     for index, item in enumerate(items):
@@ -148,6 +149,7 @@ def by_topology(items: list) -> list:
             keys.append((index, False, index))
         else:
             anchor = anchors.setdefault(marker.args[0], index)
-            keys.append((anchor, "topologies" in item.fixturenames, index))
+            own_args = inspect.signature(item.function).parameters
+            keys.append((anchor, "topologies" in own_args, index))
     order = sorted(range(len(items)), key=keys.__getitem__)
     return [items[index] for index in order]
