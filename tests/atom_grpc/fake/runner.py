@@ -12,6 +12,7 @@ from fractions import Fraction
 import numpy as np
 
 from atom.kv_transfer.disaggregation import KVConnectorFactory, KVConnectorOutput
+from atom.model_engine.kv_block import STATE_SLOT_CLASS
 from atom.model_engine.scheduler import ScheduledBatchOutput, defers_output
 from atom.model_engine.state_runtime import StateRuntime
 from tests.atom_grpc.fake.ids import IdLaw, fingerprint
@@ -126,7 +127,11 @@ class FakeRunner:
                 f"acceptance length {self.length} is outside [1, {self.mtp_k + 1}]"
             )
         self.deferred = defers_output(config)
-        self.block_size = config.kv_cache_block_size
+        # Under DCP each rank's table entry holds its share of block size x DCP tokens;
+        # the fake's entry holds them all.
+        self.block_size = (
+            config.kv_cache_block_size * config.decode_context_parallel_size
+        )
         stop = {config.eos_token_id, *config.stop_token_ids} - {None}
         self.id_law = IdLaw.for_model(config.model, stop)
         self.step_law = ConstantLaw(self.fake.step_s)
@@ -148,18 +153,29 @@ class FakeRunner:
         self.requests: dict[int, _Request] = {}
         self.pending = None  # deferred output: the last output step's (output, end)
         self.dp_rank = config.parallel_config.data_parallel_rank
-        self.record = Recorder.from_env() if rank == 0 else None  # the engine's output
+        pc = config.parallel_config  # the engine's output is its last PP stage's
+        last = pc.pipeline_parallel_rank == config.pipeline_parallel_size - 1
+        self.record = Recorder.from_env() if rank == 0 and last else None
         self.structured = None  # the reply to `prepare_structured_output`
         self.connector = None  # the worker half of the instance's KV connector
         if config.kv_transfer_config:
             self.connector = KVConnectorFactory.create_connector(config, "worker")
 
     def get_num_blocks(self) -> dict:
+        """A per-request-state model also gets its state slots, as GDN sizes them
+        without ReplaySSM: one plus a slot per speculative token, each request."""
+        from atom.model_engine.llm_engine import InputOutputProcessor
+
+        slots, per_req = {}, {}
+        stateful = InputOutputProcessor._per_req_cache_model_types()
+        if self.config.hf_config.model_type in stateful:
+            per_req = {STATE_SLOT_CLASS: 1 + self.mtp_k}
+            slots = {STATE_SLOT_CLASS: self.config.max_num_seqs * (1 + self.mtp_k)}
         return {
             "num_kvcache_blocks": self.fake.num_kvcache_blocks,
-            "pool_entries": {},
+            "pool_entries": slots,
             "pool_entry_bytes": {},
-            "pool_entries_per_req": {},
+            "pool_entries_per_req": per_req,
             "state_runtime": StateRuntime().to_wire(),
         }
 
@@ -183,6 +199,9 @@ class FakeRunner:
 
     def freeze_gc_heap(self) -> int:
         return 0
+
+    def flush_pp_send(self) -> bool:
+        return True  # no hidden states cross PP stages here, so no send is pending
 
     def prepare_structured_output(
         self,
