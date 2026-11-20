@@ -8,9 +8,18 @@ PY=/share_nfs/yajizhan/venv-cpu-test/bin/python
 RUST_ENV=/dev/shm/yajizhan-rust/env.sh
 NAME=$(basename "$(pwd)")
 SCR=/dev/shm/yajizhan-gate/$NAME-post
+TARGET=/dev/shm/yajizhan-rust/target-$NAME-post
 mkdir -p "$SCR"
 
 fail=0
+echo "== atomesh: cargo build --profile ci --bin atomesh, as CI's unit-test job builds it for the tests that start it"
+unset ATOMESH_BIN
+if (. "$RUST_ENV" && cd atom/mesh && CARGO_TARGET_DIR=$TARGET cargo build --profile ci --bin atomesh -q -j 16); then
+    export ATOMESH_BIN=$TARGET/ci/atomesh
+else
+    fail=1
+fi
+
 echo "== pytest tests/ (CI's unit-test scope)"
 # test_atomesh_mooncake_store.py's cleanup kills its process group, which ends the whole run outside CI.
 TMPDIR=$SCR PYTHONPATH=. "$PY" -m pytest -q -p no:cacheprovider --basetemp="$SCR/bt" --continue-on-collection-errors -rfE \
@@ -20,7 +29,7 @@ TMPDIR=$SCR PYTHONPATH=. "$PY" -m pytest -q -p no:cacheprovider --basetemp="$SCR
 echo "== mesh: test targets with atom-engine, CI's ext-proc check, then the mocker harness"
 (
     . "$RUST_ENV"
-    export CARGO_TARGET_DIR=/dev/shm/yajizhan-rust/target-$NAME-post
+    export CARGO_TARGET_DIR=$TARGET
     cd atom/mesh || exit 1
     rc=0
     # One test at a time until #7: routing_tests' PD tests race for ports in parallel.

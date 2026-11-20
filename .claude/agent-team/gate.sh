@@ -12,7 +12,9 @@ RUST_ENV=/dev/shm/yajizhan-rust/env.sh
 TREE=$(pwd)
 NAME=$(basename "$TREE")
 SCR=/dev/shm/yajizhan-gate/$NAME
+TARGET=/dev/shm/yajizhan-rust/target-$NAME  # this tree's cargo target directory
 mkdir -p "$SCR"
+[ -f "$RUST_ENV" ] || { echo "gate: $RUST_ENV missing (see the overlay body)"; exit 2; }
 
 FORK=$(git remote -v | awk '$2 ~ /Jasen2201\/ATOM(\.git)?$/ && $3 == "(fetch)" {print $1; exit}')
 [ -n "$FORK" ] || { echo "gate: no remote for Jasen2201/ATOM"; exit 2; }
@@ -37,6 +39,15 @@ if ((${#PYFILES[@]})); then
     "$BLACK" --check "${PYFILES[@]}" || fail=1
 fi
 
+# CI's unit-test job builds atomesh the same way; tests that start it fail when ATOMESH_BIN does not name it.
+echo "== atomesh: cargo build --profile ci --bin atomesh"
+unset ATOMESH_BIN
+if (. "$RUST_ENV" && cd atom/mesh && CARGO_TARGET_DIR=$TARGET cargo build --profile ci --bin atomesh -q -j 16); then
+    export ATOMESH_BIN=$TARGET/ci/atomesh
+else
+    fail=1
+fi
+
 # tests/entrypoints always, plus every changed or new test file elsewhere under tests/.
 mapfile -t TESTS < <(printf '%s\n' "${PYFILES[@]}" | grep -E '^tests/(.*/)?test_[^/]*\.py$' | grep -v -e '^tests/entrypoints/' -e '^tests/atom_grpc/')
 [ -d tests/atom_grpc ] && TESTS+=(tests/atom_grpc)  # this line's own tests run on every task
@@ -46,11 +57,10 @@ TMPDIR=$SCR PYTHONPATH=. "$PY" -m pytest -q -p no:cacheprovider --basetemp="$SCR
 
 # mesh: only when the change, an upstream merge included, touches atom/mesh or a .proto file.
 if [ -n "$(changed "$BASE" 'atom/mesh/*' '*.proto')" ]; then
-    [ -f "$RUST_ENV" ] || { echo "gate: $RUST_ENV missing (see the overlay body)"; exit 2; }
     echo "== mesh: cargo fmt --check; cargo check --all-targets (default features); cargo test --features atom-engine --lib, then the integration tests one test at a time"
     (
         . "$RUST_ENV"
-        export CARGO_TARGET_DIR=/dev/shm/yajizhan-rust/target-$NAME
+        export CARGO_TARGET_DIR=$TARGET
         cd atom/mesh
         ITESTS=()
         for f in tests/*.rs; do
