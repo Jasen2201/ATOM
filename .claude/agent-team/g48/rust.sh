@@ -1,6 +1,6 @@
 #!/bin/bash
-# Install the gate's Rust toolchain into g48's /dev/shm/yajizhan-rust (tmpfs) and write the env.sh the gate sources.
-# run.sh runs it in the gate image before every run; 1.100.0 is the dev host's toolchain, so cargo fmt agrees.
+# Install the gate's Rust toolchain at /dev/shm/yajizhan-rust, g48's /tmp/yajizhan-gate-rust as run.sh mounts it,
+# and write the env.sh the gate sources. run.sh runs this before every run; 1.100.0 is the dev host's, so cargo fmt agrees.
 set -euo pipefail
 R=/dev/shm/yajizhan-rust
 TOOLCHAIN=1.100.0
