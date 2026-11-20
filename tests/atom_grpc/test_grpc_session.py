@@ -225,6 +225,8 @@ def test_a_refused_request_comes_back_rejected_invalid_with_generates_message(to
         kind, refused = session.read()
         while kind != "rejected":
             kind, refused = session.read()
+        while not session.batches:  # until 1 runs: the engine drops an earlier abort
+            session.read()
         end_by_abort(session, 1)
     by_id = {item.seq_id: (item.code, item.reason) for item in refused}
     assert [by_id[i] for i in seq_ids] == answers
