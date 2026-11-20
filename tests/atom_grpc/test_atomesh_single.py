@@ -188,10 +188,8 @@ def test_atom_gets_what_atomesh_renders_and_the_client_every_token_once_in_order
         len(ids),
         24,
     )
-    emitted = [tokenizer.decode([token]) for token in admitted.output_ids[:24]]
-    # Each id is one word, so a lost, repeated or reordered id changes this list; a
-    # piece splits alone: atomesh's completions stream drops the space between (#84).
-    assert [word for piece in pieces for word in piece.split()] == emitted
+    # Each id is one word, so a lost, repeated or reordered id or a lost space shows.
+    assert "".join(pieces) == tokenizer.decode(admitted.output_ids[:24])
     assert len(pieces) > 1 if stream else len(pieces) == 1
 
 
