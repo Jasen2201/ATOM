@@ -12,6 +12,7 @@ CONFIG_ENV = "FAKE_ENGINE_CONFIG"  # the fake config file `FakeRunner` reads
 CORES_ENV = "FAKE_ENGINE_CORES"  # JSON: {"front_end": [cpus], "ranks": [[cpus]]}
 RECORD_ENV = "FAKE_ENGINE_RECORD"  # the engine record file, if any
 LINKS_ENV = "FAKE_ENGINE_LINKS"  # the directory where fake Mooncake ranks meet
+FIRST_SEQ_ID_ENV = "FAKE_ENGINE_FIRST_SEQ_ID"  # the API process's first sequence id
 TRANSFER = "tests.atom_grpc.fake.transfer"
 
 
@@ -65,5 +66,11 @@ if __name__ == "__main__":
         "runner_qualname": RUNNER,
     }
     record_api_process()
+    if FIRST_SEQ_ID_ENV in os.environ:
+        from itertools import count
+
+        from atom.model_engine.sequence import Sequence
+
+        Sequence.counter = count(int(os.environ[FIRST_SEQ_ID_ENV]))
     set_ulimit()
     main()
