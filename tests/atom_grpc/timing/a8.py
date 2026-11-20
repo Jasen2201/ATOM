@@ -7,6 +7,7 @@ import argparse
 import copy
 import json
 import os
+import shlex
 import shutil
 import statistics
 import subprocess
@@ -39,6 +40,8 @@ TOKENIZER = Path("/share_nfs/models/deepseek-ai/DeepSeek-V4.1-Flash")
 TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json", "chat_template.jinja")
 HARNESS = "1.0.9"  # agentx-harness, CI's
 PATHS, GRPC_PATHS = ("http", "grpc", "session"), ("grpc", "session")
+# More flags for the gRPC paths' routers, as shell words, which run.sh forwards; unset, none.
+GRPC_ROUTER_ARGS_ENV = "ATOM_A8_GRPC_ROUTER_ARGS"
 COPIES = {"prefill": 3, "decode": 4}  # instances of a8.toml's P and D
 API_SERVERS = 4  # the HTTP path's --api-server-count
 ATOMESH_CORES = AIPERF_CORES = 16
@@ -137,6 +140,8 @@ def path_topology(path: str, run: Path, model: Path, law: str) -> tuple[Path, di
     router |= {"name": path, "grpc": path != "http"}
     router["args"] += ["--model-path", str(model)]
     router["args"] += ["--atom-grpc-session"] * (path == "session")
+    if path != "http":
+        router["args"] += shlex.split(os.environ.get(GRPC_ROUTER_ARGS_ENV, ""))
     out = run.with_suffix(".toml")
     out.write_text(tools.dumps({"instance": instances, "router": [router]}))
     return out, ports  # P's handshake ports, by which its Ds name it
@@ -544,6 +549,8 @@ def measure(law: str, scratch: Path) -> int:
     load_average = tools.load_average(Path("/proc/loadavg").read_text())
     kthreads = int(os.environ.get(tools.KTHREADS_ENV, "0"))
     print("\n".join(tools.header("a8", load_average, kthreads, cores)), flush=True)
+    extra = os.environ.get(GRPC_ROUTER_ARGS_ENV, "")
+    print(f"gRPC routers' extra flags: {extra or 'none'}", flush=True)
     if tools.refuses(load_average, kthreads):
         print(f"refused: the load less those threads is {tools.MAX_LOAD:g} or more")
         return 2

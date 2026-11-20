@@ -59,10 +59,12 @@ COMMIT=$(git -C "$TREE" rev-parse HEAD)
 # average and runs nothing, and the container cannot see them. The case's refusal takes them off the load average.
 sleeping() { ps -eo ppid=,stat= | awk '$1 == 2 && $2 ~ /^D/' | wc -l; }
 KTHREADS=$(for _ in {1..11}; do sleeping; sleep 0.2; done | sort -n | sed -n 6p)
+# a8's gRPC routers also take the flags in ATOM_A8_GRPC_ROUTER_ARGS, as shell words.
 exec docker run --rm --init --name "$WHO-timing-$CASE-$NAME-$(date +%s%N)" --hostname "$(hostname -s)" \
     --cpuset-cpus "$CPUS" --tmpfs "/dev/shm:rw,exec,size=$SHM,mode=1777" --ulimit nofile=1048576 \
     --user "$(id -u):$(id -g)" -e HOME=/dev/shm/home -e "USER=$(id -un)" -e "LOGNAME=$(id -un)" -e TMPDIR=/dev/shm \
     -e PYTHONPATH="$TREE" -e ATOMESH_BIN="$RUST/target-$NAME/ci/atomesh" -e ATOM_TIMING_D_KTHREADS="$KTHREADS" \
     -e ATOM_TIMING_IMAGE="$IMAGE $ID" -e ATOM_TIMING_COMMIT="$COMMIT" \
+    -e ATOM_A8_GRPC_ROUTER_ARGS="${ATOM_A8_GRPC_ROUTER_ARGS:-}" \
     -v /share_nfs:/share_nfs:ro -v "$VOL:$RUST:ro" -w "$TREE" "$IMAGE" \
     bash -c 'mkdir -p "$HOME" && exec python3 -m "tests.atom_grpc.timing.$1" "${@:2}"' timing "$CASE" "${ARGS[@]}"
