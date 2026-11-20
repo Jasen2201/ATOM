@@ -44,9 +44,10 @@ built=$(docker run --rm --init --name "$WHO-timing-build-$NAME-$(date +%s%N)" --
 
 COMMIT=$(git -C "$TREE" rev-parse HEAD)
 [ -z "$(git -C "$TREE" --no-optional-locks status --porcelain)" ] || COMMIT+=" with uncommitted changes"
-# The host's kernel threads in uninterruptible sleep: each counts in its load average and runs nothing, and the
-# container cannot see them. The case's refusal takes them off the load average.
-KTHREADS=$(ps -eo ppid=,stat= | awk '$1 == 2 && $2 ~ /^D/' | wc -l)
+# The host's kernel threads in uninterruptible sleep, the median of 11 counts over 2 s: each counts in its load
+# average and runs nothing, and the container cannot see them. The case's refusal takes them off the load average.
+sleeping() { ps -eo ppid=,stat= | awk '$1 == 2 && $2 ~ /^D/' | wc -l; }
+KTHREADS=$(for _ in {1..11}; do sleeping; sleep 0.2; done | sort -n | sed -n 6p)
 exec docker run --rm --init --name "$WHO-timing-$CASE-$NAME-$(date +%s%N)" --hostname "$(hostname -s)" \
     --cpuset-cpus "$CPUS" --tmpfs /dev/shm:rw,exec,size=16g,mode=1777 --ulimit nofile=1048576 \
     --user "$(id -u):$(id -g)" -e HOME=/dev/shm/home -e "USER=$(id -un)" -e "LOGNAME=$(id -un)" -e TMPDIR=/dev/shm \
