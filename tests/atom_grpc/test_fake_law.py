@@ -4,13 +4,14 @@ virtual clock, each output handed back when ATOM's deferred output makes it due.
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from itertools import pairwise
 from pathlib import Path
 
 import pytest
 
 from tests.atom_grpc.fake.instance import FakeInstance
-from tests.atom_grpc.fake.law import Shape, StepLaw
+from tests.atom_grpc.fake.law import Group, Shape, StepLaw
 from tests.atom_grpc.fake.record import EngineRecord
 from tests.atom_grpc.fake.runner import Clock
 
@@ -19,8 +20,17 @@ LAW = FIXTURES / "laws" / "test.json"
 ARGS = ["--method", "mtp", "--num-speculative-tokens", "3"]
 ARGS += ["--cudagraph-capture-sizes", "[1,2,4]", "--max-num-seqs", "8"]
 ARGS += ["--max-num-batched-tokens", "32"]  # a 40-token prompt prefills in two chunks
+# ARGS on two DP ranks, with a budget that prefills a 40-token prompt at once.
+DP2 = ["-tp", "2", "--enable-dp-attention", *ARGS[:-1], "64"]
 STARTUP_S = 1500  # a loaded host takes minutes
 EXACT = 1e-12  # relative: the same terms, summed in another order
+# A DP dummy's prices, which run no draft-KV pass: a decode row of 4 at rung 1 or 2,
+# the target's terms then the draft's; one prefill token in bucket 64, then a propose.
+DUMMY_DECODE = {
+    1: 0.005 + 4 * 1e-6 + 6e-4 + 4 * 1e-8,
+    2: 0.006 + 4 * 1e-6 + (2 * 4 - 4) * 2e-7 + 7e-4 + 4 * 1e-8,
+}
+DUMMY_PREFILL = 0.004 + 1e-5 + 1e-8 + 5e-4 + 2e-3 + (64 - 1) * 4e-6 + 7e-4 + 8e-5
 
 
 @pytest.fixture(scope="module")
@@ -28,6 +38,19 @@ def instance(tmp_path_factory):
     fake = {"acceptance_length": 3.51, "law": str(LAW), "clock": "virtual"}
     workdir = tmp_path_factory.mktemp("law")
     started = FakeInstance(workdir, FIXTURES / "deepseek_v3_mtp", ARGS, fake)
+    try:
+        started.start()
+        started.wait_ready(time.monotonic() + STARTUP_S)
+        yield started
+    finally:
+        started.stop()
+
+
+@pytest.fixture(scope="module")
+def dp2(tmp_path_factory):
+    fake = {"acceptance_length": 3.51, "law": str(LAW), "clock": "virtual"}
+    workdir = tmp_path_factory.mktemp("dp2")
+    started = FakeInstance(workdir, FIXTURES / "deepseek_v3_mtp", DP2, fake)
     try:
         started.start()
         started.wait_ready(time.monotonic() + STARTUP_S)
@@ -90,6 +113,41 @@ def test_steps_run_back_to_back_and_hand_back_each_output_once_it_is_ready(insta
     assert any(after.called > step.called for step, after in pairwise(forwards))
 
 
+def on_rank_0(prompt: list[int], max_tokens: int) -> dict:
+    body = {"prompt_token_ids": prompt, "max_tokens": max_tokens, "temperature": 0}
+    return body | {"data_parallel_rank": 0}
+
+
+def test_a_dp2_ranks_dummies_cost_the_row_they_run_at_the_groups_phase_and_rung(dp2):
+    with ThreadPoolExecutor(1) as pool:
+        # One request decodes alone on rank 0, then beside a second one.
+        body = on_rank_0([1, *range(8, 47)], 400)
+        first = pool.submit(dp2.post, "/v1/completions", body)
+        while not any(
+            f.dp_rank == 1 and f.requests[0][3]
+            for f in EngineRecord(dp2.record).forwards
+        ):
+            assert not first.done(), first.result()
+            time.sleep(0.01)
+        second = dp2.post("/v1/completions", on_rank_0([1, *range(50, 89)], 20))
+        for status, reply in (second, first.result()):
+            assert status == 200, reply
+
+    forwards = EngineRecord(dp2.record).forwards
+    busy, idle = ([f for f in forwards if f.dp_rank == rank] for rank in (0, 1))
+    assert len(busy) == len(idle)  # each group step is one forward on each rank
+    for step, dummy in zip(busy, idle):
+        assert dummy.requests[0][0] is None and dummy.samples
+        if step.requests[0][3]:  # rank 0 decodes: a decode row of 4 at the group's rung
+            assert (dummy.requests, dummy.rung) == ([[None, 4, 4, True]], step.rung)
+            assert dummy.price == pytest.approx(DUMMY_DECODE[step.rung], rel=EXACT)
+        else:  # rank 0 prefills 40 tokens: one token, in the bucket that holds them
+            assert [row[1] for row in step.requests] == [40]
+            assert (dummy.requests, dummy.rung) == ([[None, 1, 1, False]], None)
+            assert dummy.price == pytest.approx(DUMMY_PREFILL, rel=EXACT)
+    assert {step.rung for step in busy} == {None, 1, 2}
+
+
 def test_the_port_prices_padded_decode_rows_and_two_finishing_prompts_by_hand():
     law = StepLaw.load(str(LAW))
     # Rung 4 pads two decode rows to four of the widest context.
@@ -108,6 +166,29 @@ def test_the_port_prices_padded_decode_rows_and_two_finishing_prompts_by_hand():
     middle = Shape(((200, 200, False),), None, False)
     price = 0.004 + 200 * 1e-5 + 200 * 200 * 1e-8 + 1e-4 + 200 * 2e-6
     assert law.price(middle) == pytest.approx(price, rel=EXACT)
+
+
+def test_the_port_prices_a_dp_ranks_step_by_its_group():
+    law = StepLaw.load(str(LAW))
+    # 8 tokens pad to bucket 64, which holds a peer's 40.
+    target = 0.004 + 8 * 1e-5 + 8 * 8 * 1e-8 + 5e-4 + 2e-3 + (64 - 8) * 4e-6
+    draft_kv = 1e-4 + 8 * 2e-6 + 3e-5 + 4e-5
+    prefill = Shape(((8, 8, False),), None, True, Group(40, False, True, False))
+    price = target + draft_kv + 7e-4 + 8e-5
+    assert law.price(prefill) == pytest.approx(price, rel=EXACT)
+    # Replaying no graph beside a prefilling peer or as a dummy, a decode costs 0 s; so
+    # does an idle group's dummy at a rung with no vector, not at a rung with one.
+    beside = Shape(((4, 9, True),), None, True, Group(40, False, True, False))
+    eager = Shape(((4, 4, True),), None, True, Group(0, True, False, False))
+    idle = Shape(((4, 4, True),), 8, True, Group(0, True, False, True))
+    assert law.price(beside) == law.price(eager) == law.price(idle) == 0.0
+    assert law.price(idle._replace(rung=1)) == pytest.approx(DUMMY_DECODE[1], rel=EXACT)
+    # A law with an eager vector prices them by it.
+    with_eager = json.loads(LAW.read_text())
+    for kind in (with_eager, with_eager["draft"]):
+        kind["decode"]["eager"] = kind["decode"]["1"]
+    price = 0.005 + 9 * 1e-6 + 5e-5 + 3e-6 + 6e-4 + 9 * 1e-8
+    assert StepLaw(with_eager).price(beside) == pytest.approx(price, rel=EXACT)
 
 
 @pytest.mark.parametrize(
