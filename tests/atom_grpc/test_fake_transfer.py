@@ -24,7 +24,7 @@ P_FAKE, D_FAKE = (
     for instance in tomllib.loads((TOPOLOGIES / "1p1d.toml").read_text())["instance"]
 )
 HOLD_S = float(D_FAKE["env"]["ATOM_PD_FAILED_WRITE_HOLD_S"])
-WAIT_S = 600  # for a /metrics gauge to change on a loaded host
+WAIT_S = 120  # for a /metrics gauge to change on a loaded host
 
 
 @pytest.fixture(scope="module")
@@ -135,7 +135,7 @@ def test_a_transfer_moves_the_prompt_kv_and_lasts_its_bytes_over_the_bandwidth(
     assert receive["ok"] and receive["blocks"] == 3
     assert receive["bytes"] == 3 * P_FAKE["block_bytes"]
     duration = receive["bytes"] / P_FAKE["bandwidth_gb_s"] / 1e9
-    assert receive["end"] - receive["start"] == pytest.approx(duration)
+    assert receive["seconds"] == pytest.approx(duration)
     assert prefill.steps[0].time <= receive["start"]  # P's KV was there to send
     assert receive["end"] <= request.steps[0].time  # D decodes once it has arrived
     if mode == "relay":  # Mooncake's relay transfer id is P's request id
@@ -147,8 +147,8 @@ def test_a_transfer_moves_the_prompt_kv_and_lasts_its_bytes_over_the_bandwidth(
 @pytest.mark.topology("1p1d")
 def test_a_receive_moves_only_the_blocks_d_does_not_hold(topology, tokenizer):
     pd = PD(topology)
-    first = [1, 7, *range(20, 50)]  # two full blocks
-    second = [*first, *range(60, 80)]  # the same two, then two more
+    first = [1, 7, *range(20, 58)]  # two full blocks and part of a third
+    second = [*first[:32], *range(60, 80)]  # the same two full blocks, then two more
     for prompt in (first, second):
         status, reply = pd.relay(completion(prompt, 6))
         assert status == 200, reply
@@ -174,23 +174,24 @@ def test_a_tagged_transfer_fails_and_d_reports_it_a_hold_later(topology, mode, f
     assert not receive["ok"] and not request.steps
     assert receive["bytes"] == 2 * P_FAKE["block_bytes"]
     failed_after = P_FAKE["transfer_timeout_s"] if fault == "timeout" else 0.0
-    assert receive["end"] - receive["start"] == pytest.approx(failed_after)
+    assert receive["seconds"] == pytest.approx(failed_after)
     assert receive["time"] >= receive["end"] + HOLD_S
 
 
 @pytest.mark.topology("1p1d")
 def test_a_rule_naming_one_dp_rank_fails_only_that_ranks_receives(topology, tokenizer):
     (rule,) = D_FAKE["faults"]
+    other, ruled = 1 - rule["dp_rank"], rule["dp_rank"]  # D's two DP ranks
     pd = PD(topology)
     prompt = [*rule["prompt_prefix"], *range(70, 90)]
     texts = {}
-    for rank in (0, 1):
+    for rank in (other, ruled):
         status, reply = pd.relay(completion(prompt, 8, rank))
         assert status == 200, reply
         texts[rank] = reply["choices"][0]["text"]
-    assert texts == {0: law_text(tokenizer, prompt, 8), rule["dp_rank"]: ""}
+    assert texts == {other: law_text(tokenizer, prompt, 8), ruled: ""}
     outcomes = {r.data_parallel_rank: r.receive["ok"] for r in pd.record(pd.d, prompt)}
-    assert outcomes == {0: True, 1: False}
+    assert outcomes == {other: True, ruled: False}
 
 
 @pytest.mark.topology("1p1d")
@@ -214,5 +215,5 @@ def test_a_request_aborted_while_its_receive_waits_keeps_its_blocks_till_it_repo
     receive = request.receive
     assert not receive["ok"]
     timeout = P_FAKE["transfer_timeout_s"]
-    assert receive["end"] - receive["start"] == pytest.approx(timeout)
+    assert receive["seconds"] == pytest.approx(timeout)
     assert held < receive["time"] <= freed  # held while it waited, freed once reported

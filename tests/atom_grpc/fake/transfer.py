@@ -43,15 +43,13 @@ class FakeMooncakeScheduler(MooncakeConnectorScheduler):
         for rule in self.rules:
             if rule.keys() - RULE_KEYS or rule.get("fault") not in FAULTS:
                 raise ValueError(
-                    f"fault rule {rule}: keys {RULE_KEYS}, faults {FAULTS}"
+                    f"fault rule {rule}: keys {RULE_KEYS}, one of {FAULTS}"
                 )
         self.faults = {}  # receives allocated since the last metadata, by request id
 
     def update_state_after_alloc(self, seq) -> None:
         params = seq.kv_transfer_params or {}
-        if params.get(
-            "do_remote_prefill"
-        ):  # a receive, before Mooncake clears the flag
+        if params.get("do_remote_prefill"):  # a receive; Mooncake clears the flag
             rules = (r["fault"] for r in self.rules if self._matches(r, seq))
             fault = params.get(FAULT) or next(rules, None)
             if fault:
@@ -81,11 +79,6 @@ class _Source:
     chunked: bool
     handoff: dict | None = None
     cancelled: bool = False
-
-
-def _wall(t: float) -> float:
-    """A monotonic time on the wall clock, the engine record's."""
-    return t + time.time() - time.monotonic()
 
 
 class FakeMooncakeWorker(KVConnectorBase):
@@ -190,7 +183,8 @@ class FakeMooncakeWorker(KVConnectorBase):
                 self.replies.append(msgpack.loads(sock.recv()))
         hold = envs.ATOM_PD_FAILED_WRITE_HOLD_S  # as Mooncake holds a failed receive
         for reply in list(self.replies):
-            if reply["end"] + (0.0 if reply["ok"] else hold) > now:
+            end = reply["start"] + reply["seconds"]
+            if end + (0.0 if reply["ok"] else hold) > now:
                 continue
             self.replies.remove(reply)
             req_id = reply["request_id"]
@@ -204,13 +198,16 @@ class FakeMooncakeWorker(KVConnectorBase):
             else:
                 out.failed_recving.add(req_id)
             if self.recorder is not None:
+                wall = time.time() - time.monotonic()
                 self.recorder.receive(
                     req_id,
+                    now + wall,
                     transfer_id=transfer_id,
                     blocks=len(dst),
                     bytes=reply["bytes"],
-                    start=_wall(reply["start"]),
-                    end=_wall(reply["end"]),
+                    seconds=reply["seconds"],
+                    start=reply["start"] + wall,
+                    end=end + wall,
                     ok=reply["ok"],
                 )
         return out
@@ -253,32 +250,26 @@ class FakeMooncakeWorker(KVConnectorBase):
             self.due.append((now, "admit", self.admissions.pop(transfer_id)))
         source = self.sources.get(transfer_id)
         if source is None:
-            waits = now - arrived < PREFILL_LOOKUP_TIMEOUT
-            if transfer_id in self.admitted or waits:
+            if transfer_id in self.admitted or now - arrived < PREFILL_LOOKUP_TIMEOUT:
                 return None
         elif source.chunked and not (source.handoff or source.cancelled):
             return None
         reply = {"request_id": request["request_id"], "ok": False, "bytes": 0}
-        reply |= {"start": now, "end": now}
+        reply |= {"start": now, "seconds": 0.0}
         if source is None or source.cancelled:
             self.sources.pop(transfer_id, None)
             return reply
         del self.sources[transfer_id]
         blocks = source.block_ids[request["num_computed_blocks"] :]
         reply["bytes"] = len(blocks) * self.fake.block_bytes
-        fault = request["fault"]
-        if fault == "timeout":
-            reply["end"] = now + self.fake.transfer_timeout_s
-        elif not fault and len(blocks) == request["num_blocks"]:
+        if request["fault"] == "timeout":
+            reply["seconds"] = self.fake.transfer_timeout_s
+        elif not request["fault"] and len(blocks) == request["num_blocks"]:
             reply["start"] = max(now, self.link_free)
-            reply["end"] = (
-                reply["start"] + reply["bytes"] / self.fake.bandwidth_gb_s / 1e9
-            )
-            self.link_free = reply["end"]
+            reply["seconds"] = reply["bytes"] / self.fake.bandwidth_gb_s / 1e9
+            self.link_free = reply["start"] + reply["seconds"]
             reply |= {"ok": True, "handoff": source.handoff}
             reply["tokens"] = self.kv[self._slots(blocks)].tobytes()
-        if source.chunked:
-            self.due.append((reply["end"], "safe", source.req_id))
-        else:
-            self.due.append((reply["end"], "sent", transfer_id))
+        kind, key = ("safe", source.req_id) if source.chunked else ("sent", transfer_id)
+        self.due.append((reply["start"] + reply["seconds"], kind, key))
         return reply

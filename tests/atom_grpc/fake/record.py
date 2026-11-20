@@ -89,9 +89,9 @@ class Recorder:
         event = {"kind": "step", "time": end, "dp_rank": dp_rank, "rows": rows}
         self.write(_lines([event]))
 
-    def receive(self, seq_id: int, **transfer) -> None:
-        """D's KV receive for `seq_id` as it reported it: the transfer P scheduled."""
-        event = {"kind": "receive", "time": time.time(), "seq_id": seq_id, **transfer}
+    def receive(self, seq_id: int, reported: float, **transfer) -> None:
+        """D's KV receive for `seq_id`, reported at wall time `reported`: what P sent."""
+        event = {"kind": "receive", "time": reported, "seq_id": seq_id, **transfer}
         self.write(_lines([event]))
 
     def watch(self, tokenizer):
