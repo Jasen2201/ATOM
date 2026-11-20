@@ -1,8 +1,13 @@
-# One fake instance with MTP, its API server pinned to one core and its rank to another.
+# One fake instance with MTP and gRPC, its API server pinned to one core and its rank to another.
 
 [[instance]]
 name = "single"
 model = "../fixtures/deepseek_v3_mtp"
-args = ["--method", "mtp", "--num-speculative-tokens", "3"]
+args = [
+    "--method", "mtp", "--num-speculative-tokens", "3",
+    "--served-model-name", "fake-mtp",
+    "--default-chat-template-kwargs", '{"fixture_default": true}',
+]
 fake = { acceptance_length = 3.51, step_s = 0.001 }
 cores = { front_end = 1, rank = 1 }
+grpc = true
