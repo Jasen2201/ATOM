@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Fake ModelRunner: answers every RPC EngineCore waits on, on CPU, with no model.
-Steps run back to back on one fake GPU at a constant price; ids follow `IdLaw`."""
+Steps run back to back on one fake GPU at their law's price; ids follow `IdLaw`."""
 
 import json
 import math
@@ -15,6 +15,7 @@ from atom.kv_transfer.disaggregation import KVConnectorFactory, KVConnectorOutpu
 from atom.model_engine.scheduler import ScheduledBatchOutput, defers_output
 from atom.model_engine.state_runtime import StateRuntime
 from tests.atom_grpc.fake.ids import IdLaw, fingerprint
+from tests.atom_grpc.fake.law import ConstantLaw, Shape, StepLaw
 from tests.atom_grpc.fake.record import Recorder
 from tests.atom_grpc.fake.serve import CONFIG_ENV
 
@@ -25,6 +26,8 @@ class FakeConfig:
 
     acceptance_length: float = 3.51  # mean tokens per verify step
     step_s: float = 0.001  # the constant-step law: the price of every step
+    law: str = ""  # a step-linear law file (JSON or .xz) to price steps by instead
+    clock: str = "real"  # "virtual": time passes only while the fake GPU is waited on
     num_kvcache_blocks: int = 4096
     block_bytes: int = 0  # the KV bytes a block moves from P to D; a P instance sets it
     bandwidth_gb_s: float = 20.0  # each P rank's one link to D
@@ -45,22 +48,59 @@ def verify_tokens(step: int, length: Fraction) -> int:
     return math.floor((step + 1) * length) - math.floor(step * length)
 
 
+class Clock:
+    """The fake GPU's time: monotonic seconds, a sleep until one, and the wall clock's
+    offset from them; `monotonic` and `wall` are injectable."""
+
+    def __init__(self, monotonic=time.monotonic, wall=time.time):
+        self.monotonic, self.wall = monotonic, wall
+
+    def now(self) -> float:
+        return self.monotonic()
+
+    def sleep_until(self, t: float) -> None:
+        delay = t - self.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+
+    def offset(self) -> float:
+        """Wall minus monotonic from the tightest of three bracketed reads: a process
+        preempted between two bare reads would stamp early."""
+        reads = []
+        for _ in range(3):
+            before, wall, after = self.monotonic(), self.wall(), self.monotonic()
+            reads.append((after - before, wall - (before + after) / 2))
+        return min(reads)[1]
+
+
+class VirtualClock(Clock):
+    """Seconds that pass only while the fake GPU is waited on, the engine's own time
+    free; its stamps are those seconds, so a test reads no wall time."""
+
+    def __init__(self):
+        super().__init__(lambda: self.t, lambda: self.t)
+        self.t = 0.0
+
+    def sleep_until(self, t: float) -> None:
+        self.t = max(self.t, t)
+
+
+CLOCKS = {"real": Clock, "virtual": VirtualClock}
+
+
 class SerialGpu:
     """One fake GPU: a step starts once it is called and the step before it ends."""
 
-    def __init__(self):
+    def __init__(self, clock: Clock):
+        self.clock = clock
         self.free_at = 0.0
 
-    def run(self, price: float) -> float:
-        """Queue a step of `price` seconds; returns when it ends (monotonic)."""
-        self.free_at = max(time.monotonic(), self.free_at) + price
-        return self.free_at
-
-
-def _sleep_until(t: float) -> None:
-    delay = t - time.monotonic()
-    if delay > 0:
-        time.sleep(delay)
+    def run(self, price: float) -> tuple[float, float, float]:
+        """Queue a step of `price` seconds: when it was called, starts and ends."""
+        called = self.clock.now()
+        start = max(called, self.free_at)
+        self.free_at = start + price
+        return called, start, self.free_at
 
 
 @dataclass
@@ -88,8 +128,22 @@ class FakeRunner:
         self.deferred = defers_output(config)
         self.block_size = config.kv_cache_block_size
         stop = {config.eos_token_id, *config.stop_token_ids} - {None}
-        self.law = IdLaw.for_model(config.model, stop)
-        self.gpu = SerialGpu()
+        self.id_law = IdLaw.for_model(config.model, stop)
+        self.step_law = ConstantLaw(self.fake.step_s)
+        if self.fake.law:
+            if config.parallel_config.data_parallel_size > 1:
+                raise ValueError(
+                    "a step law prices DP 1 steps; a DP dummy has no price"
+                )
+            self.step_law = StepLaw.load(self.fake.law)
+        # The ladder a decode's rung comes from, narrowed as ModelRunner narrows it.
+        top = min(
+            config.max_num_seqs, config.max_num_batched_tokens // (self.mtp_k + 1)
+        )
+        captured = [size for size in config.capture_sizes if size <= top]
+        self.ladder = [] if config.enforce_eager else sorted(captured)
+        self.clock = CLOCKS[self.fake.clock]()
+        self.gpu = SerialGpu(self.clock)
         self.kv = np.zeros(0, np.int32)  # the token id each KV slot holds
         self.requests: dict[int, _Request] = {}
         self.pending = None  # deferred output: the last output step's (output, end)
@@ -168,25 +222,48 @@ class FakeRunner:
         pass
 
     def dummy_execution(self) -> ScheduledBatchOutput:
-        end = self.gpu.run(self.fake.step_s)
+        _, _, end = self.gpu.run(self.fake.step_s)  # DP only, where the law is constant
         return self._hand_back(self._output([], [], [], []), end)
 
     def forward(self, batch) -> ScheduledBatchOutput:
-        end = self.gpu.run(self.fake.step_s)
+        shape = self._shape(batch)
+        price = self.step_law.price(shape)
+        called, start, end = self.gpu.run(price)
         output, emitted = self._step(batch)
-        if self.record is not None and emitted:
-            wall_end = time.time() + end - time.monotonic()
-            self.record.step(self.dp_rank, emitted, wall_end)
-        if not batch.produces_output():
+        if self.record is not None:
+            offset = self.clock.offset()  # one offset for the step's three times
+            self.record.step(
+                self.dp_rank,
+                emitted,
+                end + offset,
+                called=called + offset,
+                start=start + offset,
+                price=price,
+                requests=[[r, *row] for r, row in zip(batch.req_ids, shape.requests)],
+                rung=shape.rung,
+                samples=shape.samples,
+            )
+        if not shape.samples:
             return ScheduledBatchOutput(list(batch.req_ids), [], None, None, None)
         return self._hand_back(output, end)
+
+    def _shape(self, batch) -> Shape:
+        """What a law prices `batch` by; a decode's rung is the narrowest captured size
+        holding its requests, as `ForwardMode.decide` picks one at DP 1."""
+        prefill = batch.total_seqs_num_prefill
+        rows = zip(batch.num_scheduled_tokens.tolist(), batch.context_lens.tolist())
+        requests = tuple((q, c, i >= prefill) for i, (q, c) in enumerate(rows))
+        rung = None
+        if not prefill:
+            rung = next((size for size in self.ladder if size >= len(requests)), None)
+        return Shape(requests, rung, batch.produces_output())
 
     def _hand_back(self, output, end: float) -> ScheduledBatchOutput:
         """The output a step returns once it is ready: deferred, the step before's."""
         if self.deferred:
             empty = (self._output([], [], [], []), 0.0)
             self.pending, (output, end) = (output, end), self.pending or empty
-        _sleep_until(end)
+        self.clock.sleep_until(end)
         return output
 
     def _step(self, batch) -> tuple[ScheduledBatchOutput, list]:
@@ -204,8 +281,8 @@ class FakeRunner:
                 )
                 if batch.is_final_chunk is not None and not batch.is_final_chunk[i]:
                     # A middle chunk samples too, and the scheduler drops it.
-                    rows.append((self.law.fill[0],))
-                    drafts.append([self.law.fill[0]] * self.mtp_k)
+                    rows.append((self.id_law.fill[0],))
+                    drafts.append([self.id_law.fill[0]] * self.mtp_k)
                     rejected.append(0)
                     continue
                 req, first, count, reject = self._admit(req_id, table, end), end, 1, 0
@@ -249,7 +326,7 @@ class FakeRunner:
         return req
 
     def _ids(self, req: _Request, start: int, stop: int) -> list[int]:
-        return self.law.ids(req.fingerprint, start - req.prompt_len, stop - start)
+        return self.id_law.ids(req.fingerprint, start - req.prompt_len, stop - start)
 
     def _slots(self, table, start: int, stop: int) -> np.ndarray:
         positions = np.arange(start, stop)
