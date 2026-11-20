@@ -1578,12 +1578,12 @@ mod i_atom_refusals {
     use crate::app_context::AppContext;
     use crate::config::RouterConfig;
     use crate::core::prepare_pool::PreparePoolRuntime;
-    use crate::core::{BasicWorkerBuilder, ConnectionMode, RuntimeType, Worker};
+    use crate::core::{BasicWorkerBuilder, ConnectionMode, RuntimeType, Worker, WorkerType};
     use crate::observability::metrics::metrics_labels;
     use crate::routers::comm::error::extract_error_code_from_response;
-    use crate::routers::grpc::{pipeline::Pipeline, router::GrpcRouter};
+    use crate::routers::grpc::{pd_router::GrpcPDRouter, pipeline::Pipeline, router::GrpcRouter};
     use crate::routers::ingress::InferenceEnvelope;
-    use crate::routers::test_mocks::{hf_tokenizer, MockDispatcher, MockPdPlanner};
+    use crate::routers::test_mocks::{self, hf_tokenizer, MockDispatcher, MockPdPlanner};
     use crate::routers::token_handle::engine_error::EngineError;
     use crate::routers::token_handle::test_support::synthetic_single_stream;
     use crate::routers::token_handle::token_chunk::{FinishReason, TokenChunk, Usage, WorkerMeta};
@@ -1652,8 +1652,9 @@ mod i_atom_refusals {
         })]))
     }
 
-    fn worker(model: &str, runtime: RuntimeType) -> Arc<dyn Worker> {
-        let worker = BasicWorkerBuilder::new(format!("grpc://{model}:1"))
+    fn worker(model: &str, runtime: RuntimeType, kind: WorkerType) -> Arc<dyn Worker> {
+        let worker = BasicWorkerBuilder::new(format!("grpc://{model}-{kind}:1"))
+            .worker_type(kind)
             .connection_mode(ConnectionMode::Grpc { port: None })
             .runtime_type(runtime)
             .model_id(model)
@@ -1676,9 +1677,10 @@ mod i_atom_refusals {
             .load(&id, "m", "hf-test", || async { Ok(hf_tokenizer()) })
             .await
             .unwrap();
-        let served = worker("m", runtime);
+        let served = worker("m", runtime, WorkerType::Regular);
         ctx.worker_registry.register(served.clone());
-        ctx.worker_registry.register(worker("a", RuntimeType::Atom));
+        ctx.worker_registry
+            .register(worker("a", RuntimeType::Atom, WorkerType::Regular));
         let dispatcher = Arc::new(MockDispatcher::repeat_with_stream(completed));
         let planner = Arc::new(MockPdPlanner::repeat_single(served, "random"));
         let pipeline =
@@ -1721,6 +1723,33 @@ mod i_atom_refusals {
                 .collect();
             assert_eq!(answers, expected, "{runtime}");
             assert_eq!(dispatched, expected.len() - 1, "{runtime}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_an_atom_pair_gets_no_media_request() {
+        let ctx = test_mocks::app_context_with_hf_tokenizer("m");
+        let router = GrpcPDRouter::new(&ctx).await.unwrap();
+        let prefill = WorkerType::Prefill {
+            bootstrap_port: None,
+        };
+        for kind in [prefill, WorkerType::Decode] {
+            ctx.worker_registry
+                .register(worker("m", RuntimeType::Atom, kind));
+        }
+        for (path, body, answer) in requests().into_iter().filter(|(_, _, a)| *a == MEDIA) {
+            let response = match path {
+                "/generate" => {
+                    let body = serde_json::from_value(body).unwrap();
+                    router.route_generate(None, &body, Some("m")).await
+                }
+                _ => {
+                    let body = serde_json::from_value(body).unwrap();
+                    router.route_chat(None, &body, Some("m")).await
+                }
+            };
+            let code = extract_error_code_from_response(&response);
+            assert_eq!((response.status(), code), answer, "{path}");
         }
     }
 }

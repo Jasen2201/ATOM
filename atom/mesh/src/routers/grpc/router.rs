@@ -76,16 +76,6 @@ impl GrpcRouter {
         }
     }
 
-    /// Whether `model_id` has an ATOM gRPC worker; those serve neither media nor Responses.
-    fn atom_serves(&self, model_id: Option<&str>) -> bool {
-        model_id.is_some_and(|model| {
-            let workers = self.worker_registry.get_by_model(model);
-            workers
-                .iter()
-                .any(|worker| worker.metadata().runtime_type == RuntimeType::Atom)
-        })
-    }
-
     async fn route_chat_impl(
         &self,
         headers: Option<&HeaderMap>,
@@ -199,8 +189,18 @@ impl GrpcRouter {
     }
 }
 
+/// Whether `model_id` has an ATOM gRPC worker; those serve neither media nor Responses.
+pub(super) fn atom_serves(workers: &WorkerRegistry, model_id: Option<&str>) -> bool {
+    model_id.is_some_and(|model| {
+        let workers = workers.get_by_model(model);
+        workers
+            .iter()
+            .any(|worker| worker.metadata().runtime_type == RuntimeType::Atom)
+    })
+}
+
 /// ATOM gRPC workers take token ids alone, so a request's media would be dropped.
-fn media_refused() -> Response {
+pub(super) fn media_refused() -> Response {
     error::bad_request(
         "unsupported_media",
         "ATOM gRPC workers serve no image, video, audio or embedding input",
@@ -228,7 +228,9 @@ impl RouterTrait for GrpcRouter {
         body: &GenerateRequest,
         model_id: Option<&str>,
     ) -> Response {
-        if self.atom_serves(model_id) && ParsedInference::generate_carries_media(body) {
+        if atom_serves(&self.worker_registry, model_id)
+            && ParsedInference::generate_carries_media(body)
+        {
             return media_refused();
         }
         self.route_generate_impl(headers, body, model_id).await
@@ -240,7 +242,8 @@ impl RouterTrait for GrpcRouter {
         body: &ChatCompletionRequest,
         model_id: Option<&str>,
     ) -> Response {
-        if self.atom_serves(model_id) && ParsedInference::chat_carries_media(body) {
+        if atom_serves(&self.worker_registry, model_id) && ParsedInference::chat_carries_media(body)
+        {
             return media_refused();
         }
         self.route_chat_impl(headers, body, model_id).await
@@ -281,7 +284,7 @@ impl RouterTrait for GrpcRouter {
         body: &ResponsesRequest,
         model_id: Option<&str>,
     ) -> Response {
-        if self.atom_serves(model_id) {
+        if atom_serves(&self.worker_registry, model_id) {
             return error::not_implemented(
                 "unsupported_api",
                 "Responses requires an HTTP backend for ATOM workers",
