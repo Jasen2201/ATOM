@@ -13,7 +13,9 @@ for d in "$TREE" "$(git rev-parse --path-format=absolute --git-common-dir)"; do
 done
 IMAGE=atom-gate:$(sha256sum <"$DIR/Dockerfile" | cut -c1-12)
 NAME=yajizhan-gate-$(basename "$TREE")-$(date +%s%N)
-ARGS=(--rm --init --name "$NAME" --cpus 16 --shm-size 32g --ulimit nofile=1048576 --user "$(id -u):$(id -g)"
+# /dev/shm allows exec, as on the dev host: tests run stub commands and torch loads .so files from pytest's scratch.
+ARGS=(--rm --init --name "$NAME" --cpus 16 --tmpfs /dev/shm:rw,exec,size=32g,mode=1777 --ulimit nofile=1048576
+    --user "$(id -u):$(id -g)"
     -e ATOM_GATE_LOCAL=1 -e HOME=/dev/shm/home -e "USER=$(id -un)" -e "LOGNAME=$(id -un)" -e LANG=C.UTF-8
     -v /share_nfs:/share_nfs -v "$RUFF:$RUFF:ro" -v "$RDIR:/dev/shm/yajizhan-rust" -w "$TREE")
 [ -z "${PYTEST_ADDOPTS:-}" ] || ARGS+=(-e "PYTEST_ADDOPTS=$PYTEST_ADDOPTS")
