@@ -21,6 +21,10 @@ service AtomEngine {
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
   // Many requests on one stream: each Frames is one engine_v1 message.
   rpc Session(stream Frames) returns (stream Frames);
+  // The structured-output fields of a chat sent over the Session, derived as the
+  // HTTP chat route derives them; the request's SamplingParams takes them.
+  rpc PrepareStructuredOutput(PrepareStructuredOutputRequest)
+      returns (PrepareStructuredOutputResponse);
 }
 
 // The version GetServerInfo reports; a client refuses a server with another.
@@ -124,4 +128,15 @@ message HealthCheckResponse {
 // BufferRefs point into.
 message Frames {
   repeated bytes frames = 1;
+}
+
+message PrepareStructuredOutputRequest {
+  StructuredOutput structured_output = 1;
+}
+
+message PrepareStructuredOutputResponse {
+  oneof response {
+    atom.engine.v1.SamplingParams sampling = 1;  // only the fields the chat route derives
+    GenerateError error = 2;
+  }
 }

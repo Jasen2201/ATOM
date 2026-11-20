@@ -28,6 +28,7 @@ def test_atom_engine_rpcs_and_their_streaming():
         ("GetServerInfo", False, False),
         ("HealthCheck", False, False),
         ("Session", True, True),
+        ("PrepareStructuredOutput", False, False),
     ]
 
 
@@ -51,3 +52,16 @@ def test_generate_request_reuses_engine_v1_messages():
     # Presence crosses the wire: a set max_tokens stays set, an unset field unset.
     assert decoded.sampling.HasField("max_tokens")
     assert not decoded.sampling.HasField("temperature")
+
+
+def test_prepare_structured_output_takes_the_chat_and_answers_engine_v1_fields():
+    service = atom_grpc_pb2.DESCRIPTOR.services_by_name["AtomEngine"]
+    method = service.methods_by_name["PrepareStructuredOutput"]
+    chat = method.input_type.fields_by_name["structured_output"]
+    assert chat.message_type is atom_grpc_pb2.StructuredOutput.DESCRIPTOR
+    # Either the derived engine_v1 fields or the HTTP chat route's refusal.
+    answer = method.output_type.oneofs_by_name["response"]
+    assert {f.name: f.message_type for f in answer.fields} == {
+        "sampling": engine_v1_pb2.SamplingParams.DESCRIPTOR,
+        "error": atom_grpc_pb2.GenerateError.DESCRIPTOR,
+    }

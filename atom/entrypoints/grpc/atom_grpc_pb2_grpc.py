@@ -65,6 +65,11 @@ class AtomEngineStub(object):
                 request_serializer=atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.Frames.SerializeToString,
                 response_deserializer=atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.Frames.FromString,
                 _registered_method=True)
+        self.PrepareStructuredOutput = channel.unary_unary(
+                '/atom.grpc.v1.AtomEngine/PrepareStructuredOutput',
+                request_serializer=atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.PrepareStructuredOutputRequest.SerializeToString,
+                response_deserializer=atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.PrepareStructuredOutputResponse.FromString,
+                _registered_method=True)
 
 
 class AtomEngineServicer(object):
@@ -111,6 +116,14 @@ class AtomEngineServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def PrepareStructuredOutput(self, request, context):
+        """The structured-output fields of a chat sent over the Session, derived as the
+        HTTP chat route derives them; the request's SamplingParams takes them.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AtomEngineServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -143,6 +156,11 @@ def add_AtomEngineServicer_to_server(servicer, server):
                     servicer.Session,
                     request_deserializer=atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.Frames.FromString,
                     response_serializer=atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.Frames.SerializeToString,
+            ),
+            'PrepareStructuredOutput': grpc.unary_unary_rpc_method_handler(
+                    servicer.PrepareStructuredOutput,
+                    request_deserializer=atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.PrepareStructuredOutputRequest.FromString,
+                    response_serializer=atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.PrepareStructuredOutputResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -308,6 +326,33 @@ class AtomEngine(object):
             '/atom.grpc.v1.AtomEngine/Session',
             atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.Frames.SerializeToString,
             atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.Frames.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PrepareStructuredOutput(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/atom.grpc.v1.AtomEngine/PrepareStructuredOutput',
+            atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.PrepareStructuredOutputRequest.SerializeToString,
+            atom_dot_entrypoints_dot_grpc_dot_atom__grpc__pb2.PrepareStructuredOutputResponse.FromString,
             options,
             channel_credentials,
             insecure,
