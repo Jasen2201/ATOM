@@ -17,7 +17,7 @@ LOG = "atomesh.log"  # in the router's scratch directory
 
 
 def atomesh_bin() -> str:
-    """The atomesh a router runs; unset, a launch with routers fails rather than skips."""
+    """The atomesh routers run; unset, a launch with routers fails, not skips."""
     path = os.environ.get(ATOMESH_BIN)
     if not path:
         raise RuntimeError(

@@ -55,7 +55,7 @@ def words(count: int, lead: int = 0) -> str:
 
 
 def body(route: str, model: str, content: str, **fields) -> dict:
-    """A request to `route` with `content` as its prompt, or a chat's one user message."""
+    """A request to `route`: `content` its prompt, or a chat's one user message."""
     if route == "completions":
         return {"model": model, "prompt": content, **fields}
     chat = {"model": model, "messages": [{"role": "user", "content": content}]}
@@ -189,7 +189,8 @@ def test_atom_gets_what_atomesh_renders_and_the_client_every_token_once_in_order
         24,
     )
     emitted = [tokenizer.decode([token]) for token in admitted.output_ids[:24]]
-    # Each id is one word, so a lost, repeated or reordered id changes this list.
+    # Each id is one word, so a lost, repeated or reordered id changes this list; a
+    # piece splits alone: atomesh's completions stream drops the space between (#84).
     assert [word for piece in pieces for word in piece.split()] == emitted
     assert len(pieces) > 1 if stream else len(pieces) == 1
 
