@@ -1,5 +1,5 @@
-# One P and one D (DP 2) over fake Mooncake, relay or chunked; P's handshake port only
-# names its fake socket. D fails rank 1's receives of prompts starting [3, 3, 3].
+# One P and one D (DP 2) over fake Mooncake: a block moves in 0.1 s, P's handshake port
+# names only its fake socket, and D fails rank 1's receives of prompts starting [3, 3, 3].
 
 [[instance]]
 name = "p"
@@ -9,7 +9,7 @@ args = [
     "--kv-transfer-config",
     '{"kv_connector": "mooncake", "kv_role": "kv_producer", "enable_chunked_transfer": true}',
 ]
-fake = { step_s = 0.001, block_bytes = 1000000, bandwidth_gb_s = 1.0, transfer_timeout_s = 6.0 }
+fake = { step_s = 0.001, block_bytes = 100_000_000, bandwidth_gb_s = 1.0, transfer_timeout_s = 6.0 }
 
 [[instance]]
 name = "d"
