@@ -18,7 +18,7 @@ from tests.atom_grpc.fake.instance import FakeInstance, free_port
 from tests.atom_grpc.harness.launch import STARTUP_S
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/deepseek_v3_mtp"
-CONTEXT = 1 << 20  # tokens: past the trace's cap of 990,016 a request
+CONTEXT = 1 << 20  # tokens, past the trace's cap of 990,016 on a request
 BLOCK = 16  # ATOM's default --block-size
 ARGS = ["--method", "mtp", "--num-speculative-tokens", "3"]  # the single topology's
 FAKE = {

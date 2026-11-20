@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """AgentX trace sessions as token-id conversations: a session's main turns form one,
-each subagent group its own, and each hash id stands for a seeded block of 64 ids."""
+each subagent group its own, and each hash id stands for 64 seeded token ids."""
 
 import json
 from pathlib import Path
@@ -47,8 +47,8 @@ def extract_turns(path: Path = EXTRACT) -> list[Turn]:
 
 
 class TokenBlocks:
-    """Each hash id's block of token ids, drawn from a stream that `seed` and the id
-    seed: fixed under one seed, and another block under any other."""
+    """Each hash id's block of HASH_BLOCK token ids, drawn from a stream seeded by
+    `seed` and the id: the same under one seed, another under any other."""
 
     def __init__(self, *seed: int):
         self.seed = seed
