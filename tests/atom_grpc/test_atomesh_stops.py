@@ -90,9 +90,10 @@ def test_a_stop_string_ends_a_chat_through_atomesh_where_atom_http_chat_ends_it(
 
 
 @pytest.mark.topology("stops")
+@pytest.mark.parametrize("stream", [False, True], ids=["unary", "stream"])
 def test_a_stop_string_ends_a_completion_through_atomesh_where_atom_http_ends_it(
-    topology,
+    topology, stream
 ):
     instance, router = topology.instances["plain"], topology.routers["plain-mesh"]
     body = {"model": model(router), "prompt": "ba be bi", "max_tokens": 40}
-    check_stops(instance, router, "completions", body | {"stream": False}, "text")
+    check_stops(instance, router, "completions", body | {"stream": stream}, "text")
