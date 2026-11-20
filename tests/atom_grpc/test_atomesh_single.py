@@ -282,6 +282,27 @@ def test_atomesh_refuses_with_the_status_atom_http_routes_answer(
     assert router.post(ROUTES[route], request)[0] == status
 
 
+@pytest.mark.topology("single")
+@pytest.mark.parametrize("stream", [False, True], ids=["unary", "stream"])
+def test_a_repeated_chat_reports_the_prefix_cache_hit_the_http_chat_reports(
+    topology, stream
+):
+    router, instance = topology.routers["mesh"], topology.instances["single"]
+    info, content = model_info(instance), words(40, lead=6)
+    content += " Hello" if stream else " world"  # one prompt per case
+    request = body("chat", info.served_model_name, content, max_tokens=4, stream=stream)
+
+    def details(target) -> dict | None:
+        status, replies = send(target, "chat", request)
+        assert status == 200, replies
+        return answer("chat", replies)[2].get("prompt_tokens_details")
+
+    details(instance)  # the prompt's full blocks enter ATOM's prefix cache
+    over_http = details(instance)
+    assert over_http["cached_tokens"] > 0
+    assert details(router) == over_http
+
+
 def test_a_router_gets_its_instances_urls_and_waits_for_each_url_at_rank(tmp_path):
     p, d = "grpc://127.0.0.1:1", "grpc://127.0.0.1:2"
     urls, ranks = {"p": p, "d": d}, {"p": 2, "d": 1}

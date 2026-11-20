@@ -510,6 +510,20 @@ mod b2_chat_aggregator_branches {
         assert!(s.contains("usage"));
         assert!(s.contains("\"total_tokens\":10"));
     }
+
+    #[tokio::test]
+    async fn test_aggregator_usage_reports_the_cached_prompt_tokens() {
+        let mut complete = cmpl(vec![1], FinishReason::Stop, None);
+        if let TokenChunk::Complete { meta, .. } = &mut complete {
+            meta.cached_tokens = 2;
+        }
+        let stream = synthetic_single_stream(vec![Ok(complete)]);
+        let req = ChatCompletionRequest::default();
+        let resp = chat_aggregator::process(stream, ctx_with(req)).await;
+        let body = to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["usage"]["prompt_tokens_details"]["cached_tokens"], 2);
+    }
 }
 
 mod b3_chat_aggregator_typed {
@@ -1166,6 +1180,31 @@ mod c2_chat_streaming_branches {
         let s = body_of(resp).await;
         assert!(s.contains("usage"));
         assert!(s.contains("\"total_tokens\":8") || s.contains("total_tokens"));
+    }
+
+    #[tokio::test]
+    async fn test_streaming_usage_chunk_reports_the_cached_prompt_tokens() {
+        let mut req = ChatCompletionRequest::default();
+        req.stream = true;
+        req.stream_options = Some(StreamOptions {
+            include_usage: Some(true),
+        });
+        let mut meta = meta_plain();
+        meta.cached_tokens = 2;
+        let stream = synthetic_single_stream(vec![Ok(TokenChunk::Complete {
+            token_ids: vec![1],
+            finish_reason: FinishReason::Stop,
+            matched_stop: None,
+            usage: usage(3, 5),
+            logprobs: None,
+            input_logprobs: None,
+            meta,
+        })]);
+        let s = body_of(chat_streaming::process(stream, ctx_with(req), "regular")).await;
+        let mut events = s.lines().filter_map(|line| line.strip_prefix("data: "));
+        let usage_chunk = events.find(|e| e.contains("\"usage\"")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(usage_chunk).unwrap();
+        assert_eq!(json["usage"]["prompt_tokens_details"]["cached_tokens"], 2);
     }
 
     #[tokio::test]
