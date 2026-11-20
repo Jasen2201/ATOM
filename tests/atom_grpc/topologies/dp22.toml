@@ -79,8 +79,13 @@ fake = {}
 dp = 4
 grpc = true
 
+# Its preparation queue takes test_dp22's 256 requests at once. Its default, 10 per
+# thread at half the CPUs with a 250 ms wait, sheds most of them on 4 CPUs (503, 504).
 [[router]]
 name = "mesh"
 prefill = ["p0", "p1", "p2"]
 decode = ["d0", "d1", "d2", "d3"]
-args = ["--dp-aware", "--log-level", "debug", "--json-log"]
+args = [
+    "--dp-aware", "--log-level", "debug", "--json-log",
+    "--prepare-queue-capacity", "256", "--prepare-queue-timeout-ms", "60000",
+]
