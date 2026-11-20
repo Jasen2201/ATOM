@@ -16,3 +16,9 @@ grpc = true
 [[router]]
 name = "mesh"
 workers = ["single"]
+
+# `mesh` with every request on the instance's Session
+[[router]]
+name = "mesh-session"
+workers = ["single"]
+args = ["--atom-grpc-session"]

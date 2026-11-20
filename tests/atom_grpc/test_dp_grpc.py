@@ -31,6 +31,7 @@ SIZES = {"prelay": (2, 1), "pchunked": (2, 1), "d": (4, 1)}  # (dp_size, tp_size
 SYLLABLES = [c + v for c in "bcdfghjklmnprstvwxyz" for v in "aeiou"]  # fixture words
 XFER = re.compile(r"xfer-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")  # a chunked id
 WAIT_S = 120
+TRANSPORTS = {"generate": "", "session": "session_"}  # each one's router name prefix
 # Each request's session and the (P, D) ranks a mapping's routers pick: P round-robin,
 # D a new rank per new session; idx2idx moves P to D's rank where P has that rank.
 SESSIONS = ["a", "a", "b", "c", "d"]
@@ -152,14 +153,17 @@ def test_atomesh_registers_a_worker_per_url_at_rank_of_get_server_info(topology,
 
 
 @pytest.mark.topology("dp")
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("mode", ["relay", "chunked"])
 @pytest.mark.parametrize("mapping", RANKS)
 def test_each_request_runs_on_the_ranks_atomesh_picks_and_gets_what_http_gives(
-    topology, tokenizer, mapping, mode
+    topology, tokenizer, mapping, mode, transport
 ):
     p, d = topology.instances[f"p{mode}"], topology.instances["d"]
-    paths = [topology.routers[f"{path}{mapping}_{mode}"] for path in ("http_", "")]
+    names = [f"{TRANSPORTS[transport]}{path}{mapping}_{mode}" for path in ("http_", "")]
+    paths = [topology.routers[name] for name in names]
     lead = 10 * [*RANKS].index(mapping) + 5 * (mode == "chunked")
+    lead += 40 * [*TRANSPORTS].index(transport)
     for k, (session, ranks) in enumerate(zip(SESSIONS, RANKS[mapping])):
         prompt = words(8, lead + k)  # under one KV block: no run hits P's prefix cache
         for router in paths:
@@ -183,11 +187,13 @@ def test_each_request_runs_on_the_ranks_atomesh_picks_and_gets_what_http_gives(
 
 
 @pytest.mark.topology("dp")
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("outcome", ["completion", "cancel", "error"])
 def test_each_url_at_rank_load_returns_to_0_after_a_completion_cancel_or_error(
-    topology, outcome
+    topology, outcome, transport
 ):
-    router, d = topology.routers["cache"], topology.instances["d"]
+    cache = TRANSPORTS[transport] + "cache"
+    router, d = topology.routers[cache], topology.instances["d"]
     prompt = words(8, 30 + ["completion", "cancel", "error"].index(outcome))
     wait_for(partial(idle, router), "an idle router")
     if outcome == "error":
@@ -211,11 +217,16 @@ def test_each_url_at_rank_load_returns_to_0_after_a_completion_cancel_or_error(
 
 
 @pytest.mark.topology("dp")
-def test_a_fault_on_one_d_rank_fails_only_the_requests_it_runs(topology, tokenizer):
-    router, d = topology.routers["cache"], topology.instances["d"]
+@pytest.mark.parametrize("transport", TRANSPORTS)
+def test_a_fault_on_one_d_rank_fails_only_the_requests_it_runs(
+    topology, tokenizer, transport
+):
+    cache = TRANSPORTS[transport] + "cache"
+    router, d = topology.routers[cache], topology.instances["d"]
     faulted, prefix = FAULT["dp_rank"], tokenizer.decode(FAULT["prompt_prefix"])
     tokens = {}  # D rank: the completion tokens of each request it ran
-    for lead in range(40, 100):  # each new prompt goes to an idle rank at random
+    leads = range(40, 100) if transport == "generate" else range(40)  # prompts its own
+    for lead in leads:  # each new prompt goes to an idle rank at random
         if faulted in tokens and len(tokens) > 1:
             break
         prompt = f"{prefix} {words(8, lead)}"

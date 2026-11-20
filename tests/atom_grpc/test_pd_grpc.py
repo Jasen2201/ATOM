@@ -32,6 +32,7 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "deepseek_v3_mtp"
 TOPOLOGY = {"relay": "1p1d_relay", "chunked": "1p1d"}  # P's transfer mode decides which
 MODES = [pytest.param(m, marks=pytest.mark.topology(t)) for m, t in TOPOLOGY.items()]
 PATHS = ("http", "grpc")  # each topology's two routers; HTTP P/D is the reference
+TRANSPORTS = {"generate": "grpc", "session": "session"}  # the gRPC path's router
 SYLLABLES = [c + v for c in "bcdfghjklmnprstvwxyz" for v in "aeiou"]  # fixture words
 FAULTS = {"fail": "zo zo zo", "timeout": "zu zu zu"}  # what D's fault rules match first
 PREFILL = {"do_remote_decode": True, "do_remote_prefill": False}  # a relay P's params
@@ -190,7 +191,17 @@ def quiet(d) -> bool:
 
 
 def unloaded(topology) -> bool:
-    return not any(any(loads(topology.routers[path]).values()) for path in PATHS)
+    return not any(any(loads(r).values()) for r in topology.routers.values())
+
+
+def router_of(topology, path: str, transport: str):
+    """`path`'s router in `topology`, the gRPC one on `transport`."""
+    return topology.routers[TRANSPORTS[transport] if path == "grpc" else path]
+
+
+def shift(transport: str) -> int:
+    """What moves a test's leads past those its run on the other transport takes."""
+    return 2 * [*TRANSPORTS].index(transport)
 
 
 def settled(p) -> bool:
@@ -275,17 +286,20 @@ def test_a_generate_waiting_on_its_receive_ends_and_d_holds_its_blocks_till_repo
     assert decode.aborted < held < receive["time"] <= freed
 
 
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("mode", MODES)
 def test_relay_and_chunked_complete_and_d_answers_only_once_p_has_finished(
-    topology, tokenizer, mode
+    topology, tokenizer, mode, transport
 ):
     p, d = topology.instances["p"], topology.instances["d"]
-    model, text = model_info(p).served_model_name, words(40, lead=10)
+    model = model_info(p).served_model_name
+    text = words(40, lead=10 + shift(transport))
     prompt = tokenizer.encode(text, add_special_tokens=False)
     law = IdLaw.for_model(FIXTURE, {tokenizer.eos_token_id})
     expected = [tokenizer.decode([i]) for i in law.ids(fingerprint(prompt), 0, 12)]
     for path in PATHS:
-        reply = send(topology.routers[path], completion(model, text, 12, stream=True))
+        body = completion(model, text, 12, stream=True)
+        reply = send(router_of(topology, path, transport), body)
         assert reply.status == 200, reply.replies
         assert answer(reply) == (expected, "length")  # P's first token, then D's
         prefill = admitted(p, prompt)[-1]
@@ -297,17 +311,19 @@ def test_relay_and_chunked_complete_and_d_answers_only_once_p_has_finished(
     wait_for(lambda: unloaded(topology), "load on no worker")
 
 
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("mode", MODES)
 def test_p_and_d_are_given_the_same_params_rank_and_sampling_over_both_paths(
-    topology, tokenizer, mode
+    topology, tokenizer, mode, transport
 ):
     p, d = topology.instances["p"], topology.instances["d"]
-    model, text = model_info(p).served_model_name, words(40, lead=20)
+    model = model_info(p).served_model_name
+    text = words(40, lead=20 + shift(transport))
     prompt = tokenizer.encode(text, add_special_tokens=False)
     warm = p.post("/v1/completions", {"prompt_token_ids": prompt, "max_tokens": 1})
     assert warm[0] == 200, warm  # P's cache as warm for both paths
     for path in PATHS:
-        reply = send(topology.routers[path], completion(model, text, 12))
+        reply = send(router_of(topology, path, transport), completion(model, text, 12))
         assert reply.status == 200, reply.replies
     _, *prefills = admitted(p, prompt)
     decodes = admitted(d, prompt)
@@ -340,21 +356,24 @@ def test_p_and_d_are_given_the_same_params_rank_and_sampling_over_both_paths(
     wait_for(lambda: unloaded(topology), "load on no worker")
 
 
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("fault", FAULTS)
 def test_a_failed_or_timed_out_receive_ends_as_over_http_and_holds_d_blocks(
-    topology, tokenizer, mode, fault
+    topology, tokenizer, mode, fault, transport
 ):
     p, d = topology.instances["p"], topology.instances["d"]
     model, (p_fake, d_fake) = model_info(p).served_model_name, fakes(mode)
     hold = float(d_fake["env"]["ATOM_PD_FAILED_WRITE_HOLD_S"])
-    lead = 60 + 2 * [*FAULTS].index(fault)
+    lead = 60 + 2 * [*FAULTS].index(fault) + shift(transport)
     texts = {path: words(20, lead + i, FAULTS[fault]) for i, path in enumerate(PATHS)}
     wait_for(lambda: quiet(d), "quiet D")
     with concurrent.futures.ThreadPoolExecutor(len(PATHS)) as pool:
         sent = time.time()
         calls = {
-            path: pool.submit(send, topology.routers[path], completion(model, text, 8))
+            path: pool.submit(
+                send, router_of(topology, path, transport), completion(model, text, 8)
+            )
             for path, text in texts.items()
         }
         wait_for(lambda: metrics(d)["atom:kv_cache_blocks_used"] > 0, "D's blocks")
@@ -379,16 +398,22 @@ def test_a_failed_or_timed_out_receive_ends_as_over_http_and_holds_d_blocks(
     wait_for(lambda: unloaded(topology), "load on no worker")
 
 
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("mode", MODES)
 def test_a_cancel_while_d_waits_for_its_kv_keeps_its_blocks_till_the_transfer_reports(
-    topology, tokenizer, mode
+    topology, tokenizer, mode, transport
 ):
     p, d = topology.instances["p"], topology.instances["d"]
-    model = model_info(p).served_model_name
-    texts = {path: words(20, 70 + i, FAULTS["timeout"]) for i, path in enumerate(PATHS)}
+    model, lead = model_info(p).served_model_name, 70 + shift(transport)
+    texts = {
+        path: words(20, lead + i, FAULTS["timeout"]) for i, path in enumerate(PATHS)
+    }
     wait_for(lambda: quiet(d), "quiet D")
     clients = [
-        start(topology.routers[path], completion(model, text, 8, stream=True))
+        start(
+            router_of(topology, path, transport),
+            completion(model, text, 8, stream=True),
+        )
         for path, text in texts.items()
     ]
     wait_for(lambda: metrics(d)["atom:requests_parked_kv_load"] == 2, "parked D")
@@ -403,10 +428,12 @@ def test_a_cancel_while_d_waits_for_its_kv_keeps_its_blocks_till_the_transfer_re
     wait_for(lambda: unloaded(topology), "load on no worker")
 
 
-def cancel_while_d_decodes(topology, tokenizer, path: str, lead: int) -> None:
+def cancel_while_d_decodes(
+    topology, tokenizer, path: str, transport: str, lead: int
+) -> None:
     """A client cancel once D streams: P had let go of its load, and D aborts."""
     p, d = topology.instances["p"], topology.instances["d"]
-    router = topology.routers[path]
+    router = router_of(topology, path, transport)
     text = words(40, lead)
     prompt = tokenizer.encode(text, add_special_tokens=False)
     body = completion(model_info(p).served_model_name, text, MAX_TOKENS, stream=True)
@@ -423,24 +450,29 @@ def cancel_while_d_decodes(topology, tokenizer, path: str, lead: int) -> None:
     assert len(decode.output_ids) < MAX_TOKENS
 
 
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("mode", MODES)
 def test_a_client_cancel_while_d_decodes_aborts_d_after_p_let_go_of_its_load(
-    topology, tokenizer, mode
+    topology, tokenizer, mode, transport
 ):
     for i, path in enumerate(PATHS):
-        cancel_while_d_decodes(topology, tokenizer, path, lead=40 + i)
+        lead = 40 + shift(transport) + i
+        cancel_while_d_decodes(topology, tokenizer, path, transport, lead)
         wait_for(lambda: unloaded(topology), "load on no worker")
 
 
 @pytest.mark.topology("1p1d")
-def test_a_chunked_d_refusal_cancels_p_and_ends_as_over_http(topology, tokenizer):
+@pytest.mark.parametrize("transport", TRANSPORTS)
+def test_a_chunked_d_refusal_cancels_p_and_ends_as_over_http(
+    topology, tokenizer, transport
+):
     p, d = topology.instances["p"], topology.instances["d"]
     info = model_info(p)
     text = words(8, lead=32)
     prompt = tokenizer.encode(text, add_special_tokens=False)
     # D refuses the context; P, sent max_tokens 1, takes it and waits for D
     body = completion(info.served_model_name, text, info.max_context_length - 2)
-    routers = [topology.routers[path] for path in PATHS]
+    routers = [router_of(topology, path, transport) for path in PATHS]
     before = [retries(router) for router in routers]
     statuses = [send(router, body).status for router in routers]
     assert statuses == [400, 400] and [retries(r) for r in routers] == before
@@ -450,16 +482,17 @@ def test_a_chunked_d_refusal_cancels_p_and_ends_as_over_http(topology, tokenizer
     wait_for(lambda: unloaded(topology), "load on no worker")
 
 
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("mode", MODES)
 def test_a_p_failure_sends_no_d_in_relay_and_aborts_d_in_chunked_as_over_http(
-    topology, tokenizer, mode
+    topology, tokenizer, mode, transport
 ):
     p, d = topology.instances["p"], topology.instances["d"]
     blocks = fakes(mode)[0]["num_kvcache_blocks"]
     text = words(blocks * BLOCK + BLOCK // 2, lead=30)  # past P's KV pool, not D's
     prompt = tokenizer.encode(text, add_special_tokens=False)
     body = completion(model_info(p).served_model_name, text, 8)
-    routers = [topology.routers[path] for path in PATHS]
+    routers = [router_of(topology, path, transport) for path in PATHS]
     before = [retries(router) for router in routers]
     statuses = [send(router, body).status for router in routers]
     assert statuses == [400, 400] and [retries(r) for r in routers] == before
@@ -472,7 +505,9 @@ def test_a_p_failure_sends_no_d_in_relay_and_aborts_d_in_chunked_as_over_http(
     wait_for(lambda: unloaded(topology), "load on no worker")
 
 
-def cancel_while_p_prefills(topology, tokenizer, path: str, lead: int) -> list:
+def cancel_while_p_prefills(
+    topology, tokenizer, path: str, transport: str, lead: int
+) -> list:
     """A client cancel once P admitted a prompt its law prefills for seconds; D's
     admissions of it, each aborted unrun."""
     p, d = topology.instances["p"], topology.instances["d"]
@@ -480,7 +515,7 @@ def cancel_while_p_prefills(topology, tokenizer, path: str, lead: int) -> list:
     prompt = tokenizer.encode(text, add_special_tokens=False)
     wait_for(lambda: settled(p), "P's steps to end")
     body = completion(model_info(p).served_model_name, text, 8, stream=True)
-    client = start(topology.routers[path], body)
+    client = start(router_of(topology, path, transport), body)
     wait_for(lambda: admitted(p, prompt), "P's admission")
     close(client)
     wait_for(lambda: admitted(p, prompt)[0].aborted, "the cancel at P")
@@ -494,12 +529,14 @@ def cancel_while_p_prefills(topology, tokenizer, path: str, lead: int) -> list:
     return decodes
 
 
+@pytest.mark.parametrize("transport", TRANSPORTS)
 @pytest.mark.parametrize("mode", MODES)
 def test_a_client_cancel_while_p_prefills_aborts_p_and_d_as_over_http(
-    topology, tokenizer, mode
+    topology, tokenizer, mode, transport
 ):
     for i, path in enumerate(PATHS):
-        decodes = cancel_while_p_prefills(topology, tokenizer, path, lead=50 + i)
+        lead = 50 + shift(transport) + i
+        decodes = cancel_while_p_prefills(topology, tokenizer, path, transport, lead)
         if mode == "relay":
             assert decodes == []  # P never answered, so no D was sent
         wait_for(lambda: unloaded(topology), "load on no worker")
