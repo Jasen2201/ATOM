@@ -1,7 +1,10 @@
 //! gRPC workers through the local worker registration workflow and its tokenizer job:
-//! an ATOM worker's detection, labels, version refusal and chat template; vLLM's.
+//! an ATOM worker's detection, labels, version refusal, chat template and DP ranks; vLLM's.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use mesh_grpc::vllm_proto as vllm;
 use serde_json::{json, Value};
@@ -11,42 +14,58 @@ use tonic::{
 };
 use wfaas::WorkflowId;
 
-use super::create_local_worker_workflow_data;
+use super::{create_local_worker_workflow_data, get_dp_info};
 use crate::{
     app_context::AppContext,
     atom_engine::grpc::{
         atom_engine_server::{AtomEngine, AtomEngineServer},
-        AbortRequest, AbortResponse, Frames, GenerateRequest, GenerateResponse,
-        GetModelInfoRequest, GetModelInfoResponse, GetServerInfoRequest, GetServerInfoResponse,
-        HealthCheckRequest, HealthCheckResponse, PrepareStructuredOutputRequest,
-        PrepareStructuredOutputResponse,
+        generate_response, AbortRequest, AbortResponse, Frames, GenerateComplete, GenerateRequest,
+        GenerateResponse, GetModelInfoRequest, GetModelInfoResponse, GetServerInfoRequest,
+        GetServerInfoResponse, HealthCheckRequest, HealthCheckResponse,
+        PrepareStructuredOutputRequest, PrepareStructuredOutputResponse,
     },
-    core::{steps::WorkflowEngines, worker::RuntimeType, JobQueue, JobQueueConfig},
-    protocols::{chat::ChatCompletionRequest, worker_spec::WorkerConfigRequest},
+    core::{
+        placement::PlacementPlan, steps::WorkflowEngines, worker::RuntimeType, JobQueue,
+        JobQueueConfig,
+    },
+    protocols::{
+        chat::ChatCompletionRequest, generate::GenerateRequest as GenerateBody,
+        worker_spec::WorkerConfigRequest,
+    },
     routers::{
-        prepare::prepare_chat,
+        grpc::engine::GrpcEngine,
+        prepare::{build_generate_payload, prepare_chat},
         test_mocks::{app_context, tokenizer::hf_tokenizer_path},
     },
 };
 
 type Empty<T> = tokio_stream::Empty<Result<T, Status>>;
 
-/// An ATOM instance as registration sees it: its model info and protocol version.
+/// An ATOM instance as registration sees it: its model info, protocol version and DP
+/// size. Each Generate records its DP rank and completes.
+#[derive(Default)]
 struct FakeAtom {
     info: GetModelInfoResponse,
     protocol_version: u32,
+    dp_size: usize,
+    ranks: Mutex<Vec<Option<i32>>>,
 }
 
 #[tonic::async_trait]
 impl AtomEngine for FakeAtom {
-    type GenerateStream = Empty<GenerateResponse>;
+    type GenerateStream = tokio_stream::Once<Result<GenerateResponse, Status>>;
     type SessionStream = Empty<Frames>;
 
     async fn generate(
         &self,
-        _: Request<GenerateRequest>,
+        request: Request<GenerateRequest>,
     ) -> Result<Response<Self::GenerateStream>, Status> {
-        Err(Status::unimplemented("generate"))
+        let rank = request.into_inner().data_parallel_rank;
+        self.ranks.lock().unwrap().push(rank);
+        let complete = generate_response::Response::Complete(GenerateComplete::default());
+        Ok(Response::new(tokio_stream::once(Ok(GenerateResponse {
+            response: Some(complete),
+        }))))
     }
 
     async fn abort(&self, _: Request<AbortRequest>) -> Result<Response<AbortResponse>, Status> {
@@ -64,8 +83,12 @@ impl AtomEngine for FakeAtom {
         &self,
         _: Request<GetServerInfoRequest>,
     ) -> Result<Response<GetServerInfoResponse>, Status> {
+        // As ATOM's /server_info body names them.
+        let server_info =
+            json!({ "model_id": self.info.served_model_name, "dp_size": self.dp_size });
         Ok(Response::new(GetServerInfoResponse {
             protocol_version: self.protocol_version,
+            server_info_json: server_info.to_string(),
             ..Default::default()
         }))
     }
@@ -164,6 +187,7 @@ async fn serve_atom(info: GetModelInfoResponse, protocol_version: u32) -> String
     let fake = FakeAtom {
         info,
         protocol_version,
+        ..Default::default()
     };
     serve(Server::builder().add_service(AtomEngineServer::new(fake))).await
 }
@@ -314,4 +338,45 @@ async fn a_vllm_worker_is_still_detected_as_vllm() {
     assert_eq!(worker.metadata().runtime_type, RuntimeType::Vllm);
     let labels = &worker.metadata().labels;
     assert_eq!(labels.get("max_context_length").unwrap(), "2048");
+}
+
+#[tokio::test]
+async fn an_atom_worker_reporting_dp_size_4_registers_four_ranks_each_sending_its_own() {
+    let fake = Arc::new(FakeAtom {
+        info: model_info("atom-dp", "", "{}"),
+        protocol_version: 1,
+        dp_size: 4,
+        ..Default::default()
+    });
+    let url = serve(Server::builder().add_service(AtomEngineServer::from_arc(fake.clone()))).await;
+    let info = get_dp_info(&url, None, true).await.unwrap();
+    assert_eq!((info.dp_size, info.model_id.as_str()), (4, "atom-dp"));
+
+    let ctx = context();
+    register(&ctx, json!({ "url": url, "dp_aware": true }))
+        .await
+        .unwrap();
+    assert_eq!(ctx.worker_registry.get_all().len(), 4);
+    let body: GenerateBody = serde_json::from_value(json!({ "input_ids": [7, 8, 9] })).unwrap();
+    for rank in 0..4 {
+        let worker = ctx.worker_registry.get_by_url(&format!("{url}@{rank}"));
+        let worker = worker.unwrap_or_else(|| panic!("no worker {url}@{rank}"));
+        assert_eq!(worker.metadata().runtime_type, RuntimeType::Atom);
+        assert_eq!((worker.dp_rank(), worker.dp_size()), (Some(rank), Some(4)));
+
+        // Through the gRPC engine, as the router sends a request to the worker it chose.
+        let plan = PlacementPlan::Single {
+            worker,
+            policy_name: "random",
+        };
+        let mut payload = build_generate_payload(format!("r{rank}"), &body, None, vec![7, 8, 9]);
+        GrpcEngine::new()
+            .dispatch(&plan, &mut payload)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        *fake.ranks.lock().unwrap(),
+        [Some(0), Some(1), Some(2), Some(3)]
+    );
 }
