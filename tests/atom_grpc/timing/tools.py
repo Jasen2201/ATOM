@@ -50,6 +50,16 @@ def _toml(value) -> str:
     return json.dumps(value)  # a JSON string, number or boolean reads alike in TOML
 
 
+def dumps(tables: dict) -> str:
+    """A topology's tables, arrays of `[[name]]` tables, as TOML text."""
+    return "".join(
+        f"[[{name}]]\n"
+        + "".join(f"{_toml(k)} = {_toml(v)}\n" for k, v in table.items())
+        for name, array in tables.items()
+        for table in array
+    )
+
+
 def under_law(topology: Path, law: str) -> str:
     """`topology`'s TOML with each instance's steps priced by the law file `law` and its
     model path absolute, so that the text serves from any directory."""
@@ -58,12 +68,7 @@ def under_law(topology: Path, law: str) -> str:
     for spec in tables["instance"]:
         spec["model"] = str((topology.parent / spec["model"]).resolve())
         spec["fake"] = {**spec["fake"], "law": law}
-    return "".join(
-        f"[[{name}]]\n"
-        + "".join(f"{_toml(k)} = {_toml(v)}\n" for k, v in table.items())
-        for name, array in tables.items()
-        for table in array
-    )
+    return dumps(tables)
 
 
 def client_times(sent: float, chunks: list[tuple[float, int]]) -> tuple[float, float]:

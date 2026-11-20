@@ -1,6 +1,6 @@
 //! Transport-neutral request preparation: HTTP request → (GenerationPayload, ResponseContext).
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use axum::response::Response;
 use http::HeaderMap;
@@ -45,6 +45,15 @@ use tool_constraints::{filter_chat_request_by_tool_choice, generate_tool_constra
 /// The label with the markers an ATOM worker lists: GetModelInfo's `reasoning_open_markers`.
 const REASONING_OPEN_MARKERS_LABEL: &str = "reasoning_open_markers";
 
+/// `work`, its duration recorded under `stage` as the HTTP ingress records its own stages.
+fn staged<T>(stage: &'static str, work: impl FnOnce() -> T) -> T {
+    let started = Instant::now();
+    let done = work();
+    metrics::histogram!("mesh_prepare_stage_seconds", "stage" => stage)
+        .record(started.elapsed().as_secs_f64());
+    done
+}
+
 pub fn lookup_tokenizer(
     model_id: &str,
     registry: &TokenizerRegistry,
@@ -76,11 +85,12 @@ pub fn prepare_chat(
     let body_ref = filter_chat_request_by_tool_choice(&req);
 
     let template_kwargs = merged_template_kwargs(&body_ref, default_kwargs.as_ref());
-    let processed = process_chat_messages_with_kwargs(&body_ref, &*tokenizer, &template_kwargs)
-        .map_err(|e| error::bad_request("process_messages_failed", e))?;
+    let processed = staged("template", || {
+        process_chat_messages_with_kwargs(&body_ref, &*tokenizer, &template_kwargs)
+    })
+    .map_err(|e| error::bad_request("process_messages_failed", e))?;
 
-    let encoding = tokenizer
-        .encode(&processed.text, false)
+    let encoding = staged("encode", || tokenizer.encode(&processed.text, false))
         .map_err(|e| error::internal_error("tokenization_failed", format!("{}", e)))?;
     let token_ids = encoding.token_ids().to_vec();
 
@@ -360,8 +370,7 @@ fn resolve_generate_input(
     tokenizer: &Arc<dyn Tokenizer>,
 ) -> Result<(Option<String>, Vec<u32>), String> {
     if let Some(text) = &req.text {
-        let encoding = tokenizer
-            .encode(text, false)
+        let encoding = staged("encode", || tokenizer.encode(text, false))
             .map_err(|e| format!("Tokenization failed: {}", e))?;
         return Ok((Some(text.clone()), encoding.token_ids().to_vec()));
     }
