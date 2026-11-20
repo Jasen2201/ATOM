@@ -1,0 +1,86 @@
+# 22 fake ranks in relay: three P at TP2 and four D at TP4 under DP attention; atomesh
+# over their gRPC servers, its JSON log at debug naming each request's P and D url@rank.
+
+# Each P names its ranks' fake Mooncake sockets by its handshake port plus the rank.
+[[instance]]
+name = "p0"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "2", "--enable-dp-attention", "--kv-transfer-config",
+    '{"kv_connector": "mooncake", "kv_role": "kv_producer", "handshake_port": 17300}',
+]
+fake = { block_bytes = 1_000_000 }
+dp = 2
+grpc = true
+
+[[instance]]
+name = "p1"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "2", "--enable-dp-attention", "--kv-transfer-config",
+    '{"kv_connector": "mooncake", "kv_role": "kv_producer", "handshake_port": 17310}',
+]
+fake = { block_bytes = 1_000_000 }
+dp = 2
+grpc = true
+
+[[instance]]
+name = "p2"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "2", "--enable-dp-attention", "--kv-transfer-config",
+    '{"kv_connector": "mooncake", "kv_role": "kv_producer", "handshake_port": 17320}',
+]
+fake = { block_bytes = 1_000_000 }
+dp = 2
+grpc = true
+
+[[instance]]
+name = "d0"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "4", "--enable-dp-attention",
+    "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_consumer"}',
+]
+fake = {}
+dp = 4
+grpc = true
+
+[[instance]]
+name = "d1"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "4", "--enable-dp-attention",
+    "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_consumer"}',
+]
+fake = {}
+dp = 4
+grpc = true
+
+[[instance]]
+name = "d2"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "4", "--enable-dp-attention",
+    "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_consumer"}',
+]
+fake = {}
+dp = 4
+grpc = true
+
+[[instance]]
+name = "d3"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "4", "--enable-dp-attention",
+    "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_consumer"}',
+]
+fake = {}
+dp = 4
+grpc = true
+
+[[router]]
+name = "mesh"
+prefill = ["p0", "p1", "p2"]
+decode = ["d0", "d1", "d2", "d3"]
+args = ["--dp-aware", "--log-level", "debug", "--json-log"]
