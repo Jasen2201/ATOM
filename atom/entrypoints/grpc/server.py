@@ -11,6 +11,7 @@ from argparse import Namespace
 from collections import defaultdict
 from collections.abc import Callable
 from concurrent.futures import Future
+from dataclasses import replace
 from functools import partial
 from types import ModuleType
 
@@ -20,21 +21,38 @@ from fastapi import HTTPException
 
 from atom.entrypoints.grpc import atom_grpc_pb2 as pb
 from atom.entrypoints.grpc import atom_grpc_pb2_grpc as pb_grpc
+from atom.entrypoints.openai.api_compatibility import api_compatibility_for
 from atom.entrypoints.openai.protocol import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_K,
     DEFAULT_TOP_P,
+    ChatCompletionRequest,
     resolve_prompt_token_ids,
     validate_max_tokens,
 )
 from atom.entrypoints.openai.reasoning import _REASONING_OPEN_MARKERS
+from atom.entrypoints.openai.serving_chat import (
+    normalize_chat_tools,
+    request_tools,
+    validate_chat_request,
+)
+from atom.entrypoints.openai.tool_parser.registry import channel_for_request
 from atom.model_engine.request import RequestOutput
+from atom.model_engine.zmq_protocol import engine_v1_pb2 as v1
+from atom.structured_output.validation import schema_from_format
 
 logger = logging.getLogger("atom")
 
 # Also its name in /proc, which threads it starts keep unless they name their own.
 THREAD_NAME = "AtomGrpcServer"
+# The SamplingParams fields a chat's structured output sets: PrepareStructuredOutput's.
+STRUCTURED_FIELDS = (
+    "required_channel",
+    "json_schema",
+    "structured_tool_format",
+    "structured_reasoning_end",
+)
 
 
 class StepOutputs:
@@ -81,12 +99,20 @@ class AtomEngineServicer(pb_grpc.AtomEngineServicer):
         self.live: dict[str, set[int]] = {}  # request_id: its live seq ids, for Abort
 
     async def Generate(self, request, context):
-        """Admitted as `/v1/completions` admits the same token-id request, a refusal
-        answered with its status; streamed one chunk per engine step."""
+        """Admitted as `/v1/completions` admits its ids, plus its chat's structured
+        output; a refusal answered with its status; streamed one chunk per step."""
         api, outputs = self.api, asyncio.Queue()
         seq, submitted, finished = None, False, False
         try:
-            params, prompt, kv_transfer_params, stops = self._admission(request)
+            params, kv_transfer_params, stops = self._admission(request)
+            prompt = resolve_prompt_token_ids(
+                list(request.prompt_token_ids), kv_transfer_params
+            )
+            if request.HasField("structured_output"):
+                fields = await self._structured(
+                    request, params, kv_transfer_params, stops
+                )
+                params = replace(params, **fields)
             seq = await asyncio.get_running_loop().run_in_executor(
                 None,
                 partial(
@@ -94,7 +120,9 @@ class AtomEngineServicer(pb_grpc.AtomEngineServicer):
                     prompt,
                     params,
                     stream_callback=self.steps.callback(outputs),
-                    kv_transfer_params=kv_transfer_params,
+                    kv_transfer_params=api._engine_kv_transfer_params(
+                        kv_transfer_params
+                    ),
                     data_parallel_rank=_optional(request, "data_parallel_rank"),
                     stop_token_sequences=stops,
                 ),
@@ -129,7 +157,7 @@ class AtomEngineServicer(pb_grpc.AtomEngineServicer):
                 complete.kv_transfer_params_json = kv_json
             await context.write(pb.GenerateResponse(complete=complete))
         except Exception as error:  # noqa: BLE001 - answered as `_completions` does
-            await context.write(_refusal(error))
+            await context.write(pb.GenerateResponse(error=_refusal(error, "Generate")))
         finally:
             if seq is not None:
                 self._forget(request.request_id, seq.id)
@@ -145,9 +173,19 @@ class AtomEngineServicer(pb_grpc.AtomEngineServicer):
             self.api.cleanup_stream(seq_id, aborted=True)
         return pb.AbortResponse()
 
+    async def PrepareStructuredOutput(self, request, context):
+        """The structured-output fields a Generate with the same fields is admitted
+        with, each rank's grammar prepared; a refusal answered with its status."""
+        try:
+            fields = await self._structured(request, *self._admission(request))
+        except Exception as error:  # noqa: BLE001 - answered as the chat route does
+            error = _refusal(error, "PrepareStructuredOutput")
+            return pb.PrepareStructuredOutputResponse(error=error)
+        return pb.PrepareStructuredOutputResponse(sampling=_engine_v1(fields))
+
     def _admission(self, request):
-        """What `_completions` derives before preprocess, in its order: SamplingParams,
-        prompt ids, the engine's kv_transfer_params, and the stop ids as given."""
+        """The SamplingParams `_completions` builds, in its order, with the request's
+        kv_transfer_params and its stop ids as given."""
         api, sampling = self.api, request.sampling
         if sampling.n > 1:
             raise ValueError("n above 1 is not served over gRPC; send one request each")
@@ -169,11 +207,46 @@ class AtomEngineServicer(pb_grpc.AtomEngineServicer):
             top_p=_optional(sampling, "top_p", DEFAULT_TOP_P),
             n=n,
         )
-        prompt = resolve_prompt_token_ids(
-            list(request.prompt_token_ids), kv_transfer_params
-        )
         stops = [list(stop.ids) for stop in request.stop_token_sequences]
-        return params, prompt, api._engine_kv_transfer_params(kv_transfer_params), stops
+        return params, kv_transfer_params, stops
+
+    async def _structured(self, request, params, kv_transfer_params, stops) -> dict:
+        """`STRUCTURED_FIELDS` as `_chat_completions` derives them for the chat the
+        request carries, given its SamplingParams, kv_transfer_params and stop ids."""
+        api, carried = self.api, request.structured_output
+        chat = _chat_request(carried)
+        validate_chat_request(chat)
+        kwargs = json.loads(carried.chat_template_kwargs_json or "{}")
+        if not isinstance(kwargs, dict):  # a ValueError, answered 400 as over HTTP
+            raise ValueError("chat_template_kwargs must be an object")  # noqa: TRY004
+        contract = api_compatibility_for(api.custom_message_encoder)
+        if not contract.chat_forced_tools_with_thinking:
+            thinking = api._effective_thinking_enabled(kwargs)
+            contract.validate_chat_tool_choice(
+                chat.tool_choice, thinking_enabled=thinking
+            )
+        tools = request_tools(chat)
+        logprobs = request.sampling.WhichOneof("logprobs")
+        chat_params = replace(
+            params,
+            stop_strings=[str(ids) for ids in stops],  # the chat's checks read strings
+            logprobs=getattr(request.sampling, logprobs) if logprobs else False,
+            required_channel=channel_for_request(
+                api.required_tool_channel, chat.tool_choice, tools
+            ),
+        )
+        await api._configure_chat_structured_output(
+            chat_params,
+            schema_from_format(chat.response_format),
+            api.reasoning_channel(
+                carried.prompt_opens_reasoning, template_kwargs=kwargs
+            ),
+            tools=chat.tools,
+            all_tools=tools,
+            tool_choice=chat.tool_choice,
+            kv_transfer=kv_transfer_params,
+        )
+        return {name: getattr(chat_params, name) for name in STRUCTURED_FIELDS}
 
     def _forget(self, request_id: str, seq_id: int) -> None:
         live = self.live.get(request_id, set())
@@ -212,6 +285,11 @@ def _optional(message, name: str, default=None):
     return getattr(message, name) if message.HasField(name) else default
 
 
+def _json(message, name: str, default=None):
+    """`message`'s optional JSON field `name`, parsed; `default` when it is absent."""
+    return json.loads(getattr(message, name)) if message.HasField(name) else default
+
+
 def _kv_transfer_params(request) -> dict | None:
     """The request's kv_transfer_params, a JSON object as the HTTP routes take it."""
     if not request.HasField("kv_transfer_params_json"):
@@ -222,19 +300,46 @@ def _kv_transfer_params(request) -> dict | None:
     return params
 
 
-def _refusal(error: Exception) -> pb.GenerateResponse:
-    """`error` as `_completions` answers it: an HTTPException keeps its status, a
+def _chat_request(carried) -> ChatCompletionRequest:
+    """The chat a StructuredOutput carries, for the chat route's readers: its tools,
+    tool_choice and response_format, and messages holding only their own tools."""
+    message_tools = _json(carried, "message_tools_json", [])
+    if not isinstance(message_tools, list):
+        raise ValueError("message_tools must be an array")  # noqa: TRY004
+    return ChatCompletionRequest.model_construct(
+        messages=[{"tools": tools} for tools in message_tools],
+        tools=normalize_chat_tools(_json(carried, "tools_json")),
+        tool_choice=_json(carried, "tool_choice_json"),
+        response_format=_json(carried, "response_format_json"),
+    )
+
+
+def _engine_v1(fields: dict) -> v1.SamplingParams:
+    """`STRUCTURED_FIELDS` in an engine_v1 SamplingParams, its other fields unset."""
+    sampling = v1.SamplingParams(
+        structured_reasoning_end=fields["structured_reasoning_end"]
+    )
+    for name in ("json_schema", "structured_tool_format"):
+        if fields[name] is not None:
+            setattr(sampling, name, fields[name])
+    if fields["required_channel"] is not None:
+        channel = v1.RequiredChannel(**vars(fields["required_channel"]))
+        sampling.required_channel.CopyFrom(channel)
+    return sampling
+
+
+def _refusal(error: Exception, rpc: str) -> pb.GenerateError:
+    """`error` as the HTTP routes answer it: an HTTPException keeps its status, a
     ValueError is a 400 and anything else a 500."""
     if isinstance(error, HTTPException):
         status, message = error.status_code, str(error.detail)
     elif isinstance(error, ValueError):
-        logger.error("Validation error in Generate: %s", error)
+        logger.error("Validation error in %s: %s", rpc, error)
         status, message = 400, str(error)
     else:
-        logger.error("Error in Generate", exc_info=error)
+        logger.error("Error in %s", rpc, exc_info=error)
         status, message = 500, str(error)
-    error = pb.GenerateError(message=message, http_status=status)
-    return pb.GenerateResponse(error=error)
+    return pb.GenerateError(message=message, http_status=status)
 
 
 def _then(flush: Callable[[], None] | None, more: Callable[[], None]):
