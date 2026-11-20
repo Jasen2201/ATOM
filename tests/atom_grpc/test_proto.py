@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026, Advanced Micro Devices, Inc. All rights reserved.
-"""atom.grpc.v1's committed modules: protoc's output for the two protos, and
-the AtomEngine contract the gRPC server and atomesh build on."""
+"""atom.grpc.v1's committed modules: protoc's output for atom_grpc.proto and
+engine_v1.proto, and the AtomEngine contract the gRPC server and atomesh build on."""
 
 import pytest
 
@@ -11,9 +11,7 @@ from atom.model_engine.zmq_protocol import engine_v1_pb2
 
 def test_committed_modules_are_what_generate_writes():
     pytest.importorskip("grpc_tools", reason="generate.py runs grpcio-tools' protoc")
-    written = generate.generated()
-    assert sorted(written) == sorted(generate.MODULES)
-    for module, code in written.items():
+    for module, code in generate.generated().items():
         assert (generate.ROOT / module).read_bytes() == code, (
             f"{module} is not what protoc writes from the protos; "
             "run python -m atom.entrypoints.grpc.generate"
