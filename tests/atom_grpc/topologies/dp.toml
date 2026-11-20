@@ -1,0 +1,119 @@
+# P DP2 (`prelay` relays, `pchunked` sends chunks) and D DP4 over fake Mooncake; D fails
+# rank 2's receives of prompts starting "zu zo zu", reported a second later.
+
+[[instance]]
+name = "prelay"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "2", "--enable-dp-attention", "--kv-transfer-config",
+    '{"kv_connector": "mooncake", "kv_role": "kv_producer", "handshake_port": 17100}',
+]
+fake = { block_bytes = 1_000_000, bandwidth_gb_s = 1.0 }
+dp = 2
+grpc = true
+
+[[instance]]
+name = "pchunked"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "2", "--enable-dp-attention", "--kv-transfer-config",
+    '{"kv_connector": "mooncake", "kv_role": "kv_producer", "handshake_port": 17200, "enable_chunked_transfer": true}',
+]
+fake = { block_bytes = 1_000_000, bandwidth_gb_s = 1.0 }
+dp = 2
+grpc = true
+
+[[instance]]
+name = "d"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "4", "--enable-dp-attention",
+    "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_consumer"}',
+]
+dp = 4
+grpc = true
+
+[instance.fake]
+faults = [{ fault = "fail", dp_rank = 2, prompt_prefix = [107, 106, 107] }]
+env = { ATOM_PD_FAILED_WRITE_HOLD_S = "1" }
+
+# Per mapping and mode, a gRPC router and its HTTP twin: P round-robin, D one rank a
+# session, so both place the same requests alike.
+[[router]]
+name = "none_relay"
+prefill = ["prelay"]
+decode = ["d"]
+args = ["--dp-aware", "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky"]
+
+[[router]]
+name = "none_chunked"
+prefill = ["pchunked"]
+decode = ["d"]
+args = ["--dp-aware", "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky"]
+
+[[router]]
+name = "idx2idx_relay"
+prefill = ["prelay"]
+decode = ["d"]
+args = [
+    "--dp-aware", "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+    "--atom-pd-rank-mapping-policy", "idx2idx",
+]
+
+[[router]]
+name = "idx2idx_chunked"
+prefill = ["pchunked"]
+decode = ["d"]
+args = [
+    "--dp-aware", "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+    "--atom-pd-rank-mapping-policy", "idx2idx",
+]
+
+[[router]]
+name = "http_none_relay"
+prefill = ["prelay"]
+decode = ["d"]
+grpc = false
+args = [
+    "--backend", "atom", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+]
+
+[[router]]
+name = "http_none_chunked"
+prefill = ["pchunked"]
+decode = ["d"]
+grpc = false
+args = [
+    "--backend", "atom", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+]
+
+[[router]]
+name = "http_idx2idx_relay"
+prefill = ["prelay"]
+decode = ["d"]
+grpc = false
+args = [
+    "--backend", "atom", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+    "--atom-pd-rank-mapping-policy", "idx2idx",
+]
+
+[[router]]
+name = "http_idx2idx_chunked"
+prefill = ["pchunked"]
+decode = ["d"]
+grpc = false
+args = [
+    "--backend", "atom", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+    "--atom-pd-rank-mapping-policy", "idx2idx",
+]
+
+# Cache-aware P and D, rank mapping none.
+[[router]]
+name = "cache"
+prefill = ["prelay"]
+decode = ["d"]
+args = ["--dp-aware", "--policy", "cache_aware", "--cache-threshold", "0.5"]
