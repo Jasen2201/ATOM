@@ -283,9 +283,12 @@ def measure(bench: Path, scratch: Path) -> int:
         lag, sent, arrived = run(dp, LAG_LOAD, True, scratch, pinned)
         found, missed = lags(sent, arrived, lag.start, lag.end)
         worst = p99(found) if found else math.inf
+        median = sorted(found)[len(found) // 2] if found else math.inf
+        rate = len(found) / ((lag.end - lag.start) / 1e9)
         requests, served = ended(lag.ended)
-        text = f"{len(found)} steps reached atomesh, {missed} did not; lag p99 "
-        text += f"{ms(worst)}; bound {ms(LAG_BOUND_NS)}; {requests}"
+        text = f"{len(found)} steps reached atomesh ({rate:.1f}/s), {missed} did not; "
+        text += f"lag p50 {ms(median)}, p99 {ms(worst)}; bound {ms(LAG_BOUND_NS)}; "
+        text += requests
         good = bool(found) and not missed and worst <= LAG_BOUND_NS and served
         report(f"DP{dp} c{LAG_LOAD}", text, good)
     print(f"\n{'pass' if all(verdicts) else 'FAIL'}")
