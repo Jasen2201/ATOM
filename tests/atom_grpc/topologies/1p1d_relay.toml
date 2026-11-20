@@ -52,3 +52,10 @@ args = ["--backend", "atom"]  # ATOM's flow in atomesh's HTTP P/D router
 name = "grpc"
 prefill = ["p"]
 decode = ["d"]
+
+# The gRPC router, with every request on P's and D's Sessions
+[[router]]
+name = "session"
+prefill = ["p"]
+decode = ["d"]
+args = ["--atom-grpc-session"]
