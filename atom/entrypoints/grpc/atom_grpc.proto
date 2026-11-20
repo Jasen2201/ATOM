@@ -50,11 +50,14 @@ message GenerateRequest {
 // What ATOM's HTTP chat route derives a chat request's structured output from,
 // for a prompt the client rendered.
 message StructuredOutput {
-  optional string tools_json = 1;
+  optional string tools_json = 1;  // the top-level tools
   optional string tool_choice_json = 2;  // a JSON string or object
   optional string response_format_json = 3;
   string chat_template_kwargs_json = 4;  // the merged kwargs the prompt was rendered with
   bool prompt_opens_reasoning = 5;  // the prompt ends in one of reasoning_open_markers
+  // One item per chat message: the tools it declares (Kimi-K3's dynamic tools),
+  // or null. Absent when no message declares any.
+  optional string message_tools_json = 6;
 }
 
 message GenerateResponse {
@@ -130,8 +133,13 @@ message Frames {
   repeated bytes frames = 1;
 }
 
+// The chat's StructuredOutput and the request fields the chat route also reads,
+// each as GenerateRequest's field of the same name carries it.
 message PrepareStructuredOutputRequest {
   StructuredOutput structured_output = 1;
+  atom.engine.v1.SamplingParams sampling = 2;
+  repeated atom.engine.v1.TokenIds stop_token_sequences = 3;
+  optional string kv_transfer_params_json = 4;
 }
 
 message PrepareStructuredOutputResponse {

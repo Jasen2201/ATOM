@@ -54,11 +54,34 @@ def test_generate_request_reuses_engine_v1_messages():
     assert not decoded.sampling.HasField("temperature")
 
 
-def test_prepare_structured_output_takes_the_chat_and_answers_engine_v1_fields():
+def _shape(field):
+    return field.type, field.message_type, field.is_repeated, field.has_presence
+
+
+def test_structured_output_carries_message_declared_tools_apart():
+    # A response schema's tool format reads the top-level tools alone; the
+    # required channel and the tool-call grammar read both lists.
+    chat = atom_grpc_pb2.StructuredOutput(message_tools_json="[null, []]")
+    decoded = atom_grpc_pb2.StructuredOutput.FromString(chat.SerializeToString())
+    assert decoded.HasField("message_tools_json")
+    assert not decoded.HasField("tools_json")
+
+
+def test_prepare_structured_output_takes_the_request_and_answers_engine_v1_fields():
     service = atom_grpc_pb2.DESCRIPTOR.services_by_name["AtomEngine"]
     method = service.methods_by_name["PrepareStructuredOutput"]
-    chat = method.input_type.fields_by_name["structured_output"]
-    assert chat.message_type is atom_grpc_pb2.StructuredOutput.DESCRIPTOR
+    # The chat's StructuredOutput, and the request fields that decide whether its
+    # grammar can run (ignore_eos, stop strings, logprobs, kv_transfer_params).
+    fields = method.input_type.fields_by_name
+    generate = atom_grpc_pb2.GenerateRequest.DESCRIPTOR.fields_by_name
+    for name in (
+        "structured_output",
+        "sampling",
+        "stop_token_sequences",
+        "kv_transfer_params_json",
+    ):
+        assert name in fields, f"PrepareStructuredOutputRequest lacks {name}"
+        assert _shape(fields[name]) == _shape(generate[name]), name
     # Either the derived engine_v1 fields or the HTTP chat route's refusal.
     answer = method.output_type.oneofs_by_name["response"]
     assert {f.name: f.message_type for f in answer.fields} == {
