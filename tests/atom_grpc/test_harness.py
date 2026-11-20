@@ -4,6 +4,7 @@ its processes holds the cores pinned for it, and none outlives the shutdown."""
 
 import contextlib
 import ctypes
+import socket
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ import psutil
 import pytest
 
 import tests.atom_grpc.harness.topologies as harness
+from tests.atom_grpc.fake.instance import EPHEMERAL, free_port
 from tests.atom_grpc.harness.launch import (
     PR_SET_CHILD_SUBREAPER,
     InstanceSpec,
@@ -66,6 +68,14 @@ def test_core_sets_are_disjoint_taken_in_order_and_refused_past_the_cpus():
     }
     with pytest.raises(ValueError, match="pins 7 CPUs; this process has 6"):
         core_sets(specs, [0, 1, 2, 3, 4, 5])
+
+
+def test_free_ports_bind_and_lie_outside_the_ephemeral_range():
+    low, high = map(int, EPHEMERAL.read_text().split())
+    for port in [free_port() for _ in range(20)]:
+        assert not low <= port <= high, (port, low, high)
+        with socket.socket() as sock:
+            sock.bind(("", port))
 
 
 def test_a_topology_repeating_an_instance_name_is_refused(tmp_path):
