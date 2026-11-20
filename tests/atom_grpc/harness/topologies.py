@@ -33,6 +33,16 @@ class Instance(Http):
     grpc: str | None  # host:port of its gRPC server; None when it serves none
 
 
+@dataclass
+class Router(Http):
+    """An atomesh router as its launcher reports it: `pid` leads its group, and it was
+    ready once it listed each url@rank in `workers`."""
+
+    url: str
+    pid: int
+    workers: list[str]
+
+
 def group_members(group: int) -> list[int]:
     """Every process in process group `group`, zombies included."""
     members = []
@@ -57,6 +67,7 @@ class Topology:
                 cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT
             )
         self.instances: dict[str, Instance] = {}
+        self.routers: dict[str, Router] = {}
 
     def wait_ready(self) -> None:
         deadline = time.monotonic() + STARTUP_S + STOP_S
@@ -66,15 +77,16 @@ class Topology:
                     f"launch not ready, exit {self.proc.poll()}:\n{self.tail()}"
                 )
             time.sleep(1)
-        for name, fields in self._manifest()["instances"].items():
+        manifest = self._manifest()
+        for name, fields in manifest["instances"].items():
             fields["workdir"] = Path(fields["workdir"])
             self.instances[name] = Instance(**fields)
+        for name, fields in manifest["routers"].items():
+            self.routers[name] = Router(**fields)
 
-    def groups(self) -> list[int]:
-        """The process groups the launcher started: one per instance."""
-        return [
-            fields["pid"] for fields in self._manifest().get("instances", {}).values()
-        ]
+    def groups(self, kind: str = "instances") -> list[int]:
+        """The process groups the launcher started: one per instance, or per router."""
+        return [fields["pid"] for fields in self._manifest().get(kind, {}).values()]
 
     def stop(self) -> dict[int, list[int]]:
         """SIGINT the launcher, then kill and return whatever its groups still hold."""
@@ -85,7 +97,8 @@ class Topology:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
                 self.proc.wait()
-        left = {group: group_members(group) for group in self.groups()}
+        groups = [*self.groups(), *self.groups("routers")]
+        left = {group: group_members(group) for group in groups}
         left = {group: pids for group, pids in left.items() if pids}
         for group in left:
             with contextlib.suppress(ProcessLookupError):
