@@ -5,20 +5,69 @@ engine: a `grpc.aio` server on its own asyncio loop, in one named daemon thread.
 
 import asyncio
 import json
+import logging
 import threading
 from argparse import Namespace
+from collections import defaultdict
+from collections.abc import Callable
 from concurrent.futures import Future
+from functools import partial
 from types import ModuleType
 
 import grpc
 import setproctitle
+from fastapi import HTTPException
 
 from atom.entrypoints.grpc import atom_grpc_pb2 as pb
 from atom.entrypoints.grpc import atom_grpc_pb2_grpc as pb_grpc
+from atom.entrypoints.openai.protocol import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_TOP_K,
+    DEFAULT_TOP_P,
+    resolve_prompt_token_ids,
+    validate_max_tokens,
+)
 from atom.entrypoints.openai.reasoning import _REASONING_OPEN_MARKERS
+from atom.model_engine.request import RequestOutput
+
+logger = logging.getLogger("atom")
 
 # Also its name in /proc, which threads it starts keep unless they name their own.
 THREAD_NAME = "AtomGrpcServer"
+
+
+class StepOutputs:
+    """Engine outputs for gRPC calls, buffered per output thread during a step; `flush`
+    hands the step to each call's loop with one `call_soon_threadsafe`."""
+
+    def __init__(self):
+        self._local = threading.local()
+
+    def callback(self, queue: asyncio.Queue) -> Callable[[RequestOutput], None]:
+        """A stream callback buffering for `queue`, which the running loop reads."""
+        loop, local = asyncio.get_running_loop(), self._local
+
+        def buffer(output: RequestOutput) -> None:
+            step = getattr(local, "step", None)
+            if step is None:
+                step = local.step = defaultdict(list)
+            step[loop].append((queue, output))
+
+        return buffer
+
+    def flush(self) -> None:
+        step = getattr(self._local, "step", None)
+        if not step:
+            return
+        self._local.step = None
+        for loop, outputs in step.items():
+            loop.call_soon_threadsafe(_deliver, outputs)
+
+
+def _deliver(outputs: list[tuple[asyncio.Queue, RequestOutput]]) -> None:
+    for queue, output in outputs:
+        queue.put_nowait(output)
 
 
 class AtomEngineServicer(pb_grpc.AtomEngineServicer):
@@ -28,6 +77,109 @@ class AtomEngineServicer(pb_grpc.AtomEngineServicer):
     def __init__(self, api: ModuleType, model_path: str):
         self.api = api
         self.model_path = model_path  # --model, which the tokenizer loads from
+        self.steps = StepOutputs()
+        self.live: dict[str, set[int]] = {}  # request_id: its live seq ids, for Abort
+
+    async def Generate(self, request, context):
+        """Admitted as `/v1/completions` admits the same token-id request, a refusal
+        answered with its status; streamed one chunk per engine step."""
+        api, outputs = self.api, asyncio.Queue()
+        seq, submitted, finished = None, False, False
+        try:
+            params, prompt, kv_transfer_params, stops = self._admission(request)
+            seq = await asyncio.get_running_loop().run_in_executor(
+                None,
+                partial(
+                    api.engine.io_processor.preprocess,
+                    prompt,
+                    params,
+                    stream_callback=self.steps.callback(outputs),
+                    kv_transfer_params=kv_transfer_params,
+                    data_parallel_rank=_optional(request, "data_parallel_rank"),
+                    stop_token_sequences=stops,
+                ),
+            )
+            self.live.setdefault(request.request_id, set()).add(seq.id)
+            api._validate_sequence_context_length(seq, params)
+            await api._submit_engine_requests([seq])
+            submitted = True
+            ids, cached = [], 0
+            while not finished:
+                output = await outputs.get()
+                finished = output.finished
+                ids += output.output_tokens
+                cached = output.num_cached_tokens or cached
+                if request.stream and output.output_tokens:
+                    chunk = pb.GenerateStreamChunk(
+                        token_ids=output.output_tokens,
+                        prompt_tokens=seq.num_prompt_tokens,
+                        completion_tokens=len(ids),
+                        cached_tokens=cached,
+                    )
+                    await context.write(pb.GenerateResponse(chunk=chunk))
+            complete = pb.GenerateComplete(
+                output_ids=[] if request.stream else ids,
+                finish_reason=output.finish_reason,
+                prompt_tokens=seq.num_prompt_tokens,
+                completion_tokens=len(ids),
+                cached_tokens=cached,
+            )
+            if output.kv_transfer_params_output is not None:
+                kv_json = json.dumps(output.kv_transfer_params_output)
+                complete.kv_transfer_params_json = kv_json
+            await context.write(pb.GenerateResponse(complete=complete))
+        except Exception as error:  # noqa: BLE001 - answered as `_completions` does
+            await context.write(_refusal(error))
+        finally:
+            if seq is not None:
+                self._forget(request.request_id, seq.id)
+                if submitted:  # the HTTP stream teardown
+                    api.cleanup_stream(seq.id, aborted=not finished)
+                else:
+                    api.engine.io_processor.requests.pop(seq.id, None)
+
+    async def Abort(self, request, context):
+        """Ends the request as a dropped HTTP stream ends one; an unknown or finished
+        request_id is no error."""
+        for seq_id in list(self.live.get(request.request_id, ())):
+            self.api.cleanup_stream(seq_id, aborted=True)
+        return pb.AbortResponse()
+
+    def _admission(self, request):
+        """What `_completions` derives before preprocess, in its order: SamplingParams,
+        prompt ids, the engine's kv_transfer_params, and the stop ids as given."""
+        api, sampling = self.api, request.sampling
+        if sampling.n > 1:
+            raise ValueError("n above 1 is not served over gRPC; send one request each")
+        kv_transfer_params = _kv_transfer_params(request)
+        api._validate_chunked_receive(kv_transfer_params)
+        temperature = _optional(sampling, "temperature", DEFAULT_TEMPERATURE)
+        n = api._coerce_n(_optional(sampling, "n"), temperature)
+        given = sampling.HasField("max_tokens")
+        max_tokens = DEFAULT_MAX_TOKENS
+        if given:
+            max_tokens = validate_max_tokens(sampling.max_tokens)
+        params = api._build_sampling_params(
+            temperature=temperature,
+            max_tokens=max_tokens,
+            max_tokens_is_default=sampling.max_tokens_is_default or not given,
+            stop_strings=None,  # they arrive as ids, which preprocess takes
+            ignore_eos=sampling.ignore_eos,
+            top_k=_optional(sampling, "top_k", DEFAULT_TOP_K),
+            top_p=_optional(sampling, "top_p", DEFAULT_TOP_P),
+            n=n,
+        )
+        prompt = resolve_prompt_token_ids(
+            list(request.prompt_token_ids), kv_transfer_params
+        )
+        stops = [list(stop.ids) for stop in request.stop_token_sequences]
+        return params, prompt, api._engine_kv_transfer_params(kv_transfer_params), stops
+
+    def _forget(self, request_id: str, seq_id: int) -> None:
+        live = self.live.get(request_id, set())
+        live.discard(seq_id)
+        if not live:
+            self.live.pop(request_id, None)
 
     async def HealthCheck(self, request, context):
         problem = self.api.health_problem()
@@ -56,6 +208,48 @@ class AtomEngineServicer(pb_grpc.AtomEngineServicer):
         )
 
 
+def _optional(message, name: str, default=None):
+    return getattr(message, name) if message.HasField(name) else default
+
+
+def _kv_transfer_params(request) -> dict | None:
+    """The request's kv_transfer_params, a JSON object as the HTTP routes take it."""
+    if not request.HasField("kv_transfer_params_json"):
+        return None
+    params = json.loads(request.kv_transfer_params_json)
+    if params is not None and not isinstance(params, dict):
+        raise ValueError("kv_transfer_params must be a JSON object")
+    return params
+
+
+def _refusal(error: Exception) -> pb.GenerateResponse:
+    """`error` as `_completions` answers it: an HTTPException keeps its status, a
+    ValueError is a 400 and anything else a 500."""
+    if isinstance(error, HTTPException):
+        status, message = error.status_code, str(error.detail)
+    elif isinstance(error, ValueError):
+        logger.error("Validation error in Generate: %s", error)
+        status, message = 400, str(error)
+    else:
+        logger.error("Error in Generate", exc_info=error)
+        status, message = 500, str(error)
+    error = pb.GenerateError(message=message, http_status=status)
+    return pb.GenerateResponse(error=error)
+
+
+def _then(flush: Callable[[], None] | None, more: Callable[[], None]):
+    """One per-step flush: `flush`, then `more` even when `flush` fails."""
+
+    def both() -> None:
+        try:
+            if flush is not None:
+                flush()
+        finally:
+            more()
+
+    return both
+
+
 def start_grpc_server(api: ModuleType, args: Namespace) -> None:
     """Serve AtomEngine on `--host`:`--grpc-port`; return once it listens, or raise
     why it cannot."""
@@ -66,6 +260,9 @@ def start_grpc_server(api: ModuleType, args: Namespace) -> None:
         target=_run, args=(address, servicer, listening), name=THREAD_NAME, daemon=True
     ).start()
     listening.result()
+    core_mgr = api.engine.core_mgr  # its per-step flush now hands gRPC its outputs too
+    flush = _then(core_mgr._flush_stream_batch_fn, servicer.steps.flush)
+    core_mgr._flush_stream_batch_fn = flush
 
 
 def _run(address: str, servicer: AtomEngineServicer, listening: Future) -> None:
