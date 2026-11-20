@@ -217,7 +217,7 @@ class AtomEngineServicer(pb_grpc.AtomEngineServicer):
         chat = _chat_request(carried)
         validate_chat_request(chat)
         kwargs = json.loads(carried.chat_template_kwargs_json or "{}")
-        if not isinstance(kwargs, dict):  # a ValueError, answered 400 as over HTTP
+        if not isinstance(kwargs, dict):
             raise ValueError("chat_template_kwargs must be an object")  # noqa: TRY004
         contract = api_compatibility_for(api.custom_message_encoder)
         if not contract.chat_forced_tools_with_thinking:
@@ -227,9 +227,11 @@ class AtomEngineServicer(pb_grpc.AtomEngineServicer):
             )
         tools = request_tools(chat)
         logprobs = request.sampling.WhichOneof("logprobs")
+        # What the chat route checks: the stop ids count as stop strings and logprobs
+        # as asked, though the SamplingParams Generate admits carry neither.
         chat_params = replace(
             params,
-            stop_strings=[str(ids) for ids in stops],  # the chat's checks read strings
+            stop_strings=[str(ids) for ids in stops],
             logprobs=getattr(request.sampling, logprobs) if logprobs else False,
             required_channel=channel_for_request(
                 api.required_tool_channel, chat.tool_choice, tools
