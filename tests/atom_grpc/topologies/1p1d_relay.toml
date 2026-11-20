@@ -1,0 +1,54 @@
+# 1p1d.toml with a P that relays: atomesh chunks every transfer from a P publishing a
+# chunked-transfer template, so relay through atomesh needs a P without one.
+
+[[instance]]
+name = "p"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "--method", "mtp", "--num-speculative-tokens", "3",
+    # P's decode rungs and batch kept to those its law prices
+    "--cudagraph-capture-sizes", "[1,2,4]", "--max-num-seqs", "4",
+    "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_producer"}',
+]
+grpc = true
+
+[instance.fake]
+# From the repository root; under it a prefill of 16001 tokens takes about 2.7 s.
+law = "tests/atom_grpc/fixtures/laws/test.json"
+num_kvcache_blocks = 2304  # below D's pool: P refuses a prompt that D takes
+block_bytes = 2_000_000  # a block moves in 2 ms
+bandwidth_gb_s = 1.0
+transfer_timeout_s = 6.0
+
+[[instance]]
+name = "d"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "2", "--enable-dp-attention", "--method", "mtp", "--num-speculative-tokens", "3",
+    "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_consumer"}',
+]
+dp = 2
+grpc = true
+
+[instance.fake]
+acceptance_length = 3.51
+step_s = 0.001
+# Every rank fails receives of prompts starting "zo zo zo" and times out those starting
+# "zu zu zu": atomesh replaces D's kv_transfer_params, so no request can tag a fault.
+faults = [
+    { fault = "fail", prompt_prefix = [106, 106, 106] },
+    { fault = "timeout", prompt_prefix = [107, 107, 107] },
+]
+env = { ATOM_PD_FAILED_WRITE_HOLD_S = "2" }
+
+[[router]]
+name = "http"
+prefill = ["p"]
+decode = ["d"]
+grpc = false
+args = ["--backend", "atom"]  # ATOM's flow in atomesh's HTTP P/D router
+
+[[router]]
+name = "grpc"
+prefill = ["p"]
+decode = ["d"]
