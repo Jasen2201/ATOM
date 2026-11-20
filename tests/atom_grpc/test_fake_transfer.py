@@ -182,7 +182,7 @@ def test_a_tagged_transfer_fails_and_d_reports_it_a_hold_later(topology, mode, f
 
 @pytest.mark.topology("1p1d")
 def test_a_rule_naming_one_dp_rank_fails_only_that_ranks_receives(topology, tokenizer):
-    (rule,) = D_FAKE["faults"]
+    (rule,) = [rule for rule in D_FAKE["faults"] if "dp_rank" in rule]
     other, ruled = 1 - rule["dp_rank"], rule["dp_rank"]  # D's two DP ranks
     pd = PD(topology)
     prompt = [*rule["prompt_prefix"], *range(70, 90)]
