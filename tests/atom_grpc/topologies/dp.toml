@@ -117,3 +117,95 @@ name = "cache"
 prefill = ["prelay"]
 decode = ["d"]
 args = ["--dp-aware", "--policy", "cache_aware", "--cache-threshold", "0.5"]
+
+# Per mapping and mode, the same pair over the Session, with an HTTP twin of its own:
+# round-robin placement depends on what a router placed before.
+[[router]]
+name = "session_none_relay"
+prefill = ["prelay"]
+decode = ["d"]
+args = [
+    "--atom-grpc-session", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+]
+
+[[router]]
+name = "session_http_none_relay"
+prefill = ["prelay"]
+decode = ["d"]
+grpc = false
+args = [
+    "--backend", "atom", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+]
+
+[[router]]
+name = "session_none_chunked"
+prefill = ["pchunked"]
+decode = ["d"]
+args = [
+    "--atom-grpc-session", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+]
+
+[[router]]
+name = "session_http_none_chunked"
+prefill = ["pchunked"]
+decode = ["d"]
+grpc = false
+args = [
+    "--backend", "atom", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+]
+
+[[router]]
+name = "session_idx2idx_relay"
+prefill = ["prelay"]
+decode = ["d"]
+args = [
+    "--atom-grpc-session", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+    "--atom-pd-rank-mapping-policy", "idx2idx",
+]
+
+[[router]]
+name = "session_http_idx2idx_relay"
+prefill = ["prelay"]
+decode = ["d"]
+grpc = false
+args = [
+    "--backend", "atom", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+    "--atom-pd-rank-mapping-policy", "idx2idx",
+]
+
+[[router]]
+name = "session_idx2idx_chunked"
+prefill = ["pchunked"]
+decode = ["d"]
+args = [
+    "--atom-grpc-session", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+    "--atom-pd-rank-mapping-policy", "idx2idx",
+]
+
+[[router]]
+name = "session_http_idx2idx_chunked"
+prefill = ["pchunked"]
+decode = ["d"]
+grpc = false
+args = [
+    "--backend", "atom", "--dp-aware",
+    "--prefill-policy", "round_robin", "--decode-policy", "dp_sticky",
+    "--atom-pd-rank-mapping-policy", "idx2idx",
+]
+
+# `cache` over the Session.
+[[router]]
+name = "session_cache"
+prefill = ["prelay"]
+decode = ["d"]
+args = [
+    "--atom-grpc-session", "--dp-aware",
+    "--policy", "cache_aware", "--cache-threshold", "0.5",
+]
