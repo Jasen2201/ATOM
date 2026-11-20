@@ -31,7 +31,7 @@ service AtomEngine {
 // A change an older peer could misread bumps CURRENT.
 enum ProtocolVersion {
   PROTOCOL_VERSION_UNSPECIFIED = 0;
-  PROTOCOL_VERSION_CURRENT = 1;
+  PROTOCOL_VERSION_CURRENT = 2;
 }
 
 message GenerateRequest {
