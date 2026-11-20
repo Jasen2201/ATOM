@@ -6,8 +6,11 @@ HOST=pit2-p03-g48
 DIR=$(cd "$(dirname "$0")" && pwd)
 TREE=$(pwd)
 RUFF=/home/yajizhan@amd.com/.local/bin/ruff
-# Rust toolchain, crates and cargo targets, on g48's disk-backed /tmp: logind empties our /dev/shm after our last session.
-RDIR=/tmp/yajizhan-gate-rust
+# Rust toolchain, crates and cargo targets: a docker volume on g48's disk, out of reach of logind, which empties our
+# /dev/shm, and of Spur's epilog, which deletes our old files in /tmp. docker creates it on first use.
+VOL=yajizhan-gate-rust
+# The image build's lock is this directory itself, since the epilog deletes only files.
+LOCK=/tmp/yajizhan-gate-lock
 for d in "$TREE" "$(git rev-parse --path-format=absolute --git-common-dir)"; do
     [[ $d == /share_nfs/* ]] || { echo "gate: $d is not under /share_nfs, which $HOST mounts; move the tree or set ATOM_GATE_LOCAL=1"; exit 2; }
 done
@@ -17,7 +20,7 @@ NAME=yajizhan-gate-$(basename "$TREE")-$(date +%s%N)
 ARGS=(--rm --init --name "$NAME" --cpus 16 --tmpfs /dev/shm:rw,exec,size=32g,mode=1777 --ulimit nofile=1048576
     --user "$(id -u):$(id -g)"
     -e ATOM_GATE_LOCAL=1 -e HOME=/dev/shm/home -e "USER=$(id -un)" -e "LOGNAME=$(id -un)" -e LANG=C.UTF-8
-    -v /share_nfs:/share_nfs -v "$RUFF:$RUFF:ro" -v "$RDIR:/dev/shm/yajizhan-rust" -w "$TREE")
+    -v /share_nfs:/share_nfs -v "$RUFF:$RUFF:ro" -v "$VOL:/dev/shm/yajizhan-rust" -w "$TREE")
 [ -z "${PYTEST_ADDOPTS:-}" ] || ARGS+=(-e "PYTEST_ADDOPTS=$PYTEST_ADDOPTS")
 # The umask is the dev host's, and a failed setup exits 2, as in the gate. Opening each file refreshes g48's NFS attribute
 # cache, which can show python, ruff and cargo a file the dev host changed seconds ago with its old mtime.
@@ -34,10 +37,11 @@ trap 'stop_run 130' INT
 trap 'stop_run 143' TERM
 trap 'stop_run 129' HUP
 BUILD="docker image inspect $IMAGE >/dev/null 2>&1 || docker build -q -t $IMAGE - <$(printf %q "$DIR/Dockerfile")"
-# /tmp is shared, so a directory or link someone else made under that name is refused; runs build the image one at a time.
-# ssh ignores the signals, a process group's included, so only the end of the remote run ends it.
-(trap '' INT TERM HUP && exec "${SSH[@]}" "mkdir -p -m 700 $RDIR && [ ! -L $RDIR ] && [ -O $RDIR ] || { echo 'gate: $RDIR on $HOST is not ours'; exit 2; }
-    flock $RDIR/.image.lock bash -c $(printf %q "$BUILD") || exit 2
+# /tmp is shared, so a lock someone else made is refused; runs build the image one at a time, then give the volume's root
+# to the caller. ssh ignores the signals, a process group's included, so only the end of the remote run ends it.
+(trap '' INT TERM HUP && exec "${SSH[@]}" "mkdir -p -m 700 $LOCK && [ ! -L $LOCK ] && [ -O $LOCK ] || { echo 'gate: $LOCK on $HOST is not ours'; exit 2; }
+    flock $LOCK bash -c $(printf %q "$BUILD") || exit 2
+    docker run --rm -v $VOL:/r $IMAGE chown $(id -u):$(id -g) /r || exit 2
     $(printf '%q ' docker run "${ARGS[@]}" "$IMAGE" bash -c "$CMD" gate "$DIR/rust.sh" "$1")") &
 wait $!
 rc=$?

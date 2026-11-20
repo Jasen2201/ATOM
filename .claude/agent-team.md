@@ -39,10 +39,14 @@ and its sub-issues; agents do not write there.
 - `gate_task` and `gate_post_land` run on pit2-p03-g48, in a container that
   mounts `/share_nfs` at its own path (`.claude/agent-team/g48/run.sh`), so
   every tree they gate, a detached one included, must be under `/share_nfs`,
-  such as in `<worktree_root>`. Their Rust toolchain and per-tree cargo targets
-  live in g48's `/tmp/yajizhan-gate-rust`; remove a tree's `target-<tree name>`
-  and `target-<tree name>-post` there with the tree. `ATOM_GATE_LOCAL=1` runs
-  them on the dev host.
+  such as in `<worktree_root>`. `ATOM_GATE_LOCAL=1` runs them on the dev host.
+  Their Rust toolchain and per-tree cargo targets persist in g48's docker volume
+  `yajizhan-gate-rust`; remove a tree's two targets with the tree, here tree
+  `22`'s:
+
+  ```bash
+  ssh pit2-p03-g48 docker run --rm -v yajizhan-gate-rust:/r ubuntu:24.04 rm -rf /r/target-22 /r/target-22-post
+  ```
 - `gate_targeted` runs as `gate_task` does, on pit2-p03-g48 unless
   `ATOM_GATE_LOCAL=1`, and in the same cargo target: `gate.sh`'s lint, then
   only those of `gate.sh`'s tests the change reaches (`select_tests.py`).
