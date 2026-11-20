@@ -5,16 +5,18 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::thread;
 
 use futures::{stream, Stream, StreamExt};
 use http::StatusCode;
 use parking_lot::Mutex;
 use serde_json::Value as Json;
-use tokio::sync::mpsc;
+use tokio::runtime;
+use tokio::sync::{mpsc, oneshot};
 use tonic::{Status, Streaming};
 use tracing::{debug, warn, Level};
 
-use super::{pair::atom_client, AtomClient};
+use super::AtomClient;
 use crate::atom_engine::grpc::{
     generate_response::Response, Frames, GenerateComplete, GenerateError, GenerateResponse,
     GenerateStreamChunk,
@@ -68,10 +70,7 @@ impl AtomSessions {
         if let Some(session) = slot.as_ref().filter(|session| session.is_open()) {
             return Ok(session.clone());
         }
-        let client = atom_client(worker)
-            .await
-            .ok_or_else(|| EngineError::ConnectionAcquireFailed(worker.url().to_string()))?;
-        Ok(slot.insert(Session::open(&client, url).await?).clone())
+        Ok(slot.insert(Session::open(url).await?).clone())
     }
 }
 
@@ -89,21 +88,19 @@ enum Command {
 }
 
 impl Session {
-    /// Opens the call and waits for ATOM's Ready, refusing one of another protocol version.
-    async fn open(client: &AtomClient, url: &str) -> Result<Self, EngineError> {
+    /// Opens the call on a connection and thread of its own, which nothing else the router
+    /// runs can hold up; waits for ATOM's Ready, refusing one of another protocol version.
+    async fn open(url: &str) -> Result<Self, EngineError> {
         let (commands, queued) = mpsc::unbounded_channel();
-        let mut inbound = client
-            .session(writer(queued))
-            .await
-            .map_err(EngineError::Transport)?;
-        let first = inbound.message().await.map_err(EngineError::Transport)?;
-        match first.map(|message| Inbound::decode(message.frames).map(|m| m.body)) {
-            Some(Ok(Body::Ready(_))) => {}
-            Some(Err(e)) => return Err(refused(&e)),
-            _ => return Err(refused("the call did not start with Ready")),
-        }
         let routes = Arc::new(Mutex::new(Routes::default()));
-        tokio::spawn(read(inbound, routes.clone(), url.to_string()));
+        let (opened, ready) = oneshot::channel();
+        let (url, read_into) = (url.to_string(), routes.clone());
+        thread::Builder::new()
+            .name("atom-session".into())
+            .spawn(move || run(url, queued, read_into, opened))
+            .map_err(|e| EngineError::Transport(Status::internal(e.to_string())))?;
+        let gone = |_| EngineError::Transport(Status::internal("the Session thread ended"));
+        ready.await.map_err(gone)??;
         Ok(Self { routes, commands })
     }
 
@@ -143,6 +140,55 @@ impl Session {
             rx,
             session: self.clone(),
         })
+    }
+}
+
+/// The Session's thread: a runtime of its own, which connects, opens the call and reads
+/// it until it ends; `opened` gets how the opening went.
+fn run(
+    url: String,
+    queued: mpsc::UnboundedReceiver<Command>,
+    routes: Arc<Mutex<Routes>>,
+    opened: oneshot::Sender<Result<(), EngineError>>,
+) {
+    let runtime = match runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            let _ = opened.send(Err(EngineError::Transport(Status::internal(e.to_string()))));
+            return;
+        }
+    };
+    runtime.block_on(async move {
+        match start(&url, queued).await {
+            Ok((_client, inbound)) => {
+                let _ = opened.send(Ok(()));
+                read(inbound, routes, url).await;
+            }
+            Err(e) => {
+                let _ = opened.send(Err(e));
+            }
+        }
+    });
+}
+
+/// Connects to `url`, opens the call and reads ATOM's Ready; the client keeps the
+/// connection the call runs on.
+async fn start(
+    url: &str,
+    queued: mpsc::UnboundedReceiver<Command>,
+) -> Result<(AtomClient, Streaming<Frames>), EngineError> {
+    let client = AtomClient::connect(url)
+        .await
+        .map_err(|_| EngineError::ConnectionAcquireFailed(url.to_string()))?;
+    let mut inbound = client
+        .session(writer(queued))
+        .await
+        .map_err(EngineError::Transport)?;
+    let first = inbound.message().await.map_err(EngineError::Transport)?;
+    match first.map(|message| Inbound::decode(message.frames).map(|m| m.body)) {
+        Some(Ok(Body::Ready(_))) => Ok((client, inbound)),
+        Some(Err(e)) => Err(refused(&e)),
+        _ => Err(refused("the call did not start with Ready")),
     }
 }
 
