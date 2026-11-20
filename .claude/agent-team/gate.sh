@@ -1,7 +1,8 @@
 #!/bin/bash
 # agent-team gate_task for jasen/atom-grpc: lint + CPU tests, no GPU.
-# Run from a tree root; exit 0 is a pass.
+# Run from a tree root; exit 0 is a pass. It runs on pit2-p03-g48 through g48/run.sh unless ATOM_GATE_LOCAL=1.
 set -uo pipefail
+[ "${ATOM_GATE_LOCAL:-}" = 1 ] || exec bash "$(dirname "$0")/g48/run.sh" "$0"
 
 PY=/share_nfs/yajizhan/venv-cpu-test/bin/python
 BLACK=/share_nfs/yajizhan/venv-black26/bin/black
