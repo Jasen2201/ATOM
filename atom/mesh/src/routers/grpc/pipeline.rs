@@ -247,10 +247,8 @@ impl Pipeline {
             ));
         }
 
-        let (mut payload, mut resp_ctx) =
-            prepare::prepare_chat(req, headers, model_id, &components)?;
+        let (mut payload, resp_ctx) = prepare::prepare_chat(req, headers, model_id, &components)?;
         let placement = self.plan_for(&payload, &resp_ctx).await?;
-        drop_stops_for_atom(&placement, &mut resp_ctx);
         let _guards = self.load_guards(&placement, resp_ctx.headers.as_ref());
         let stream = self
             .engine
