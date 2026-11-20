@@ -272,14 +272,12 @@ async fn one_session_serves_both_ranks_and_each_request_gets_only_its_outputs_in
         assert_eq!((received, ids), (spec(name), prompt));
     }
 
-    let host = pb::Value {
-        kind: Some(Kind::StringValue("10.0.0.1".to_string())),
+    let string = |s: &str| pb::Value {
+        kind: Some(Kind::StringValue(s.to_string())),
     };
     let entry = pb::MapEntry {
-        key: Some(pb::Value {
-            kind: Some(Kind::StringValue("remote_host".to_string())),
-        }),
-        value: Some(host),
+        key: Some(string("remote_host")),
+        value: Some(string("10.0.0.1")),
     };
     let kv = pb::Value {
         kind: Some(Kind::MapValue(pb::ValueMap {
@@ -343,33 +341,21 @@ async fn one_session_serves_both_ranks_and_each_request_gets_only_its_outputs_in
 async fn a_rejected_request_fails_with_the_http_status_its_code_reads_back_to() {
     let (ranks, mut calls) = instance().await;
     let sessions = AtomSessions::default();
+    let cases = [
+        ("invalid", Code::Invalid, 400),
+        ("overloaded", Code::Overloaded, 503),
+        ("internal", Code::Internal, 500),
+    ];
     let first = sessions.submit(&ranks[0], spec("invalid"), vec![1], true);
     let (mut call, invalid) = opening(&mut calls, PROTOCOL_VERSION, first).await;
-    let mut streams = vec![(invalid.unwrap(), Code::Invalid, StatusCode::BAD_REQUEST)];
-    for (name, code, status) in [
-        (
-            "overloaded",
-            Code::Overloaded,
-            StatusCode::SERVICE_UNAVAILABLE,
-        ),
-        (
-            "internal",
-            Code::Internal,
-            StatusCode::INTERNAL_SERVER_ERROR,
-        ),
-    ] {
-        let stream = submit(&sessions, &ranks[0], name, vec![1], true).await;
-        streams.push((stream, code, status));
+    let mut streams = vec![invalid.unwrap()];
+    for (name, ..) in &cases[1..] {
+        streams.push(submit(&sessions, &ranks[0], name, vec![1], true).await);
     }
     let sent = submitted(&mut call, 3).await;
-    let named = [
-        ("invalid", Code::Invalid),
-        ("overloaded", Code::Overloaded),
-        ("internal", Code::Internal),
-    ];
-    let items = named
-        .into_iter()
-        .map(|(name, code)| pb::RejectedRequest {
+    let items = cases
+        .iter()
+        .map(|&(name, code, _)| pb::RejectedRequest {
             seq_id: sent[name].0.seq_id,
             reason: format!("{name} refused"),
             code: code as i32,
@@ -378,12 +364,12 @@ async fn a_rejected_request_fails_with_the_http_status_its_code_reads_back_to() 
     let rejected = frames(Body::Rejected(pb::Rejected { items }), Vec::new());
     call.outbound.send(rejected).unwrap();
 
-    for (stream, code, expected) in streams {
+    for (stream, (name, _, expected)) in streams.into_iter().zip(cases) {
         let failed = chunks(stream).await;
         assert!(
             matches!(&failed[..], [Err(EngineError::Http { status, message })]
-                if *status == expected && message.ends_with("refused")),
-            "{code:?}: {failed:?}"
+                if status.as_u16() == expected && *message == format!("{name} refused")),
+            "{name}: {failed:?}"
         );
     }
 }
