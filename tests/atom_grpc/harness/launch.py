@@ -3,6 +3,7 @@
 it lists, wait for every /health, and on exit kill every process group it started."""
 
 import argparse
+import contextlib
 import ctypes
 import json
 import os
@@ -21,6 +22,7 @@ REAP_S = 30  # for a killed group's last members to be reaped
 MANIFEST = "topology.json"  # in the scratch directory, rewritten once all are ready
 SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 PR_SET_PDEATHSIG = 1
+PR_SET_CHILD_SUBREAPER = 36
 
 
 class Stop(Exception):
@@ -110,19 +112,23 @@ def _stop(signum, frame):
 
 
 def stop(instances: dict[str, FakeInstance]) -> None:
-    """Stop every instance; wait until no process is left in the groups they led."""
+    """Stop every instance; reap their orphans until their groups hold no process."""
     for instance in instances.values():
         instance.stop()  # SIGINT, then SIGKILL to its whole process group
     groups = [instance.proc.pid for instance in instances.values()]
     deadline = time.monotonic() + REAP_S
     while groups and time.monotonic() < deadline:
         time.sleep(0.1)
-        groups = [group for group in groups if _has_members(group)]
+        groups = [group for group in groups if _left_after_reaping(group)]
     if groups:
         raise RuntimeError(f"process groups {groups} outlived SIGKILL")
 
 
-def _has_members(group: int) -> bool:
+def _left_after_reaping(group: int) -> bool:
+    """Reap the adopted members of `group`; whether any process is left in it."""
+    with contextlib.suppress(ChildProcessError):  # no child of this process is in it
+        while os.waitpid(-group, os.WNOHANG)[0]:
+            pass
     try:
         os.killpg(group, 0)
     except ProcessLookupError:
@@ -139,7 +145,9 @@ def main() -> None:
     scratch.mkdir(parents=True, exist_ok=True)
     for sig in SIGNALS:
         signal.signal(sig, _stop)
-    ctypes.CDLL(None).prctl(PR_SET_PDEATHSIG, signal.SIGTERM)  # stop with the parent
+    libc = ctypes.CDLL(None)
+    libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM)  # stop with the parent
+    libc.prctl(PR_SET_CHILD_SUBREAPER, 1)  # adopt the instances' orphans, to reap them
     instances: dict[str, FakeInstance] = {}
     try:
         run(args.topology.resolve(), scratch, instances)

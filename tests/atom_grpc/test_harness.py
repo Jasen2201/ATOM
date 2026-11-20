@@ -2,6 +2,8 @@
 """The topology launcher and its session fixture: the single topology serves, each of
 its processes holds the cores pinned for it, and none outlives the shutdown."""
 
+import contextlib
+import ctypes
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +11,12 @@ import psutil
 import pytest
 
 import tests.atom_grpc.harness.topologies as harness
-from tests.atom_grpc.harness.launch import InstanceSpec, core_sets, load
+from tests.atom_grpc.harness.launch import (
+    PR_SET_CHILD_SUBREAPER,
+    InstanceSpec,
+    core_sets,
+    load,
+)
 from tests.atom_grpc.harness.topologies import Topology, by_topology, group_members
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "deepseek_v3_mtp"
@@ -32,6 +39,18 @@ def allowed_cpus(pid: int) -> set[tuple[int, ...]]:
             if line.startswith("Cpus_allowed_list:"):
                 found.add(cpu_list(line.partition(":")[2]))
     return found
+
+
+@contextlib.contextmanager
+def reaping_nothing():
+    """This process adopts its descendants' orphans and reaps none of them, as PID 1 of
+    a container without an init."""
+    libc = ctypes.CDLL(None)
+    libc.prctl(PR_SET_CHILD_SUBREAPER, 1)
+    try:
+        yield
+    finally:
+        libc.prctl(PR_SET_CHILD_SUBREAPER, 0)
 
 
 def test_core_sets_are_disjoint_taken_in_order_and_refused_past_the_cpus():
@@ -143,7 +162,8 @@ def test_each_pinned_process_shows_its_core_set_in_proc(topology):
 def test_no_process_of_the_topology_outlives_its_shutdown(topology, topologies):
     members = {group: group_members(group) for group in topology.groups()}
     assert all(len(pids) >= 3 for pids in members.values())  # server, core, runner
-    topologies.down()
+    with reaping_nothing():  # the launcher reaps its instances' orphans itself
+        topologies.down()
     assert topology.proc.returncode == 0
     left = {group: group_members(group) for group in members}
     assert left == {group: [] for group in members}
