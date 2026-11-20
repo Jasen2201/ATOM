@@ -14,8 +14,7 @@ import numpy as np
 from atom.model_engine.scheduler import ScheduledBatchOutput, defers_output
 from atom.model_engine.state_runtime import StateRuntime
 from tests.atom_grpc.fake.ids import IdLaw, fingerprint
-
-CONFIG_ENV = "FAKE_ENGINE_CONFIG"
+from tests.atom_grpc.fake.serve import CONFIG_ENV
 
 
 @dataclass(frozen=True)

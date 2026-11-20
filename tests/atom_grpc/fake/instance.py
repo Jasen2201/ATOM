@@ -16,7 +16,7 @@ from pathlib import Path
 
 import psutil
 
-from tests.atom_grpc.fake.runner import CONFIG_ENV
+from tests.atom_grpc.fake.serve import CONFIG_ENV, CORES_ENV
 
 ROOT = Path(__file__).resolve().parents[3]
 STAND_INS = Path(__file__).resolve().parent / "stand_ins"
@@ -28,10 +28,43 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
-class FakeInstance:
-    """`start`, `wait_ready`, then requests; `stop` kills whatever its group left."""
+class Http:
+    """JSON requests to one instance's HTTP server at `url`."""
 
-    def __init__(self, workdir: Path, model: Path, args: list[str], fake: dict):
+    url: str
+
+    def get(self, path: str, timeout: float = 60) -> tuple[int, object]:
+        return self._call(urllib.request.Request(self.url + path), timeout)
+
+    def post(self, path: str, body: dict, timeout: float = 600) -> tuple[int, object]:
+        request = urllib.request.Request(
+            self.url + path,
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        return self._call(request, timeout)
+
+    @staticmethod
+    def _call(request, timeout: float) -> tuple[int, object]:
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as reply:
+                return reply.status, json.loads(reply.read())
+        except urllib.error.HTTPError as error:
+            return error.code, error.read().decode(errors="replace")
+
+
+class FakeInstance(Http):
+    """`start`, `wait_ready`, then requests; `stop` kills whatever its group left.
+    `cores` pins its processes as `serve.pin` reads them; None leaves them unpinned."""
+
+    def __init__(
+        self,
+        workdir: Path,
+        model: Path,
+        args: list[str],
+        fake: dict,
+        cores: dict | None = None,
+    ):
         self.workdir = workdir
         self.port = free_port()
         self.url = f"http://127.0.0.1:{self.port}"
@@ -47,6 +80,8 @@ class FakeInstance:
             CONFIG_ENV: str(workdir / "fake.json"),
             "TMPDIR": str(workdir),  # ZMQ ipc paths: short, and gone with the dir
         }
+        if cores is not None:
+            self.env[CORES_ENV] = json.dumps(cores)
         self.proc: subprocess.Popen | None = None
 
     def start(self) -> None:
@@ -86,25 +121,6 @@ class FakeInstance:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(self.proc.pid, signal.SIGKILL)
         self.proc.wait()
-
-    def get(self, path: str, timeout: float = 60) -> tuple[int, object]:
-        return self._call(urllib.request.Request(self.url + path), timeout)
-
-    def post(self, path: str, body: dict, timeout: float = 600) -> tuple[int, object]:
-        request = urllib.request.Request(
-            self.url + path,
-            data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        return self._call(request, timeout)
-
-    @staticmethod
-    def _call(request, timeout: float) -> tuple[int, object]:
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as reply:
-                return reply.status, json.loads(reply.read())
-        except urllib.error.HTTPError as error:
-            return error.code, error.read().decode(errors="replace")
 
     def _zombie_children(self) -> set[int]:
         with contextlib.suppress(psutil.Error):
