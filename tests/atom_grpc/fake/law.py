@@ -40,6 +40,7 @@ class Shape(NamedTuple):
     rung: int | None
     samples: bool
     group: Group | None = None  # None on one rank
+    producer: bool = False  # whether a P/D producer runs it
 
 
 class Vector:
@@ -109,13 +110,15 @@ class StepLaw:
         return total
 
     def _free(self, shape: Shape) -> bool:
-        """Compass's 0 s DP decodes, at a rung with no vector: one replaying no graph as
-        a dummy or beside a prefilling peer, and a dummy of an idle group."""
-        group = shape.group
-        if group is None or not all(decode for _, _, decode in shape.requests):
+        """0 s at a rung with no vector: a P/D producer's eager decode, and Compass's
+        eager dummy or decode beside a prefilling peer, and idle group's dummy."""
+        group = shape.group or Group(0, False, False, False)  # one rank: no peer
+        if not all(decode for _, _, decode in shape.requests):
             return False
         eager = shape.rung is None
-        free = (group.dummy or group.prefills) if eager else group.idle
+        free = (
+            (shape.producer or group.dummy or group.prefills) if eager else group.idle
+        )
         return free and shape.rung not in self.decode
 
     def _terms(self, shape: Shape) -> tuple[list, list]:
