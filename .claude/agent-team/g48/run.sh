@@ -19,8 +19,10 @@ ARGS=(--rm --init --name "$NAME" --cpus 16 --tmpfs /dev/shm:rw,exec,size=32g,mod
     -e ATOM_GATE_LOCAL=1 -e HOME=/dev/shm/home -e "USER=$(id -un)" -e "LOGNAME=$(id -un)" -e LANG=C.UTF-8
     -v /share_nfs:/share_nfs -v "$RUFF:$RUFF:ro" -v "$RDIR:/dev/shm/yajizhan-rust" -w "$TREE")
 [ -z "${PYTEST_ADDOPTS:-}" ] || ARGS+=(-e "PYTEST_ADDOPTS=$PYTEST_ADDOPTS")
-# The umask is the dev host's; a failed toolchain install is an environment failure, exit 2, as in the gate.
-CMD='umask 002 && mkdir -p "$HOME" && { bash "$1" || exit 2; } && exec bash "$2"'
+# The umask is the dev host's, and a failed setup exits 2, as in the gate. Opening each file refreshes g48's NFS attribute
+# cache, which can show python, ruff and cargo a file the dev host changed seconds ago with its old mtime.
+CMD='umask 002 && mkdir -p "$HOME" && bash "$1" || exit 2; '
+CMD+='git ls-files -z --cached --others --exclude-standard | xargs -0r -P 32 -n 64 head -qc0 -- 2>/dev/null; exec bash "$2"'
 SSH=(ssh -n -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 "$HOST")
 # On a signal, stop the container until ssh ($!) exits: the container may not exist yet, and the remote run outlives ssh.
 stop_run() {
