@@ -39,15 +39,9 @@ fi
 # tests/entrypoints always, plus every changed or new test file elsewhere under tests/.
 mapfile -t TESTS < <(printf '%s\n' "${PYFILES[@]}" | grep -E '^tests/(.*/)?test_[^/]*\.py$' | grep -v -e '^tests/entrypoints/' -e '^tests/atom_grpc/')
 [ -d tests/atom_grpc ] && TESTS+=(tests/atom_grpc)  # this line's own tests run on every task
-DESELECT=(
-    # Fail on main 52a0cf790 in this venv as well; not caused by this line of work.
-    --deselect "tests/entrypoints/test_structured_output.py::test_relaxed_mtp_rejected_on_execution_worker"
-    --deselect "tests/entrypoints/test_structured_output.py::test_strict_arguments_are_rechecked_per_keyword[schema0-12345-1234]"
-    --deselect "tests/entrypoints/test_structured_output.py::test_strict_schemas_close_every_object[city5-patternProperties]"
-)
 echo "== pytest tests/entrypoints ${TESTS[*]}"
 TMPDIR=$SCR PYTHONPATH=. "$PY" -m pytest -q -p no:cacheprovider --basetemp="$SCR/bt" \
-    "${DESELECT[@]}" tests/entrypoints "${TESTS[@]}" || fail=1
+    tests/entrypoints "${TESTS[@]}" || fail=1
 
 # mesh: only when the change, an upstream merge included, touches atom/mesh or a .proto file.
 if [ -n "$(changed "$BASE" 'atom/mesh/*' '*.proto')" ]; then
