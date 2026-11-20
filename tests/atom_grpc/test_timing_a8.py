@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""The a8 timing case's measures: each path's topology, aiperf's records, a lean engine
-record read back, extra TTFT and ITL per request, and the criteria with their rerun rule.
-"""
+"""The a8 case's measures: each path's topology, aiperf's records, a lean engine record,
+extra TTFT and ITL per request, and the criteria with their rerun rule."""
 
 import json
 import time
@@ -24,24 +23,31 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "deepseek_v3_mtp"
 STARTUP_S = 1500
 
 
-def test_each_path_runs_its_router_alone_and_http_four_front_ends_without_grpc(
-    tmp_path,
-):
-    specs, routers = load(a8.TOPOLOGY)
-    assert sum(spec.dp for spec in specs) == 22
-    assert a8.handshake_ports(specs) == {"p0": 17300, "p1": 17310, "p2": 17320}
+def test_each_path_runs_p_three_times_and_d_four_under_its_own_router(tmp_path):
+    (p, d), (router,) = load(a8.TOPOLOGY)
+    prefill, decode = [f"p{k}" for k in range(3)], [f"d{k}" for k in range(4)]
     model = tmp_path / "model"
     for path in a8.PATHS:
-        mine, (router,) = load(a8.path_topology(path, tmp_path / path, model, "law"))
-        (original,) = [r for r in routers if r.name == path]
-        assert router.args == [*original.args, "--model-path", str(model)]
-        for spec, before in zip(mine, specs, strict=True):
-            http = path == "http"
-            assert spec.grpc != http
-            assert spec.args == before.args + http * ["--api-server-count", "4"]
+        file, ports = a8.path_topology(path, tmp_path / path, model, "law")
+        specs, (mine,) = load(file)
+        http, session = path == "http", path == "session"
+        assert (mine.name, mine.grpc, mine.prefill, mine.decode) == (
+            path, not http, prefill, decode,
+        )  # fmt: skip
+        flags = [*router.args, "--model-path", str(model)]
+        assert mine.args == flags + session * ["--atom-grpc-session"]
+        assert [spec.name for spec in specs] == prefill + decode
+        assert ports == {"p0": 17300, "p1": 17310, "p2": 17320}
+        for spec in specs:
+            template = p if spec.name in prefill else d
             counts = str(tmp_path / path / spec.name / "grpc_counts.jsonl")
-            env = before.fake.get("env", {}) | {LEAN_ENV: "1", COUNTS_ENV: counts}
-            assert spec.fake == before.fake | {"law": "law", "env": env}
+            env = template.fake["env"] | {LEAN_ENV: "1", COUNTS_ENV: counts}
+            assert spec.fake == template.fake | {"law": "law", "env": env}
+            assert (spec.dp, spec.cores) == (template.dp, template.cores)
+            assert spec.grpc != http
+            ports = [a for a in spec.args if "handshake_port" not in a]
+            want = [a for a in template.args if "handshake_port" not in a]
+            assert ports == want + http * ["--api-server-count", "4"]
     plan = a8.plan_cores(list(range(37, 128)), specs)
     assert [len(plan[k]) for k in ("instances", "atomesh", "aiperf")] == [57, 16, 16]
     assert plan["driver"] == [126, 127]
@@ -74,6 +80,7 @@ def test_aiperf_records_give_profiled_requests_and_their_outcomes(tmp_path):
     assert found[0] == pytest.approx(a8.Client(1.0, 3.0, 0.25, 0.0075, 640, 20, "ok"))
     outcomes = [client.outcome for client in found]
     assert outcomes == ["ok", "cancelled", "refused", "503 prepare_queue_full"]
+    assert found[-1].detail.startswith("m ")
 
 
 def test_extra_times_take_p_and_d_time_off_and_leave_out_unsure_matches():
@@ -94,14 +101,11 @@ def test_extra_times_take_p_and_d_time_off_and_leave_out_unsure_matches():
 def test_slices_percentiles_and_windowed_samples():
     done = [a8.Client(0, end, 1, 0.01, 10, 300, "ok") for end in (1, 299, 300, 1799)]
     assert a8.slices(done, 0) == [2.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-    assert a8.percentile(list(range(1, 11)), 50) == 5
-    assert a8.percentile(list(range(1, 11)), 90) == 9
+    assert a8.p50_p90(list(range(1, 12))) == (6, 10)
     ticks = [(0, {7: 0}), (5, {7: 100}), (10, {7: 300}), (15, {7: 900})]
     assert a8.cpu_shares(ticks, 4, 11, 100) == {7: 0.4}  # 200 ticks over 5 s
-    count, total = (
-        f'{a8.STAGES}_count{{stage="encode"}}',
-        f'{a8.STAGES}_sum{{stage="encode"}}',
-    )
+    count = f'{a8.STAGES}_count{{stage="encode"}}'
+    total = count.replace("_count", "_sum")
     metrics = [(0, {count: 1, total: 0.5}), (5, {count: 5, total: 1.3})]
     assert a8.stage_means(metrics, 0, 5) == {"encode": (4, pytest.approx(0.2))}
     with pytest.raises(ValueError, match="1 samples"):
@@ -112,7 +116,7 @@ def run(path: str, ttft: tuple, **fields) -> a8.Run:
     base = {
         "atomesh": 4.0, "stages": {}, "queue_timeouts": 0.0, "front_ends": {"p0 0": 0.5},
         "messages": {}, "itl": (0.0, 0.0), "completed": 10, "left_out": 0,
-        "slices": [100.0] * 6, "outcomes": Counter(ok=10), "prompt": 1000.0,
+        "slices": [100.0] * 6, "outcomes": Counter(ok=10), "failures": {}, "prompt": 1000.0,
     }  # fmt: skip
     return a8.Run(path, ttft=ttft, **(base | fields))
 
@@ -171,16 +175,14 @@ def test_the_grpc_messages_counted_are_those_sent_and_the_record_holds_no_prompt
     streamed, sessioned = prompt_ids(70), prompt_ids(71)
     with grpc.insecure_channel(target) as channel:
         request = generate_request(streamed, stream=True, max_tokens=12)
-        replies = list(
-            pb_grpc.AtomEngineStub(channel).Generate(request, timeout=WAIT_S)
-        )
+        stub = pb_grpc.AtomEngineStub(channel)
+        replies = list(stub.Generate(request, timeout=WAIT_S))
     with SessionCall(target) as session:
         session.send(submit({3: (sessioned, {"max_tokens": 9} | GREEDY)}))
         session.until_ended([3])
         session.end()
-        read = (
-            1 + len(session.batches) + 1 + len(list(session.call))
-        )  # Ready, Completions
+        rest = list(session.call)
+        read = 1 + len(session.batches) + 1 + len(rest)  # Ready, the Completions
     want = {"generate_in": 1, "generate_out": len(replies), "session_in": 1}
     want["session_out"] = read
 
