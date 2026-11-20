@@ -25,5 +25,9 @@ trap '"${SSH[@]}" docker stop "$NAME" >/dev/null 2>&1; kill ${pid:-} 2>/dev/null
 pid=$!
 wait $pid
 rc=$?
-[ $rc -le 2 ] || echo "gate: the run on $HOST ended with exit $rc (255: ssh failed); ATOM_GATE_LOCAL=1 runs it here"
+case $rc in
+    0 | 1 | 2) ;;
+    255) echo "gate: ssh to $HOST failed; ATOM_GATE_LOCAL=1 runs the gate on this host" ;;
+    *) echo "gate: the run on $HOST ended with exit $rc" ;;
+esac
 exit $rc
