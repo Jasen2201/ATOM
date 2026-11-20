@@ -84,10 +84,11 @@ class Recorder:
     def write(self, lines: bytes) -> None:
         os.write(self.fd, lines)
 
-    def step(self, dp_rank: int, rows: list, end: float) -> None:
-        """One step's ids, `rows` as (seq_id, ids), and the wall-clock time it ended."""
+    def step(self, dp_rank: int, rows: list, end: float, **forward) -> None:
+        """One step's ids, `rows` as (seq_id, ids), the wall-clock time it ended, and
+        `forward`: `Forward`'s other fields."""
         event = {"kind": "step", "time": end, "dp_rank": dp_rank, "rows": rows}
-        self.write(_lines([event]))
+        self.write(_lines([event | forward]))
 
     def receive(self, seq_id: int, reported: float, **transfer) -> None:
         """D's KV receive for `seq_id`, reported at wall time `reported`: what P sent."""
@@ -146,6 +147,20 @@ class Step(NamedTuple):
     ids: list[int]
 
 
+class Forward(NamedTuple):
+    """One step the fake GPU ran, at wall-clock times, and what its law priced: per
+    request [seq_id, query tokens, context tokens, decode], its rung and sampling."""
+
+    dp_rank: int
+    called: float  # when `forward` was called
+    start: float
+    time: float  # its end, as `Step.time`
+    price: float
+    requests: list
+    rung: int | None  # the decode graph's capture size; None when none replays
+    samples: bool
+
+
 @dataclass
 class Request:
     """One admitted sequence as the record holds it, with its steps in record order."""
@@ -168,16 +183,18 @@ class Request:
 
 
 class EngineRecord:
-    """A record read back: `requests` by seq id, and the API process's `tokenizer`
-    calls in order, each {kind: encode or decode, time, inputs}."""
+    """A record read back: `requests` by seq id, every step as a `Forward` in record
+    order, and the API process's `tokenizer` calls, each {kind, time, inputs}."""
 
     def __init__(self, path: Path):
         text = path.read_text()
         whole = text[: text.rfind("\n") + 1]  # a process may be mid-write
         events = [json.loads(line) for line in whole.splitlines()]
         steps, receives = defaultdict(list), {}
+        self.forwards: list[Forward] = []
         for event in events:
             if event["kind"] == "step":
+                self.forwards.append(Forward(**{f: event[f] for f in Forward._fields}))
                 for seq_id, ids in event["rows"]:
                     steps[seq_id].append(Step(event["time"], event["dp_rank"], ids))
             elif event["kind"] == "receive":
