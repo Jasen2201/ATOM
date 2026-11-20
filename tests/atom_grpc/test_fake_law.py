@@ -2,9 +2,9 @@
 """The step law on a fake instance: steps cost the test law's prices, back to back on one
 virtual clock, each output handed back when ATOM's deferred output makes it due."""
 
+import http.client
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor
 from itertools import pairwise
 from pathlib import Path
 
@@ -137,21 +137,26 @@ def on_rank_0(prompt: list[int], max_tokens: int) -> dict:
 
 
 def test_a_dp2_ranks_dummies_cost_the_row_they_run_at_the_groups_phase_and_rung(dp2):
-    with ThreadPoolExecutor(1) as pool:
-        # One request decodes alone on rank 0, then beside a second one.
-        body = on_rank_0([1, *range(8, 47)], 400)
-        first = pool.submit(dp2.post, "/v1/completions", body)
+    # One request decodes alone on rank 0, then beside a second one. It ends when the test
+    # hangs up, after the second's reply, unless its 60,000 tokens (~17,000 steps) run out.
+    first = http.client.HTTPConnection("127.0.0.1", dp2.port)
+    try:
+        body = json.dumps(on_rank_0([1, *range(8, 47)], 60_000))
+        headers = {"Content-Type": "application/json"}
+        first.request("POST", "/v1/completions", body, headers)
+        deadline = time.monotonic() + WAIT_S
         while not any(
             f.dp_rank == 1 and f.requests[0][3]
             for f in EngineRecord(dp2.record).forwards
         ):
-            assert not first.done(), first.result()
+            assert time.monotonic() < deadline, "rank 0 never decoded the first request"
             time.sleep(0.01)
-        second = dp2.post("/v1/completions", on_rank_0([1, *range(50, 89)], 20))
-        for status, reply in (second, first.result()):
-            assert status == 200, reply
+        status, reply = dp2.post("/v1/completions", on_rank_0([1, *range(50, 89)], 20))
+        assert status == 200, reply
+        forwards = EngineRecord(dp2.record).forwards
+    finally:
+        first.close()  # the server aborts the first request
 
-    forwards = EngineRecord(dp2.record).forwards
     busy, idle = ([f for f in forwards if f.dp_rank == rank] for rank in (0, 1))
     for step, dummy in zip(busy, idle):  # each group step is one forward a rank
         assert dummy.requests[0][0] is None and dummy.samples
