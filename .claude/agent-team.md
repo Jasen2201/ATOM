@@ -3,6 +3,7 @@ repo: Jasen2201/ATOM
 integration_branch: jasen/atom-grpc
 never_touch: ROCm/ATOM
 gate_task: bash .claude/agent-team/gate.sh
+gate_targeted: bash .claude/agent-team/gate_targeted.sh
 gate_post_land: bash .claude/agent-team/post_land.sh
 design_entry: docs/architecture_guide.md
 new_tests_dir: tests
@@ -42,6 +43,9 @@ and its sub-issues; agents do not write there.
   live in g48's `/tmp/yajizhan-gate-rust`; remove a tree's `target-<tree name>`
   and `target-<tree name>-post` there with the tree. `ATOM_GATE_LOCAL=1` runs
   them on the dev host.
+- `gate_targeted` runs as `gate_task` does, on pit2-p03-g48 unless
+  `ATOM_GATE_LOCAL=1`, and in the same cargo target: `gate.sh`'s lint, then
+  only those of `gate.sh`'s tests the change reaches (`select_tests.py`).
 - Python tests: `/share_nfs/yajizhan/venv-cpu-test/bin/python -m pytest`
   (CPU torch, grpcio 1.78.0, protobuf 6.33, matching the ATOM image's
   `protobuf<7`). Set `TMPDIR` under `/dev/shm`: `/share_nfs` rejects `:` in
