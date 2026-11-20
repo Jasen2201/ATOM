@@ -17,7 +17,7 @@ from pathlib import Path
 import psutil
 
 from tests.atom_grpc.fake.record import RECORD
-from tests.atom_grpc.fake.serve import CONFIG_ENV, CORES_ENV, RECORD_ENV
+from tests.atom_grpc.fake.serve import CONFIG_ENV, CORES_ENV, LINKS_ENV, RECORD_ENV
 
 ROOT = Path(__file__).resolve().parents[3]
 STAND_INS = Path(__file__).resolve().parent / "stand_ins"
@@ -56,7 +56,7 @@ class Http:
 
 class FakeInstance(Http):
     """`start`, `wait_ready`, then requests; `stop` kills whatever its group left.
-    `cores` pins its processes (`serve.pin`); with `record` they write `self.record`."""
+    `cores` pins it, `record` fills `self.record`, `fake["env"]` adds to its env."""
 
     def __init__(
         self,
@@ -70,6 +70,8 @@ class FakeInstance(Http):
         self.workdir = workdir
         self.port = free_port()
         self.url = f"http://127.0.0.1:{self.port}"
+        fake = dict(fake)
+        env = fake.pop("env", {})
         (workdir / "fake.json").write_text(json.dumps(fake))
         self.cmd = [sys.executable, "-m", "tests.atom_grpc.fake.serve"]
         self.cmd += ["--model", str(model), "--server-port", str(self.port)]
@@ -78,9 +80,11 @@ class FakeInstance(Http):
         path = [str(STAND_INS), str(ROOT), os.environ.get("PYTHONPATH", "")]
         self.env = {
             **os.environ,
+            **env,
             "PYTHONPATH": os.pathsep.join(filter(None, path)),
             CONFIG_ENV: str(workdir / "fake.json"),
             "TMPDIR": str(workdir),  # ZMQ ipc paths: short, and gone with the dir
+            LINKS_ENV: str(workdir.parent),  # shared by P/D peers' workdirs
         }
         if cores is not None:
             self.env[CORES_ENV] = json.dumps(cores)

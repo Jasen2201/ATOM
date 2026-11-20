@@ -11,6 +11,21 @@ RUNNER = "tests.atom_grpc.fake.runner.FakeRunner"
 CONFIG_ENV = "FAKE_ENGINE_CONFIG"  # the fake config file `FakeRunner` reads
 CORES_ENV = "FAKE_ENGINE_CORES"  # JSON: {"front_end": [cpus], "ranks": [[cpus]]}
 RECORD_ENV = "FAKE_ENGINE_RECORD"  # the engine record file, if any
+LINKS_ENV = "FAKE_ENGINE_LINKS"  # the directory where fake Mooncake ranks meet
+TRANSFER = "tests.atom_grpc.fake.transfer"
+
+
+def register_mooncake() -> None:
+    """Build `mooncake` connectors from `TRANSFER` in this process."""
+    from atom.kv_transfer.disaggregation.factory import KVConnectorFactory
+
+    KVConnectorFactory.register(
+        "mooncake",
+        worker_module=TRANSFER,
+        worker_class="FakeMooncakeWorker",
+        scheduler_module=TRANSFER,
+        scheduler_class="FakeMooncakeScheduler",
+    )
 
 
 def pin(api_server: bool) -> None:
@@ -30,6 +45,9 @@ def pin(api_server: bool) -> None:
 
 if __name__ in ("__main__", "__mp_main__"):
     pin(api_server=__name__ == "__main__")
+
+if __name__ == "__mp_main__":  # EngineCores and runners build the connectors
+    register_mooncake()
 
 if __name__ == "__main__":
     from atom.metrics.prometheus import initialize_metrics
