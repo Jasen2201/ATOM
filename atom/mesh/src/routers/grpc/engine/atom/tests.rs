@@ -693,13 +693,12 @@ mod pairs {
 
     #[tokio::test]
     async fn in_chunked_a_prefill_failure_cancels_decode_and_a_decode_refusal_cancels_prefill() {
-        for prefill_fails in [true, false] {
-            // When P fails, D has already sent its first token.
-            let d_script = if prefill_fails {
-                vec![chunk(&[21])]
-            } else {
-                Vec::new()
-            };
+        // P fails after D's first token, then while D still waits; then D refuses.
+        for (prefill_fails, d_script) in [
+            (true, vec![chunk(&[21])]),
+            (true, Vec::new()),
+            (false, Vec::new()),
+        ] {
             let (p, p_url) = instance(vec![vec![]], true, prefill_info(2, Some(template()))).await;
             let (d, d_url) = instance(vec![d_script], true, None).await;
             let (pw, dw) = (worker(&p_url, PREFILL), worker(&d_url, WorkerType::Decode));
