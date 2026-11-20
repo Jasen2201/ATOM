@@ -10,6 +10,7 @@ import re
 RUNNER = "tests.atom_grpc.fake.runner.FakeRunner"
 CONFIG_ENV = "FAKE_ENGINE_CONFIG"  # the fake config file `FakeRunner` reads
 CORES_ENV = "FAKE_ENGINE_CORES"  # JSON: {"front_end": [cpus], "ranks": [[cpus]]}
+RECORD_ENV = "FAKE_ENGINE_RECORD"  # the engine record file, if any
 
 
 def pin(api_server: bool) -> None:
@@ -38,11 +39,13 @@ if __name__ == "__main__":
     from atom.entrypoints.openai.api_server import main
     from atom.model_engine.arg_utils import EngineArgs
     from atom.utils import set_ulimit
+    from tests.atom_grpc.fake.record import record_api_process
 
     engine_kwargs = EngineArgs._get_engine_kwargs
     EngineArgs._get_engine_kwargs = lambda self: {
         **engine_kwargs(self),
         "runner_qualname": RUNNER,
     }
+    record_api_process()
     set_ulimit()
     main()
