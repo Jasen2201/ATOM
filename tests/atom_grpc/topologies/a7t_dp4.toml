@@ -1,0 +1,19 @@
+# a7t_dp1.toml at DP4 (TP4, DP attention): each rank on a core of its own, with KV room for a quarter
+# of the 1024 requests; atomesh over the instance's one Session.
+
+[[instance]]
+name = "dp4"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "4", "--enable-dp-attention", "--method", "mtp", "--num-speculative-tokens", "3",
+    "--max-num-seqs", "1024",
+]
+fake = { acceptance_length = 3.51, step_s = 0.0165, num_kvcache_blocks = 100_000 }
+dp = 4
+cores = { front_end = 1, rank = 1 }
+grpc = true
+
+[[router]]
+name = "mesh"
+workers = ["dp4"]
+args = ["--atom-grpc-session", "--json-log", "--prepare-queue-capacity", "1024"]

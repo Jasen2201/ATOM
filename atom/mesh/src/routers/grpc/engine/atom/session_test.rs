@@ -2,7 +2,7 @@
 //! answers: per-seq_id splitting, Abort on drop, failure and reopening, Ready's version.
 
 use std::future::Future;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use prost::Message as _;
 use tokio::time::timeout;
@@ -558,6 +558,52 @@ fn seq_ids_stay_below_2_24_and_skip_those_open_requests_hold() {
     // The second search passes the held 2^24 - 1 and 0, wrapping below 2^24.
     let ids = [routes.free_seq_id(), routes.free_seq_id()];
     assert_eq!(ids, [Some(SEQ_IDS - 2), Some(1)]);
+}
+
+/// One step's StreamBatch for 1024 streaming requests, 3 or 4 ids each (3.51 on average),
+/// decoded and split to them 1000 times; prints the p50 and p99 for the timing case.
+#[test]
+#[ignore = "a benchmark: tests/atom_grpc/timing/run.sh a7t runs it on the timing host"]
+fn split_one_step_of_1024_requests() {
+    const REQUESTS: u64 = 1024;
+    const RUNS: usize = 1000;
+    let routes = Mutex::new(Routes::default());
+    let mut outputs = Vec::new();
+    for seq_id in 0..REQUESTS {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let route = Route {
+            tx,
+            stream: true,
+            prompt_tokens: 1024,
+            completion_tokens: 0,
+            cached_tokens: 0,
+        };
+        routes.lock().open.insert(seq_id, route);
+        outputs.push(rx);
+    }
+    let entries: Vec<_> = (0..REQUESTS)
+        .map(|seq_id| (seq_id, vec![7; 3 + usize::from(seq_id % 100 < 51)], 0))
+        .collect();
+    let message = step(&entries).unwrap().frames;
+    let mut took = Vec::with_capacity(RUNS);
+    for _ in 0..RUNS {
+        let frames = message.clone();
+        let start = Instant::now();
+        let inbound = Inbound::decode(frames).unwrap();
+        routes.lock().route(&inbound).unwrap();
+        took.push(start.elapsed());
+        for rx in &mut outputs {
+            let chunk = rx.try_recv().unwrap().unwrap().response;
+            assert!(matches!(chunk, Some(Response::Chunk(c)) if c.token_ids.len() >= 3));
+        }
+    }
+    took.sort();
+    let rank = |percent: usize| took[RUNS * percent / 100 - 1].as_nanos();
+    println!(
+        "split of one {REQUESTS}-request StreamBatch, {RUNS} runs: p50_ns={} p99_ns={}",
+        rank(50),
+        rank(99)
+    );
 }
 
 /// Requests through the gRPC routers built from a config with `atom_grpc_session`:
