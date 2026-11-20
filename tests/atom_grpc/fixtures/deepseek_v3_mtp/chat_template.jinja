@@ -1,0 +1,1 @@
+{{ bos_token }}{% for message in messages %}{% if message['role'] == 'user' %}<|user|>{{ message['content'] }}{% elif message['role'] == 'assistant' %}<|assistant|>{{ message['content'] }}{{ eos_token }}{% else %}{{ message['content'] }}{% endif %}{% endfor %}{% if add_generation_prompt %}<|assistant|>{% endif %}
