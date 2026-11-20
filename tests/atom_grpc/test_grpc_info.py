@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""A1.7 and A1.8: over a real channel, a fake instance's info RPCs answer as its HTTP
-routes do, and an instance started without --grpc-port has no gRPC listener."""
+"""Over a real channel, a fake instance's info RPCs answer as its HTTP routes do, and
+an instance started without --grpc-port has no gRPC listener."""
 
 import asyncio
 import contextlib
@@ -154,7 +154,8 @@ def test_health_check_is_not_serving_exactly_when_health_answers_503(
 
 
 def test_a_taken_grpc_port_fails_the_start_with_its_bind_error():
-    with socket.socket() as taken:
+    with socket.socket() as taken:  # held as a gRPC server holds it, port shareable
+        taken.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         taken.bind(("127.0.0.1", 0))
         taken.listen()
         port = taken.getsockname()[1]
