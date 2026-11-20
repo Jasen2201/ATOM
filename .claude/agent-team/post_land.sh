@@ -2,6 +2,7 @@
 # agent-team gate_post_land for jasen/atom-grpc: CI's CPU test scope and every mesh test target (ext-proc ones checked only, as CI does).
 # Red is judged against the tip before the run's first landing; only new failures count.
 set -uo pipefail
+[ "${ATOM_GATE_LOCAL:-}" = 1 ] || exec bash "$(dirname "$0")/g48/run.sh" "$0"  # on pit2-p03-g48 unless ATOM_GATE_LOCAL=1
 
 PY=/share_nfs/yajizhan/venv-cpu-test/bin/python
 RUST_ENV=/dev/shm/yajizhan-rust/env.sh
