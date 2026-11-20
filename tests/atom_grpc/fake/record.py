@@ -118,8 +118,8 @@ class Recorder:
 
 
 def record_api_process() -> None:
-    """When `RECORD_ENV` is set, record what this API process admits to its engine and
-    every tokenizer call it makes."""
+    """When `RECORD_ENV` is set, record what this API process admits to its engine, each
+    abort it asks of the engine and every tokenizer call it makes."""
     recorder = Recorder.from_env()
     if recorder is None:
         return
@@ -127,6 +127,7 @@ def record_api_process() -> None:
     from atom.model_engine.engine_core_mgr import CoreManager
 
     add_request, load_tokenizer = CoreManager.add_request, api_server.load_tokenizer
+    abort_request = CoreManager.abort_request
 
     def recorded_add_request(manager, seqs):
         now = time.time()
@@ -134,10 +135,17 @@ def record_api_process() -> None:
         add_request(manager, seqs)
         recorder.write(lines)
 
+    def recorded_abort_request(manager, seq_id):
+        recorder.write(
+            _lines([{"kind": "abort", "time": time.time(), "seq_id": seq_id}])
+        )
+        abort_request(manager, seq_id)
+
     def recorded_tokenizer(*args, **kwargs):
         return recorder.watch(load_tokenizer(*args, **kwargs))
 
     CoreManager.add_request = recorded_add_request
+    CoreManager.abort_request = recorded_abort_request
     api_server.load_tokenizer = recorded_tokenizer
 
 
@@ -175,6 +183,9 @@ class Request:
     data_parallel_rank: int | None
     steps: list[Step] = field(default_factory=list)
     receive: dict | None = None  # its KV receive's report, on a P/D decode instance
+    aborted: float | None = (
+        None  # when the API process first asked the engine to abort it
+    )
 
     @property
     def output_ids(self) -> list[int]:
@@ -190,7 +201,7 @@ class EngineRecord:
         text = path.read_text()
         whole = text[: text.rfind("\n") + 1]  # a process may be mid-write
         events = [json.loads(line) for line in whole.splitlines()]
-        steps, receives = defaultdict(list), {}
+        steps, receives, aborts = defaultdict(list), {}, {}
         self.forwards: list[Forward] = []
         for event in events:
             if event["kind"] == "step":
@@ -199,6 +210,8 @@ class EngineRecord:
                     steps[seq_id].append(Step(event["time"], event["dp_rank"], ids))
             elif event["kind"] == "receive":
                 receives[event["seq_id"]] = event
+            elif event["kind"] == "abort":
+                aborts.setdefault(event["seq_id"], event["time"])
         self.requests: dict[int, Request] = {}
         self.tokenizer: list[dict] = []
         for event in events:
@@ -208,6 +221,7 @@ class EngineRecord:
                     **fields,
                     steps=steps[event["seq_id"]],
                     receive=receives.get(event["seq_id"]),
+                    aborted=aborts.get(event["seq_id"]),
                 )
             elif event["kind"] in ("encode", "decode"):
                 self.tokenizer.append(event)
