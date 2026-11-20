@@ -83,8 +83,8 @@ fn stop_token_sequences(
     Ok(sequences)
 }
 
-/// `value` widened through its shortest decimal: the f64 ATOM's HTTP routes
-/// parse from the JSON number atomesh read as `value`.
+/// `value` widened through its shortest decimal: a JSON number of up to 6 significant digits,
+/// in f32's normal range, arrives as the f64 ATOM's HTTP routes parse from it.
 fn json_f64(value: f32) -> f64 {
     value.to_string().parse().unwrap_or(value.into())
 }
