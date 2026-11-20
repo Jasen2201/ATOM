@@ -1,0 +1,53 @@
+#!/bin/bash
+# `bash tests/atom_grpc/timing/run.sh <case>` on pit2-p03-g48: one timing case in one container of the ATOM image,
+# this tree mounted read-only, no GPU device, on a core set of its own. Exit 0 passes, 1 fails, 2 refuses to run.
+set -euo pipefail
+CASE=${1:-}
+case $CASE in
+    a2t) CPUS=${ATOM_TIMING_CPUS:-112-115} ;;  # a front end, a rank, atomesh and the client
+    *) echo "usage: run.sh a2t" >&2; exit 2 ;;
+esac
+TREE=$(cd "$(dirname "$0")/../../.." && pwd)
+NAME=$(basename "$TREE")
+WHO=$(id -un | cut -d@ -f1)
+IMAGE=${ATOM_TIMING_IMAGE:-rocm/atom-dev:latest}
+CACHE=${ATOM_TIMING_CACHE:-/share_nfs/$WHO/atom-grpc-timing}
+COMPASS_SHA=600fde979768a9039c8fcece2e28c18152b33585  # jgong5/ATOM: Compass's evaluator and laws
+COMPASS=$CACHE/compass-$COMPASS_SHA
+ID=$(docker image inspect -f '{{.Id}}' "$IMAGE") || { echo "run.sh: no image $IMAGE here" >&2; exit 2; }
+
+# Compass's evaluator and its laws, checked out once into the cache.
+if [ ! -d "$COMPASS" ]; then
+    mkdir -p "$CACHE"
+    tmp=$(mktemp -d "$CACHE/.compass.XXXXXX")
+    trap 'rm -rf "$tmp"' EXIT
+    git -C "$tmp" init -q
+    git -C "$tmp" remote add origin https://github.com/jgong5/ATOM.git
+    git -C "$tmp" sparse-checkout set --cone atom/compass atom/plugin scripts/compass/laws
+    git -C "$tmp" fetch -q --depth 1 --filter=blob:none origin "$COMPASS_SHA"
+    git -C "$tmp" -c advice.detachedHead=false checkout -q FETCH_HEAD
+    mv -T "$tmp" "$COMPASS" 2>/dev/null || [ -d "$COMPASS" ]  # or a concurrent run's fetch landed first
+fi
+
+# atomesh as the gate builds it on this host: the gate's image and Rust toolchain, and this tree's cargo target.
+GATE=$TREE/.claude/agent-team/g48
+BUILD=atom-gate:$(sha256sum <"$GATE/Dockerfile" | cut -c1-12)
+VOL=yajizhan-gate-rust
+RUST=/dev/shm/yajizhan-rust
+docker image inspect "$BUILD" >/dev/null 2>&1 || docker build -q -t "$BUILD" - <"$GATE/Dockerfile" >/dev/null
+docker run --rm -v "$VOL:/r" "$BUILD" chown "$(id -u):$(id -g)" /r
+built=$(docker run --rm --init --name "$WHO-timing-build-$NAME-$(date +%s%N)" --cpus 16 \
+    --tmpfs /dev/shm:rw,exec,size=32g,mode=1777 --user "$(id -u):$(id -g)" -e HOME=/dev/shm/home \
+    -v /share_nfs:/share_nfs -v "$VOL:$RUST" -w "$TREE/atom/mesh" "$BUILD" bash -c 'mkdir -p "$HOME" && bash "$1" &&
+        . "$2/env.sh" && CARGO_TARGET_DIR=$3 cargo build --profile ci --bin atomesh -q -j 16' \
+    build "$GATE/rust.sh" "$RUST" "$RUST/target-$NAME" 2>&1) || { echo "$built" >&2; exit 2; }
+
+COMMIT=$(git -C "$TREE" rev-parse HEAD)
+[ -z "$(git -C "$TREE" --no-optional-locks status --porcelain)" ] || COMMIT+=" with uncommitted changes"
+exec docker run --rm --init --name "$WHO-timing-$CASE-$NAME-$(date +%s%N)" --hostname "$(hostname -s)" \
+    --cpuset-cpus "$CPUS" --tmpfs /dev/shm:rw,exec,size=16g,mode=1777 --ulimit nofile=1048576 \
+    --user "$(id -u):$(id -g)" -e HOME=/dev/shm/home -e "USER=$(id -un)" -e "LOGNAME=$(id -un)" -e TMPDIR=/dev/shm \
+    -e PYTHONPATH="$TREE" -e ATOMESH_BIN="$RUST/target-$NAME/ci/atomesh" \
+    -e ATOM_TIMING_IMAGE="$IMAGE $ID" -e ATOM_TIMING_COMMIT="$COMMIT" \
+    -v /share_nfs:/share_nfs:ro -v "$VOL:$RUST:ro" -w "$TREE" "$IMAGE" \
+    bash -c 'mkdir -p "$HOME" && exec python3 -m "tests.atom_grpc.timing.$1" --compass "$2"' timing "$CASE" "$COMPASS"
