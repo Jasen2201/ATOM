@@ -16,7 +16,8 @@ from pathlib import Path
 
 import psutil
 
-from tests.atom_grpc.fake.serve import CONFIG_ENV, CORES_ENV
+from tests.atom_grpc.fake.record import RECORD
+from tests.atom_grpc.fake.serve import CONFIG_ENV, CORES_ENV, RECORD_ENV
 
 ROOT = Path(__file__).resolve().parents[3]
 STAND_INS = Path(__file__).resolve().parent / "stand_ins"
@@ -55,7 +56,7 @@ class Http:
 
 class FakeInstance(Http):
     """`start`, `wait_ready`, then requests; `stop` kills whatever its group left.
-    `cores` pins its processes as `serve.pin` reads them; None leaves them unpinned."""
+    `cores` pins its processes (`serve.pin`); with `record` they write `self.record`."""
 
     def __init__(
         self,
@@ -64,6 +65,7 @@ class FakeInstance(Http):
         args: list[str],
         fake: dict,
         cores: dict | None = None,
+        record: bool = True,
     ):
         self.workdir = workdir
         self.port = free_port()
@@ -82,9 +84,14 @@ class FakeInstance(Http):
         }
         if cores is not None:
             self.env[CORES_ENV] = json.dumps(cores)
+        self.record = workdir / RECORD if record else None
+        if self.record is not None:
+            self.env[RECORD_ENV] = str(self.record)
         self.proc: subprocess.Popen | None = None
 
     def start(self) -> None:
+        if self.record is not None:
+            self.record.write_bytes(b"")  # one record per run, as one log
         with open(self.workdir / "server.log", "w") as log:
             self.proc = subprocess.Popen(
                 self.cmd,
