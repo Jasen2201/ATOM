@@ -7,6 +7,7 @@ import queue
 import threading
 from contextlib import nullcontext
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -36,22 +37,8 @@ def idle(monkeypatch):
         pending.clear()
         return True
 
-    engine.scheduler = SimpleNamespace(
-        extend=pending.extend,
-        is_finished=lambda: not pending,
-        heartbeat_throughput=lambda now: None,
-        engine_stats=SimpleNamespace(
-            note_idle=lambda now: None,
-            note_busy=lambda now: None,
-            bump_step=lambda: None,
-        ),
-        publish_kv_events=lambda: None,
-        shutdown_kv_events=lambda: None,
-        close_kv_connector=lambda: None,
-    )
-    engine.utility_handler = SimpleNamespace(
-        process_queue=lambda *args: None, push_metrics=lambda: None
-    )
+    engine.scheduler = Mock(extend=pending.extend, is_finished=lambda: not pending)
+    engine.utility_handler = Mock()
     engine.label = "test"
     engine.kv_transfer_enabled = False
     engine._ingested_seqs = 0
