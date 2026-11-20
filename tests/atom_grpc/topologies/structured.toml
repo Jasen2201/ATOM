@@ -1,0 +1,24 @@
+# One fake instance per tool-call format: Kimi-K3's, which holds tool_choice required to
+# its tools channel, and DeepSeek-V4.1's DSML, behind a template whose prompt opens reasoning.
+
+[[instance]]
+name = "k3"
+model = "../fixtures/deepseek_v3_mtp"
+args = ["--tool-call-parser", "kimi_k3"]
+fake = {}
+grpc = true
+
+[[instance]]
+name = "v41"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "--tool-call-parser", "dsml_v41",
+    # the fixture's template, its generation prompt opening a reasoning channel
+    "--chat-template", """\
+{{ bos_token }}{% for message in messages %}{% if message['role'] == 'user' %}\
+<|user|>{{ message['content'] }}{% elif message['role'] == 'assistant' %}\
+<|assistant|>{{ message['content'] }}{{ eos_token }}{% else %}{{ message['content'] }}\
+{% endif %}{% endfor %}{% if add_generation_prompt %}<|assistant|><think>{% endif %}""",
+]
+fake = {}
+grpc = true

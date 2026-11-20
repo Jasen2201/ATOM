@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """`python -m tests.atom_grpc.harness.launch <topology.toml>`: start the fake instances
-it lists, wait for every /health, and on exit kill every process group it started."""
+and atomesh routers it lists, wait until all serve; on exit, kill each group started."""
 
 import argparse
 import contextlib
@@ -16,6 +16,7 @@ from pathlib import Path
 import tomllib
 
 from tests.atom_grpc.fake.instance import FakeInstance, free_port
+from tests.atom_grpc.harness.atomesh import Atomesh, RouterSpec, atomesh_bin
 
 STARTUP_S = 1500  # a loaded dev host takes minutes per instance
 REAP_S = 30  # for a killed group's last members to be reaped
@@ -42,13 +43,29 @@ class InstanceSpec:
     grpc: bool = False  # also serve gRPC, on a free port given as --grpc-port
 
 
-def load(path: Path) -> list[InstanceSpec]:
+def load(path: Path) -> tuple[list[InstanceSpec], list[RouterSpec]]:
+    """A topology file's instances, then its routers, each naming instances it lists
+    and, routing over gRPC, only instances serving it."""
     with open(path, "rb") as f:
-        specs = [InstanceSpec(**table) for table in tomllib.load(f)["instance"]]
+        tables = tomllib.load(f)
+    specs = [InstanceSpec(**table) for table in tables["instance"]]
+    routers = [RouterSpec(**table) for table in tables.get("router", [])]
     names = [spec.name for spec in specs]
     if len(set(names)) < len(names):  # each names a scratch dir and a process group
         raise ValueError(f"{path}: instance names repeat in {names}")
-    return specs
+    names += [router.name for router in routers]
+    if len(set(names)) < len(names):
+        raise ValueError(f"{path}: a router repeats a name in {names}")
+    serves_grpc = {spec.name: spec.grpc for spec in specs}
+    for router in routers:
+        for name in router.instances():
+            if name not in serves_grpc:
+                raise ValueError(
+                    f"{path}: router {router.name} names no instance {name}"
+                )
+            if router.grpc and not serves_grpc[name]:
+                raise ValueError(f"{path}: router {router.name} needs gRPC of {name}")
+    return specs, routers
 
 
 def core_sets(specs: list[InstanceSpec], cpus: list[int]) -> dict[str, dict | None]:
@@ -73,9 +90,14 @@ def core_sets(specs: list[InstanceSpec], cpus: list[int]) -> dict[str, dict | No
 
 
 def write_manifest(
-    scratch: Path, instances: dict, cores: dict, grpc_ports: dict, ready: bool
+    scratch: Path,
+    instances: dict,
+    cores: dict,
+    grpc_ports: dict,
+    routers: dict,
+    ready: bool,
 ) -> None:
-    manifest = {"ready": ready, "instances": {}}
+    manifest = {"ready": ready, "instances": {}, "routers": {}}
     for name, instance in instances.items():
         port = grpc_ports.get(name)
         manifest["instances"][name] = {
@@ -85,13 +107,26 @@ def write_manifest(
             "cores": cores[name],
             "grpc": None if port is None else f"127.0.0.1:{port}",
         }
+    for name, router in routers.items():
+        manifest["routers"][name] = {
+            "url": router.url,
+            "pid": router.proc.pid,  # its process group too
+            "workers": router.workers,
+        }
     (scratch / f"{MANIFEST}.tmp").write_text(json.dumps(manifest, indent=1))
     os.replace(scratch / f"{MANIFEST}.tmp", scratch / MANIFEST)
 
 
-def run(path: Path, scratch: Path, instances: dict[str, FakeInstance]) -> None:
-    """Start every instance into `instances`, wait until each is ready, then until a stop."""
-    specs = load(path)
+def run(
+    path: Path,
+    scratch: Path,
+    instances: dict[str, FakeInstance],
+    routers: dict[str, Atomesh],
+) -> None:
+    """Start every instance, then every router, into the two dicts; wait until each is
+    ready, then until a stop."""
+    specs, router_specs = load(path)
+    binary = atomesh_bin() if router_specs else ""
     cores = core_sets(specs, sorted(os.sched_getaffinity(0)))
     grpc_ports = {spec.name: free_port() for spec in specs if spec.grpc}
     for spec in specs:
@@ -104,11 +139,23 @@ def run(path: Path, scratch: Path, instances: dict[str, FakeInstance]) -> None:
         instance = FakeInstance(workdir, model, args, spec.fake, cores[spec.name])
         instances[spec.name] = instance
         instance.start()
-    write_manifest(scratch, instances, cores, grpc_ports, ready=False)
+    write_manifest(scratch, instances, cores, grpc_ports, routers, ready=False)
     deadline = time.monotonic() + STARTUP_S
     for instance in instances.values():
         instance.wait_ready(deadline)
-    write_manifest(scratch, instances, cores, grpc_ports, ready=True)
+    ranks = {spec.name: spec.dp for spec in specs}
+    http_urls = {name: instance.url for name, instance in instances.items()}
+    grpc_urls = {name: f"grpc://127.0.0.1:{port}" for name, port in grpc_ports.items()}
+    for spec in router_specs:
+        workdir = scratch / spec.name
+        workdir.mkdir(parents=True, exist_ok=True)
+        urls = grpc_urls if spec.grpc else http_urls
+        routers[spec.name] = Atomesh(workdir, spec, urls, ranks, binary)
+        routers[spec.name].start()
+    write_manifest(scratch, instances, cores, grpc_ports, routers, ready=False)
+    for router in routers.values():
+        router.wait_ready(deadline)
+    write_manifest(scratch, instances, cores, grpc_ports, routers, ready=True)
     print(f"ready: {scratch / MANIFEST}", flush=True)
     while True:
         signal.pause()
@@ -120,11 +167,13 @@ def _stop(signum, frame):
     raise Stop(signal.Signals(signum).name)
 
 
-def stop(instances: dict[str, FakeInstance]) -> None:
-    """Stop every instance; reap their orphans until their groups hold no process."""
-    for instance in instances.values():
-        instance.stop()  # SIGINT, then SIGKILL to its whole process group
-    groups = [instance.proc.pid for instance in instances.values()]
+def stop(instances: dict[str, FakeInstance], routers: dict[str, Atomesh]) -> None:
+    """Stop every router, then every instance; reap their orphans until their groups
+    hold no process."""
+    started = [*routers.values(), *instances.values()]
+    for process in started:
+        process.stop()  # SIGINT, then SIGKILL to its whole process group
+    groups = [process.proc.pid for process in started if process.proc is not None]
     deadline = time.monotonic() + REAP_S
     while groups and time.monotonic() < deadline:
         time.sleep(0.1)
@@ -158,14 +207,15 @@ def main() -> None:
     libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM)  # stop with the parent
     libc.prctl(PR_SET_CHILD_SUBREAPER, 1)  # adopt the instances' orphans, to reap them
     instances: dict[str, FakeInstance] = {}
+    routers: dict[str, Atomesh] = {}
     try:
-        run(args.topology.resolve(), scratch, instances)
+        run(args.topology.resolve(), scratch, instances, routers)
     except Stop:
         pass
     finally:  # a failed launch exits 1 with its traceback, once this has run
         for sig in SIGNALS:
             signal.signal(sig, signal.SIG_IGN)
-        stop(instances)
+        stop(instances, routers)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,17 @@
+# Two D instances that refuse a chunked receive: PP 2, with none of speculative decoding,
+# DP attention or a consumer connector, which ATOM refuses under PP; and DCP 2 on a model
+# that keeps per-request state.
+
+[[instance]]
+name = "pp2"
+model = "../fixtures/deepseek_v3_mtp"
+args = ["-pp", "2"]
+fake = {}
+grpc = true
+
+[[instance]]
+name = "dcp2"
+model = "../fixtures/qwen3_next"
+args = ["-tp", "2", "-dcp", "2"]
+fake = {}
+grpc = true
