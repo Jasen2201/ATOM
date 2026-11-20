@@ -30,6 +30,7 @@ class Instance(Http):
     pid: int
     workdir: Path
     cores: dict | None
+    grpc: str | None  # host:port of its gRPC server; None when it serves none
 
 
 def group_members(group: int) -> list[int]:

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import tomllib
 
-from tests.atom_grpc.fake.instance import FakeInstance
+from tests.atom_grpc.fake.instance import FakeInstance, free_port
 
 STARTUP_S = 1500  # a loaded dev host takes minutes per instance
 REAP_S = 30  # for a killed group's last members to be reaped
@@ -39,6 +39,7 @@ class InstanceSpec:
     fake: dict
     dp: int = 1  # its DP ranks, each pinned to a core set of its own
     cores: dict | None = None  # {front_end = n, rank = n}: CPUs in each pinned set
+    grpc: bool = False  # also serve gRPC, on a free port given as --grpc-port
 
 
 def load(path: Path) -> list[InstanceSpec]:
@@ -71,14 +72,18 @@ def core_sets(specs: list[InstanceSpec], cpus: list[int]) -> dict[str, dict | No
     return sets
 
 
-def write_manifest(scratch: Path, instances: dict, cores: dict, ready: bool) -> None:
+def write_manifest(
+    scratch: Path, instances: dict, cores: dict, grpc_ports: dict, ready: bool
+) -> None:
     manifest = {"ready": ready, "instances": {}}
     for name, instance in instances.items():
+        port = grpc_ports.get(name)
         manifest["instances"][name] = {
             "url": instance.url,
             "pid": instance.proc.pid,  # its process group too
             "workdir": str(instance.workdir),
             "cores": cores[name],
+            "grpc": None if port is None else f"127.0.0.1:{port}",
         }
     (scratch / f"{MANIFEST}.tmp").write_text(json.dumps(manifest, indent=1))
     os.replace(scratch / f"{MANIFEST}.tmp", scratch / MANIFEST)
@@ -88,18 +93,22 @@ def run(path: Path, scratch: Path, instances: dict[str, FakeInstance]) -> None:
     """Start every instance into `instances`, wait until each is ready, then until a stop."""
     specs = load(path)
     cores = core_sets(specs, sorted(os.sched_getaffinity(0)))
+    grpc_ports = {spec.name: free_port() for spec in specs if spec.grpc}
     for spec in specs:
         workdir = scratch / spec.name
         workdir.mkdir(parents=True, exist_ok=True)
         model = (path.parent / spec.model).resolve()
-        instance = FakeInstance(workdir, model, spec.args, spec.fake, cores[spec.name])
+        args = spec.args
+        if spec.grpc:
+            args = [*args, "--grpc-port", str(grpc_ports[spec.name])]
+        instance = FakeInstance(workdir, model, args, spec.fake, cores[spec.name])
         instances[spec.name] = instance
         instance.start()
-    write_manifest(scratch, instances, cores, ready=False)
+    write_manifest(scratch, instances, cores, grpc_ports, ready=False)
     deadline = time.monotonic() + STARTUP_S
     for instance in instances.values():
         instance.wait_ready(deadline)
-    write_manifest(scratch, instances, cores, ready=True)
+    write_manifest(scratch, instances, cores, grpc_ports, ready=True)
     print(f"ready: {scratch / MANIFEST}", flush=True)
     while True:
         signal.pause()
