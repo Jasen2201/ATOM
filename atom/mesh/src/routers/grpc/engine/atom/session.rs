@@ -130,6 +130,7 @@ impl Session {
             prompt_tokens: prompt.len() as u32,
             completion_tokens: 0,
             cached_tokens: 0,
+            ids: Vec::new(),
         };
         if routes.closed || self.commands.send(Command::Submit(spec, prompt)).is_err() {
             return Err(EngineError::Transport(Status::unavailable(
@@ -250,6 +251,8 @@ struct Route {
     completion_tokens: u32,
     /// The last nonzero prefix-cache hit, as ATOM's HTTP routes keep it.
     cached_tokens: u32,
+    /// A request that does not stream: its ids so far, which its Complete carries.
+    ids: Vec<u32>,
 }
 
 impl Route {
@@ -277,20 +280,21 @@ impl Routes {
         match &message.body {
             Body::Stream(batch) => self.step(batch),
             Body::Completions(completions) => {
-                // Every item is read before any request ends.
+                // Every item is read before any request ends. An item carries no ids:
+                // its request's StreamBatch entries did.
                 let mut read = Vec::with_capacity(completions.items.len());
                 for item in &completions.items {
-                    let ids = message.tokens(item.completion_token_ids.as_ref())?;
                     let kv = item.kv_transfer_params_output.as_ref();
-                    read.push((item, ids, kv.map(json).transpose()?));
+                    read.push((item, kv.map(json).transpose()?));
                 }
-                for (item, ids, kv) in read {
-                    let Some(route) = self.open.remove(&item.seq_id) else {
+                for (item, kv) in read {
+                    let Some(mut route) = self.open.remove(&item.seq_id) else {
                         continue;
                     };
+                    let output_ids = std::mem::take(&mut route.ids);
                     route.send(Response::Complete(GenerateComplete {
-                        completion_tokens: ids.len() as u32,
-                        output_ids: if route.stream { Vec::new() } else { ids },
+                        completion_tokens: route.completion_tokens,
+                        output_ids,
                         finish_reason: item.leave_reason.clone(),
                         prompt_tokens: item.num_prompt_tokens,
                         cached_tokens: route.cached_tokens,
@@ -314,7 +318,8 @@ impl Routes {
         }
     }
 
-    /// One engine step's entries: each request's ids, as one chunk when it streams.
+    /// One engine step's entries: each request's ids, as one chunk when it streams,
+    /// else kept for its Complete.
     fn step(&mut self, batch: &pb::StreamBatch) -> Result<(), String> {
         let entries = batch.seq_ids.len();
         let counted: usize = batch.token_counts.iter().map(|&n| n as usize).sum();
@@ -324,10 +329,11 @@ impl Routes {
         {
             return Err("StreamBatch columns disagree in length".into());
         }
-        let mut tokens = batch.tokens.iter().map(|&id| id as u32);
+        let mut start = 0;
         let columns = batch.token_counts.iter().zip(&batch.num_cached_tokens);
         for (seq_id, (&count, &cached)) in batch.seq_ids.iter().zip(columns) {
-            let token_ids: Vec<u32> = tokens.by_ref().take(count as usize).collect();
+            let tokens = &batch.tokens[start..start + count as usize];
+            start += count as usize;
             let Some(route) = self.open.get_mut(seq_id) else {
                 continue;
             };
@@ -335,13 +341,16 @@ impl Routes {
             if cached > 0 {
                 route.cached_tokens = cached as u32;
             }
+            let token_ids = tokens.iter().map(|&id| id as u32);
             if route.stream {
                 route.send(Response::Chunk(GenerateStreamChunk {
-                    token_ids,
+                    token_ids: token_ids.collect(),
                     prompt_tokens: route.prompt_tokens,
                     completion_tokens: route.completion_tokens,
                     cached_tokens: route.cached_tokens,
                 }));
+            } else {
+                route.ids.extend(token_ids);
             }
         }
         Ok(())

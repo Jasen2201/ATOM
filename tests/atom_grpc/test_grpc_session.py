@@ -111,7 +111,7 @@ def end_by_abort(session: SessionCall, seq_id: int) -> None:
     session.send(frames.encode_abort([seq_id]))
     ended = session.until_ended([seq_id])[seq_id]
     assert ended.leave_reason == "aborted"
-    assert ended.completion_token_ids == streamed(session.batches, seq_id)
+    assert ended.completion_token_ids == []  # its StreamBatch entries carried them
 
 
 @pytest.mark.topology("single")
@@ -142,8 +142,8 @@ def test_a_session_sends_ready_then_one_message_per_engine_step_in_its_window(to
         times.append(ended_at.pop())
     assert times == sorted(set(times))  # and each step's in one message
     for i, n in lengths.items():
-        ids = ended[i].completion_token_ids
-        assert ids == streamed(batches, i) == admitted[i].output_ids[:n]
+        assert streamed(batches, i) == admitted[i].output_ids[:n]
+        assert ended[i].completion_token_ids == []  # the StreamBatches carried them
         assert ended[i].leave_reason == "max_tokens"
         assert ended[i].num_prompt_tokens == len(prompts[i])
 
@@ -173,7 +173,7 @@ def test_two_sessions_get_disjoint_seq_ids_and_dropping_one_ends_only_its_own(to
     assert all(len(r.output_ids) < MAX_TOKENS for r in admitted["dropped"])
     for item in ended.values():
         assert item.leave_reason == "max_tokens"
-        assert len(item.completion_token_ids) == lengths["kept"]
+        assert len(streamed(kept.batches, item.seq_id)) == lengths["kept"]
     assert max(s.time for r in admitted["kept"] for s in r.steps) > dropped_at
 
 
