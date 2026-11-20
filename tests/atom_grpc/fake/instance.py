@@ -5,6 +5,7 @@ in a process group of its own, its fake config in a file, its sockets in `workdi
 import contextlib
 import json
 import os
+import random
 import signal
 import socket
 import subprocess
@@ -21,12 +22,19 @@ from tests.atom_grpc.fake.serve import CONFIG_ENV, CORES_ENV, LINKS_ENV, RECORD_
 
 ROOT = Path(__file__).resolve().parents[3]
 STAND_INS = Path(__file__).resolve().parent / "stand_ins"
+EPHEMERAL = Path("/proc/sys/net/ipv4/ip_local_port_range")  # connect's and port 0's
 
 
 def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    """A port free now and outside the ephemeral range: no connect or bind to port 0 can
+    take it before its process binds it, which an instance does minutes later."""
+    low, high = map(int, EPHEMERAL.read_text().split())
+    outside = [*range(1024, low), *range(high + 1, 1 << 16)]
+    for port in random.sample(outside, min(len(outside), 64)):
+        with socket.socket() as sock, contextlib.suppress(OSError):
+            sock.bind(("", port))
+            return port
+    raise RuntimeError(f"no free port outside the ephemeral range {low}-{high}")
 
 
 class Http:
