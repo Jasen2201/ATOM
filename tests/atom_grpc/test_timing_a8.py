@@ -112,6 +112,13 @@ def test_extra_times_take_p_and_d_time_off_and_leave_out_unsure_matches():
     assert a8.extras([client], {}, [d])[2] == 1  # no P
 
 
+def test_a_failure_is_71s_when_its_window_holds_a_whole_block_receive_d_lost():
+    failed = [a8.Client(at, at + 10, *[None] * 4, "x") for at in (10, 30)]
+    lost = [15.0, 16.0]  # both within the first request's: only one is its
+    assert a8.relay_failures(failed, lost) == 1 and lost == [16.0]
+    assert a8.relay_failures(failed, [35.0, 12.0]) == 2
+
+
 def test_slices_percentiles_and_windowed_samples():
     done = [a8.Client(0, end, 1, 0.01, 10, 300, "ok") for end in (1, 299, 300, 1799)]
     assert a8.slices(done, 0) == [2.0, 1.0, 0.0, 0.0, 0.0, 1.0]
@@ -130,14 +137,15 @@ def run(path: str, ttft: tuple, **fields) -> a8.Run:
     base = {
         "atomesh": 4.0, "stages": {}, "queue_timeouts": 0.0, "front_ends": {"p0 0": 0.5},
         "messages": {}, "itl": (0.0, 0.0), "completed": 10, "left_out": 0,
-        "slices": [100.0] * 6, "outcomes": Counter(ok=10), "failed_receives": [], "prompt": 1000.0,
+        "slices": [100.0] * 6, "outcomes": Counter(ok=10), "relay_failed": 0, "prompt": 1000.0,
     }  # fmt: skip
     return a8.Run(path, ttft=ttft, **(base | fields))
 
 
 def test_the_criteria_hold_on_both_grpc_paths_and_a_close_ttft_runs_both_again():
     runs = {"http": [run("http", (0.5, 0.9))], "grpc": [run("grpc", (0.2, 0.4))]}
-    runs["session"] = [run("session", (0.49, 0.6), outcomes=Counter(ok=9, refused=1))]
+    outcomes = Counter({"ok": 8, "refused": 1, "None InvalidInferenceResultError": 1})
+    runs["session"] = [run("session", (0.49, 0.6), outcomes=outcomes, relay_failed=1)]
     assert all(ok for _, ok in a8.verdicts(runs))
     assert not a8.close(runs["grpc"][0], runs["http"][0])
     assert a8.close(runs["session"][0], runs["http"][0])  # p50 within 5%
@@ -154,7 +162,7 @@ def test_the_criteria_hold_on_both_grpc_paths_and_a_close_ttft_runs_both_again()
     assert failed == {
         "atomesh's CPU and its prepare queue",
         "the last slice's throughput",
-        "no failure or cancel but ATOM's refusals",
+        "no failure or cancel but ATOM's refusals and #71's",
         "mean prompt length",
     }
 
