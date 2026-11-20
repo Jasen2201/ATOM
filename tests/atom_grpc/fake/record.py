@@ -183,9 +183,7 @@ class Request:
     data_parallel_rank: int | None
     steps: list[Step] = field(default_factory=list)
     receive: dict | None = None  # its KV receive's report, on a P/D decode instance
-    aborted: float | None = (
-        None  # when the API process first asked the engine to abort it
-    )
+    aborted: float | None = None  # when the API first asked the engine to abort it
 
     @property
     def output_ids(self) -> list[int]:
