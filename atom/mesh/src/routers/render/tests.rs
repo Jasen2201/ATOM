@@ -524,6 +524,21 @@ mod b2_chat_aggregator_branches {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["usage"]["prompt_tokens_details"]["cached_tokens"], 2);
     }
+
+    #[tokio::test]
+    async fn test_aggregator_reasoning_only_output_carries_an_empty_content() {
+        let mut req = ChatCompletionRequest::default();
+        req.separate_reasoning = true;
+        let mut ctx = ctx_with(req);
+        ctx.configured_reasoning_parser = Some("deepseek_r1".to_string());
+        let complete = cmpl(vec![1, 2], FinishReason::Length, None);
+        let resp = chat_aggregator::process(synthetic_single_stream(vec![Ok(complete)]), ctx).await;
+        let body = to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let message = &json["choices"][0]["message"];
+        assert_eq!(message["reasoning_content"], "Hello world");
+        assert_eq!(message["content"], "");
+    }
 }
 
 mod b3_chat_aggregator_typed {
@@ -1205,6 +1220,32 @@ mod c2_chat_streaming_branches {
         let usage_chunk = events.find(|e| e.contains("\"usage\"")).unwrap();
         let json: serde_json::Value = serde_json::from_str(usage_chunk).unwrap();
         assert_eq!(json["usage"]["prompt_tokens_details"]["cached_tokens"], 2);
+    }
+
+    #[tokio::test]
+    async fn test_streaming_output_without_text_opens_with_an_empty_content() {
+        let mut req = ChatCompletionRequest::default();
+        req.stream = true;
+        let stream = synthetic_single_stream(vec![
+            Ok(TokenChunk::Partial {
+                token_ids: vec![999], // <eos>, which decodes to no text
+                logprobs: None,
+            }),
+            Ok(TokenChunk::Complete {
+                token_ids: vec![],
+                finish_reason: FinishReason::Stop,
+                matched_stop: None,
+                usage: usage(3, 1),
+                logprobs: None,
+                input_logprobs: None,
+                meta: meta_plain(),
+            }),
+        ]);
+        let s = body_of(chat_streaming::process(stream, ctx_with(req), "regular")).await;
+        let mut events = s.lines().filter_map(|line| line.strip_prefix("data: "));
+        let json: serde_json::Value = serde_json::from_str(events.next().unwrap()).unwrap();
+        assert_eq!(json["choices"][0]["delta"]["role"], "assistant");
+        assert_eq!(json["choices"][0]["delta"]["content"], "");
     }
 
     #[tokio::test]
