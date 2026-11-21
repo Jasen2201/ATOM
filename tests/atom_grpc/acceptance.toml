@@ -372,3 +372,8 @@ what = "atomesh decodes a Session message of at most 4 MiB; a larger one fails t
 issue = 121
 cases = ["A7t"]
 what = "at DP4 each rank's output thread holds the front end's GIL about 0.38 ms a step, hence DP4's 4 ms lag bound"
+
+[[known]]
+issue = 128
+cases = ["A4.4", "A7.3"]
+what = "under load the Session's chunked cancel while D decodes can miss D's abort within 120 s"
