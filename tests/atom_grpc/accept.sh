@@ -12,7 +12,7 @@ if [ -f "$RUST_ENV" ]; then
     . "$RUST_ENV"
     export CARGO_TARGET_DIR=$CARGO_TARGET_DIR-$(basename "$ROOT")  # this tree's own target, as the gate's
 fi
-OUT=$(mktemp -d "${ATOM_ACCEPT_OUT:-/dev/shm}/accept-$ITEM.XXXXXX")
+OUT=$(mktemp -d "${ATOM_ACCEPT_OUT:-/dev/shm}/accept-$ITEM.XXXXXX")  # short: the fake instances' IPC socket paths
 export ACCEPT_ITEM=$ITEM ACCEPT_OUT=$OUT ACCEPT_MAP=${ATOM_ACCEPT_MAP:-$HERE/acceptance.toml}
 export TMPDIR=$OUT PYTHONPATH=$ROOT
 cd "$ROOT"

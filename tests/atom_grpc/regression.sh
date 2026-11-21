@@ -43,7 +43,8 @@ def env(tree, name):
 def pytest_failures(tree, name, args):
     """Node ids whose test failed or errored, collection errors as their file's id."""
     report = Path(OUT, f"{name}.xml")
-    subprocess.run([*PYTEST, f"--junitxml={report}", *args], cwd=tree, env=env(tree, name), stdout=subprocess.DEVNULL)
+    bt = f"--basetemp={OUT}/{name}/bt"  # short: the fake instances' IPC socket paths fit 107 bytes
+    subprocess.run([*PYTEST, bt, f"--junitxml={report}", *args], cwd=tree, env=env(tree, name), stdout=subprocess.DEVNULL)
     failed = []
     for case in ET.parse(report).iter("testcase"):
         if case.find("failure") is None and case.find("error") is None:
