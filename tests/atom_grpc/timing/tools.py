@@ -11,6 +11,8 @@ from typing import NamedTuple
 
 import tomllib
 
+from tests.atom_grpc.harness.atomesh import atomesh_bin
+
 # A run refuses to start at this 1-minute load average or above, less the host's kernel
 # threads in uninterruptible sleep: each counts in the load average and runs nothing.
 MAX_LOAD = 32.0
@@ -39,6 +41,16 @@ def header(case: str, load: float, kthreads: int, cores: dict) -> list[str]:
         + f" a run refuses at {MAX_LOAD:g}",
     ]
     return lines + [f"cores, {name}: {sorted(cpus)}" for name, cpus in cores.items()]
+
+
+def pinned_atomesh(cores: list[int], scratch: Path) -> Path:
+    """`ATOMESH_BIN`'s binary on `cores` from its first instruction, so that it sizes its
+    runtime and preparation pool to them."""
+    script = scratch / "atomesh"
+    cpus = ",".join(map(str, cores))
+    script.write_text(f'#!/bin/sh\nexec taskset -c {cpus} {atomesh_bin()} "$@"\n')
+    script.chmod(0o755)
+    return script
 
 
 def _toml(value) -> str:

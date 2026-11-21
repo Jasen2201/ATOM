@@ -3,10 +3,13 @@
 topology under a step law, client and law times, and a median held to its bound."""
 
 import dataclasses
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from tests.atom_grpc.harness.atomesh import ATOMESH_BIN
 from tests.atom_grpc.harness.launch import load
 from tests.atom_grpc.harness.topologies import TOPOLOGIES
 from tests.atom_grpc.timing import tools
@@ -51,6 +54,23 @@ def test_the_single_topology_under_a_law_loads_as_itself_with_the_law(tmp_path):
         assert Path(spec.model) == model and model.is_dir()
         assert spec.fake == {**before.fake, "law": law}
         assert dataclasses.replace(spec, model=before.model, fake=before.fake) == before
+
+
+def test_pinned_atomesh_runs_atomesh_bin_on_its_cores_from_its_start(
+    tmp_path, monkeypatch
+):
+    fake = tmp_path / "fake-atomesh"
+    fake.write_text(
+        "#!/bin/sh\ngrep Cpus_allowed_list /proc/self/status\nprintf '%s\\n' \"$@\"\n"
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv(ATOMESH_BIN, str(fake))
+    core = max(os.sched_getaffinity(0))
+    script = tools.pinned_atomesh([core], tmp_path)
+    out = subprocess.run(
+        [script, "--port", "1 2"], capture_output=True, text=True, check=True
+    )
+    assert out.stdout.splitlines() == [f"Cpus_allowed_list:\t{core}", "--port", "1 2"]
 
 
 def test_client_times_take_the_first_chunks_delay_then_time_per_token_after_it():
