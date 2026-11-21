@@ -6,7 +6,8 @@ ITEM=${1:?usage: accept.sh <item>, such as A1, A2t or A7t}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PY=${ATOM_ACCEPT_PYTHON:-/share_nfs/yajizhan/venv-cpu-test/bin/python}
-"$PY" -c '' 2>/dev/null || PY=python3  # the timing host runs only run.sh, from its own Python
+# The timing host runs only run.sh, from its own python3: there the venv is 3.10 without tomli.
+"$PY" -c 'import tomllib' 2>/dev/null || "$PY" -c 'import tomli' 2>/dev/null || PY=python3
 RUST_ENV=${ATOM_ACCEPT_RUST_ENV:-/dev/shm/yajizhan-rust/env.sh}
 if [ -f "$RUST_ENV" ]; then
     . "$RUST_ENV"
