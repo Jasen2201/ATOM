@@ -225,16 +225,15 @@ def count_grpc_messages() -> None:
             counts["session_out"] += 1
             yield message
 
-    def write_totals(recorder: Recorder) -> None:
+    def write_totals() -> None:
+        recorder = Recorder(path)
         while True:
             time.sleep(COUNT_S)
             recorder.write(_lines([{"time": time.time(), **counts}]))
 
     AtomEngineServicer.Generate = counted_generate
     AtomEngineServicer.Session = counted_session
-    threading.Thread(
-        target=write_totals, args=(Recorder(path),), name="grpc-counts", daemon=True
-    ).start()
+    threading.Thread(target=write_totals, name="grpc-counts", daemon=True).start()
 
 
 class Step(NamedTuple):

@@ -4,8 +4,10 @@ on fake engines under AgentX through atomesh's HTTP P/D path, its gRPC streams a
 """
 
 import argparse
+import contextlib
 import copy
 import json
+import math
 import os
 import shlex
 import shutil
@@ -25,7 +27,7 @@ import tomllib
 
 from tests.atom_grpc.fake.record import RECORD
 from tests.atom_grpc.fake.serve import COUNTS_ENV, LEAN_ENV
-from tests.atom_grpc.harness.atomesh import ATOMESH_BIN, LOG
+from tests.atom_grpc.harness.atomesh import ATOMESH_BIN
 from tests.atom_grpc.harness.launch import core_sets, load
 from tests.atom_grpc.harness.topologies import TOPOLOGIES, Topology
 from tests.atom_grpc.timing import tools
@@ -52,7 +54,7 @@ CLOSE = 0.05  # an extra-TTFT percentile this near the HTTP path's: both paths r
 FLOOR = 0.95  # the last slice's throughput over the first's
 PROMPT_SPREAD = 0.02  # a mean prompt length's distance from HTTP's
 STAGES, ERRORS = "mesh_prepare_stage_seconds", "mesh_prepare_errors_total"
-QUEUE_TIMEOUT = f'{ERRORS}{{reason="prepare_queue_timeout"}}'
+QUEUE_ERRORS = [f'{ERRORS}{{reason="prepare_queue_{r}"}}' for r in ("full", "timeout")]
 SECONDS = {"ns": 1e-9, "us": 1e-6, "ms": 1e-3, "sec": 1.0, "s": 1.0}  # aiperf's units
 TAGS = ("time_to_first_token", "inter_token_latency", "input_sequence_length", "output_sequence_length")  # fmt: skip
 AIPERF_ENV = {  # the recipe's
@@ -113,8 +115,7 @@ def path_topology(path: str, run: Path, model: Path, law: str) -> tuple[Path, di
     """a8.toml's P thrice and D four times under `path`'s router, serving `model` under `law`,
     recording leanly and counting gRPC messages; on HTTP, four front ends and no gRPC.
     """
-    with open(TOPOLOGY, "rb") as f:
-        tables = tomllib.load(f)
+    tables = tomllib.loads(TOPOLOGY.read_text())
     (router,), instances, ports = tables["router"], [], {}
     for template in tables["instance"]:
         role = "prefill" if template["name"] in router["prefill"] else "decode"
@@ -181,10 +182,8 @@ class Sampler(threading.Thread):
         while True:
             now, ticks = time.time(), {}
             for pid in self.pids:
-                try:
+                with contextlib.suppress(FileNotFoundError):  # ended
                     ticks[pid] = stat_ticks(Path(f"/proc/{pid}/stat").read_text())[1]
-                except FileNotFoundError:  # ended
-                    pass
             self.ticks.append((now, ticks))
             self.metrics.append((now, scrape(self.url)))
             if self.done.wait(SAMPLE_S):
@@ -227,7 +226,7 @@ def grpc_messages(path: Path, start: float, end: float) -> dict[str, int]:
 
 
 class Client(NamedTuple):
-    """One profiled request as aiperf recorded it, in wall seconds."""
+    """One request as aiperf recorded it, in wall seconds."""
 
     start: float
     end: float
@@ -235,29 +234,29 @@ class Client(NamedTuple):
     itl: float | None
     isl: int | None
     osl: int | None
-    outcome: str  # "ok", "cancelled", "refused" or its error's code and type
+    outcome: str  # "ok", "cancelled", "refused" or its error's code, type and message
 
 
-def clients(export: Path) -> list[Client]:
-    """The profiling phase's records in aiperf's profile_export.jsonl."""
+def clients(export: Path, phase: str = "profiling") -> list[Client]:
+    """`phase`'s records in aiperf's profile_export.jsonl, if aiperf wrote it."""
     found = []
-    with open(export) as f:
-        for line in f:
-            record = json.loads(line)
-            meta, metrics = record["metadata"], record.get("metrics") or {}
-            if meta.get("benchmark_phase") != "profiling":
-                continue
-            values = [metrics.get(tag) for tag in TAGS]
-            values = [v and v["value"] * SECONDS.get(v["unit"], 1) for v in values]
-            outcome, error = "ok", record.get("error")
-            if meta.get("was_cancelled"):
-                outcome = "cancelled"
-            elif meta.get("context_overflow_skip"):
-                outcome = "refused"  # by ATOM, for its context length
-            elif error:
-                outcome = f"{error.get('code')} {error.get('type')}"
-            ends = meta["request_start_ns"] / 1e9, meta["request_end_ns"] / 1e9
-            found.append(Client(*ends, *values, outcome))
+    for line in export.read_text().splitlines() if export.exists() else []:
+        record = json.loads(line)
+        meta, metrics = record["metadata"], record.get("metrics") or {}
+        if meta.get("benchmark_phase") != phase:
+            continue
+        values = [metrics.get(tag) for tag in TAGS]
+        values = [v and v["value"] * SECONDS.get(v["unit"], 1) for v in values]
+        outcome, error = "ok", record.get("error")
+        if meta.get("was_cancelled"):
+            outcome = "cancelled"
+        elif meta.get("context_overflow_skip"):
+            outcome = "refused"  # by ATOM, for its context length
+        elif error:  # its message's head says who refused it and why
+            head = str(error.get("message"))[:120]
+            outcome = f"{error.get('code')} {error.get('type')}: {head}"
+        ends = meta["request_start_ns"] / 1e9, meta["request_end_ns"] / 1e9
+        found.append(Client(*ends, *values, outcome))
     return found
 
 
@@ -356,10 +355,8 @@ class Run(NamedTuple):
     path: str
     atomesh: float  # mean CPU, in cores
     stages: dict[str, tuple]  # preparation stage: (count, mean seconds)
-    queue_timeouts: float  # requests that hit --prepare-queue-timeout-ms, whole run
-    front_ends: dict[
-        str, float
-    ]  # "<instance> <k>", 0 its API server: mean CPU, in cores
+    queue_errors: float  # the prepare queue's refusals and timeouts, whole run
+    front_ends: dict[str, float]  # CPU in cores by "<instance> <k>", 0 its API server
     messages: dict[str, dict[str, int]]  # gRPC messages by instance
     ttft: tuple[float, float]  # extra, p50 and p90
     itl: tuple[float, float]
@@ -396,7 +393,7 @@ def measured(path: str, topology, sampler, fronts: dict, ports: dict, profiled) 
         path,
         shares[router.pid],
         stage_means(sampler.metrics, start, end),
-        sampler.metrics[-1][1].get(QUEUE_TIMEOUT, 0.0),
+        sum(sampler.metrics[-1][1].get(name, 0.0) for name in QUEUE_ERRORS),
         fronts,
         counted,
         p50_p90(ttfts),
@@ -415,8 +412,8 @@ def measured(path: str, topology, sampler, fronts: dict, ports: dict, profiled) 
 
 def run_path(
     path: str, attempt: int, plan: dict, model: Path, law: str, scratch: Path
-) -> Run:
-    """One run of the recipe's AgentX load through `path`'s router."""
+) -> Run | None:
+    """One run of the recipe's AgentX load through `path`'s router; None if none profiled."""
     run = scratch / f"{path}{attempt}"
     # The launcher pins its instances from these, and atomesh pins itself.
     os.sched_setaffinity(0, plan["instances"])
@@ -434,11 +431,8 @@ def run_path(
         sampler = Sampler(pids, f"{metrics}/metrics")
         sampler.start()
         hf = {"HF_HUB_CACHE": "hub", "HF_HOME": "home", "HF_DATASETS_CACHE": "datasets"}
-        env = (
-            os.environ
-            | AIPERF_ENV
-            | {k: str(scratch / "hf" / v) for k, v in hf.items()}
-        )
+        hf = {name: str(scratch / "hf" / part) for name, part in hf.items()}
+        env = os.environ | AIPERF_ENV | hf
         aiperf = ["taskset", "-c", ",".join(map(str, plan["aiperf"])), "agentx"]
         command = [*aiperf, *aiperf_args(router.url, str(model), out)]
         print(f"{path} run {attempt}: aiperf started {time.ctime()}", flush=True)
@@ -453,13 +447,14 @@ def run_path(
     if left or topology.proc.returncode:
         code = topology.proc.returncode
         raise RuntimeError(f"launch exit {code}, left {left}:\n{topology.tail()}")
-    export = out / "profile_export.jsonl"
-    profiled = clients(export) if export.exists() else []
-    if not profiled:
-        logs = (run / "aiperf.log", run / path / LOG)  # aiperf's, then atomesh's
-        tails = "\n".join(log.read_text(errors="replace")[-6000:] for log in logs)
-        raise RuntimeError(f"aiperf exit {code} profiled no request:\n{tails}")
-    measure = measured(path, topology, sampler, fronts, ports, profiled)
+    export, measure = out / "profile_export.jsonl", None
+    if profiled := clients(export):
+        measure = measured(path, topology, sampler, fronts, ports, profiled)
+    else:  # what failed before the window, else how aiperf's log ends
+        failed = [c.outcome for c in clients(export, "warmup") if c.outcome != "ok"]
+        log = (run / "aiperf.log").read_text(errors="replace")[-4000:]
+        print(f"\n{path} run {attempt}: aiperf exit {code}, nothing profiled")
+        print(f"  failed: {dict(Counter(failed))}" if failed else log, flush=True)
     shutil.rmtree(run)  # its engine records: gigabytes of /dev/shm
     return measure
 
@@ -474,7 +469,7 @@ def report(run: Run, attempt: int) -> list[str]:
     messages = ", ".join(f"{n} {m['generate_in'] + m['session_in']} in, {m['generate_out'] + m['session_out']} out" for n, m in run.messages.items())  # fmt: skip
     return [
         f"\n{run.path} run {attempt}:",
-        f"  atomesh CPU {run.atomesh / ATOMESH_CORES:.1%} of its {ATOMESH_CORES} cores; prepare stages: {stages or 'none'}; prepare-queue timeouts {run.queue_timeouts:.0f}",
+        f"  atomesh CPU {run.atomesh / ATOMESH_CORES:.1%} of its {ATOMESH_CORES} cores; prepare stages: {stages or 'none'}; prepare queue full or timed out {run.queue_errors:.0f}",
         f"  ATOM front-end processes, CPU of one core: {fronts}",
         f"  gRPC messages: {messages or 'none'}",
         f"  extra TTFT p50 {ms(run.ttft[0])}, p90 {ms(run.ttft[1])}; extra ITL p50 {ms(run.itl[0])}, p90 {ms(run.itl[1])}; over {run.completed} completed, {run.left_out} matching no engine request",
@@ -484,15 +479,19 @@ def report(run: Run, attempt: int) -> list[str]:
     ]  # fmt: skip
 
 
-def verdicts(runs: dict[str, list[Run]]) -> list[tuple[str, bool]]:
-    """A8's criteria on both gRPC paths: each run's, then extra TTFT over the runs' mean."""
-    http = runs["http"]
-    prompt = statistics.fmean(r.prompt for r in http)
+def verdicts(runs: dict[str, list[Run | None]]) -> list[tuple[str, bool]]:
+    """A8's criteria on both gRPC paths: each run's, then extra TTFT over the runs' mean. A
+    run aiperf ended before its window, None, fails them."""
+    http = [r for r in runs["http"] if r]
+    prompt = statistics.fmean(r.prompt for r in http) if http else math.nan
     found = []
     for path in GRPC_PATHS:
         for k, r in enumerate(runs[path], 1):
             name = f"{path} run {k}"
-            atomesh = r.atomesh < CPU_SHARE * ATOMESH_CORES and r.queue_timeouts == 0
+            if r is None:
+                found.append((f"{name}: aiperf's profiling window", False))
+                continue
+            atomesh = r.atomesh < CPU_SHARE * ATOMESH_CORES and r.queue_errors == 0
             failed = sum(n for k, n in r.outcomes.items() if k not in ("ok", "refused"))
             refused = failed == r.relay_failed  # every failure ATOM's or #71's
             found += [
@@ -502,18 +501,20 @@ def verdicts(runs: dict[str, list[Run]]) -> list[tuple[str, bool]]:
                 (f"{name}: no failure or cancel but ATOM's refusals and #71's", refused),
                 (f"{name}: mean prompt length", abs(r.prompt - prompt) <= PROMPT_SPREAD * prompt),
             ]  # fmt: skip
+        ran = [r for r in runs[path] if r]
         for i, p in enumerate((50, 90)):
-            mine = statistics.fmean(r.ttft[i] for r in runs[path])
-            theirs = statistics.fmean(r.ttft[i] for r in http)
+            mine = statistics.fmean(r.ttft[i] for r in ran) if ran else math.nan
+            theirs = statistics.fmean(r.ttft[i] for r in http) if http else math.nan
             text = f"{path}: extra TTFT p{p} {ms(mine)} below HTTP's {ms(theirs)}"
-            runs_ = f" (means of {len(runs[path])} and {len(http)} runs)"
+            runs_ = f" (means of {len(ran)} and {len(http)} runs)"
             found.append((text + runs_, mine < theirs))
     return found
 
 
-def close(grpc: Run, http: Run) -> bool:
-    """Whether an extra-TTFT percentile of `grpc` is within `CLOSE` of HTTP's."""
-    return any(abs(g - h) <= CLOSE * abs(h) for g, h in zip(grpc.ttft, http.ttft))
+def close(grpc: Run | None, http: Run | None) -> bool:
+    """Whether both ran and an extra-TTFT percentile of `grpc` is within `CLOSE` of HTTP's."""
+    pairs = zip(grpc.ttft, http.ttft) if grpc and http else []
+    return any(abs(g - h) <= CLOSE * abs(h) for g, h in pairs)
 
 
 def measure(law: str, scratch: Path) -> int:
@@ -544,14 +545,13 @@ def measure(law: str, scratch: Path) -> int:
     hub_cache(TRACE, scratch / "hf" / "hub")
     os.environ[ATOMESH_BIN] = str(tools.pinned_atomesh(plan["atomesh"], scratch))
     runs = defaultdict(list)
-
     order = list(PATHS)  # then HTTP and each gRPC path whose extra TTFT is close to it
     while order:
         path = order.pop(0)
-        runs[path].append(
-            run_path(path, len(runs[path]) + 1, plan, model, law, scratch)
-        )
-        print("\n".join(report(runs[path][-1], len(runs[path]))), flush=True)
+        run = run_path(path, len(runs[path]) + 1, plan, model, law, scratch)
+        runs[path].append(run)
+        if run is not None:
+            print("\n".join(report(run, len(runs[path]))), flush=True)
         if path == PATHS[-1] and len(runs[path]) == 1:
             again = [g for g in GRPC_PATHS if close(runs[g][0], runs["http"][0])]
             order += ["http", *again] if again else []
