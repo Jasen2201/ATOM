@@ -53,6 +53,23 @@ def test_each_path_runs_p_three_times_and_d_four_under_its_own_router(tmp_path):
         a8.plan_cores(list(range(89)), specs)
 
 
+def test_only_the_grpc_paths_routers_take_the_forwarded_flags(tmp_path, monkeypatch):
+    def router_args(path: str) -> list[str]:
+        file, _ = a8.path_topology(path, tmp_path / path, tmp_path / "model", "law")
+        return load(file)[1][0].args
+
+    monkeypatch.delenv(a8.GRPC_ROUTER_ARGS_ENV, raising=False)
+    unset = {path: router_args(path) for path in a8.PATHS}
+    monkeypatch.setenv(a8.GRPC_ROUTER_ARGS_ENV, "")
+    assert {path: router_args(path) for path in a8.PATHS} == unset
+    flags = "--fastokens-models '*' --fastokens-segment-cache-mb 512"
+    monkeypatch.setenv(a8.GRPC_ROUTER_ARGS_ENV, flags)
+    extra = ["--fastokens-models", "*", "--fastokens-segment-cache-mb", "512"]
+    assert router_args("http") == unset["http"]
+    for path in a8.GRPC_PATHS:
+        assert router_args(path) == unset[path] + extra
+
+
 def record(meta: dict, metrics: dict, error=None) -> str:
     units = {"time_to_first_token": "ms", "inter_token_latency": "ms"}
     shown = {k: {"value": v, "unit": units.get(k, "tokens")} for k, v in metrics.items()}  # fmt: skip

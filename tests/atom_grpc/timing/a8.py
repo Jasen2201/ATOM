@@ -9,6 +9,7 @@ import copy
 import json
 import math
 import os
+import shlex
 import shutil
 import statistics
 import subprocess
@@ -26,7 +27,7 @@ import tomllib
 
 from tests.atom_grpc.fake.record import RECORD
 from tests.atom_grpc.fake.serve import COUNTS_ENV, LEAN_ENV
-from tests.atom_grpc.harness.atomesh import ATOMESH_BIN, atomesh_bin
+from tests.atom_grpc.harness.atomesh import ATOMESH_BIN
 from tests.atom_grpc.harness.launch import core_sets, load
 from tests.atom_grpc.harness.topologies import TOPOLOGIES, Topology
 from tests.atom_grpc.timing import tools
@@ -40,6 +41,8 @@ TRACE = Path("/share_nfs/models/datasets--semianalysisai--cc-traces-weka-062126"
 TOKENIZER = Path("/share_nfs/models/deepseek-ai/DeepSeek-V4.1-Flash")
 HARNESS = "1.0.9"  # agentx-harness, CI's
 PATHS, GRPC_PATHS = ("http", "grpc", "session"), ("grpc", "session")
+# More flags for the gRPC paths' routers, as shell words, which run.sh forwards; unset, none.
+GRPC_ROUTER_ARGS_ENV = "ATOM_A8_GRPC_ROUTER_ARGS"
 COPIES = {"prefill": 3, "decode": 4}  # instances of a8.toml's P and D
 API_SERVERS = 4  # the HTTP path's --api-server-count
 ATOMESH_CORES = AIPERF_CORES = 16
@@ -134,6 +137,8 @@ def path_topology(path: str, run: Path, model: Path, law: str) -> tuple[Path, di
     router |= {"name": path, "grpc": path != "http"}
     router["args"] += ["--model-path", str(model)]
     router["args"] += ["--atom-grpc-session"] * (path == "session")
+    if path != "http":
+        router["args"] += shlex.split(os.environ.get(GRPC_ROUTER_ARGS_ENV, ""))
     out = run.with_suffix(".toml")
     out.write_text(tools.dumps({"instance": instances, "router": [router]}))
     return out, ports  # P's handshake ports, by which its Ds name it
@@ -148,16 +153,6 @@ def plan_cores(cpus: list[int], specs) -> dict[str, list[int]]:
     edges = [0, pinned, pinned + ATOMESH_CORES, pinned + ATOMESH_CORES + AIPERF_CORES]
     names = ("instances", "atomesh", "aiperf", "driver")
     return {name: cpus[a:b] for name, a, b in zip(names, edges, [*edges[1:], None])}
-
-
-def pinned_atomesh(cores: list[int], scratch: Path) -> Path:
-    """`ATOMESH_BIN`'s binary on `cores` from its first instruction, so that it sizes its
-    runtime and preparation pool to them."""
-    script = scratch / "atomesh"
-    cpus = ",".join(map(str, cores))
-    script.write_text(f'#!/bin/sh\nexec taskset -c {cpus} {atomesh_bin()} "$@"\n')
-    script.chmod(0o755)
-    return script
 
 
 def front_ends(instance) -> list[int]:
@@ -537,6 +532,8 @@ def measure(law: str, scratch: Path) -> int:
     load_average = tools.load_average(Path("/proc/loadavg").read_text())
     kthreads = int(os.environ.get(tools.KTHREADS_ENV, "0"))
     print("\n".join(tools.header("a8", load_average, kthreads, cores)), flush=True)
+    extra = os.environ.get(GRPC_ROUTER_ARGS_ENV, "")
+    print(f"gRPC routers' extra flags: {extra or 'none'}", flush=True)
     if tools.refuses(load_average, kthreads):
         print(f"refused: the load less those threads is {tools.MAX_LOAD:g} or more")
         return 2
@@ -546,7 +543,7 @@ def measure(law: str, scratch: Path) -> int:
         return 2
     os.sched_setaffinity(0, plan["driver"])
     hub_cache(TRACE, scratch / "hf" / "hub")
-    os.environ[ATOMESH_BIN] = str(pinned_atomesh(plan["atomesh"], scratch))
+    os.environ[ATOMESH_BIN] = str(tools.pinned_atomesh(plan["atomesh"], scratch))
     runs = defaultdict(list)
     order = list(PATHS)  # then HTTP and each gRPC path whose extra TTFT is close to it
     while order:
