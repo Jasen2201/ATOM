@@ -196,6 +196,29 @@ def test_a_module_case_and_a_timing_case_pass_only_on_exit_status_0(stub, tmp_pa
     assert not (stub / "cargo-args").exists()
 
 
+def test_a_python_that_runs_but_reads_no_toml_gives_way_to_python3(stub, tmp_path):
+    # As the venv's Python 3.10 on the timing host: it starts, but has neither module.
+    hidden = tmp_path / "no_toml"
+    hidden.mkdir()
+    for name in ("tomllib", "tomli"):
+        (hidden / f"{name}.py").write_text("raise ImportError\n")
+    bin_dir = tmp_path / "py_bin"
+    bin_dir.mkdir()
+    venv_py = bin_dir / "venv_python"
+    venv_py.write_text(f'#!/bin/sh\nPYTHONPATH={hidden} exec {sys.executable} "$@"\n')
+    venv_py.chmod(0o755)
+    (bin_dir / "python3").symlink_to(sys.executable)
+    path = f"{bin_dir}:{os.environ['PATH']}"
+    status, lines = accept(
+        "Y3t", stub, tmp_path, ATOM_ACCEPT_PYTHON=str(venv_py), PATH=path
+    )
+    assert (status, lines[:2]) == (
+        0,
+        ["Y3t passed tests/atom_grpc/timing/run.sh 0", "known: #7: a known defect"],
+    )
+    assert (stub / "ran").read_text().split() == ["0"]
+
+
 def test_every_pytest_id_the_map_names_selects_tests_this_tree_collects():
     ids = {i for case in MAP["case"].values() for i in case.get("pytest", [])}
     files = sorted({i.split("::")[0] for i in ids})
