@@ -4,15 +4,19 @@ lines its processes append to the file `RECORD_ENV` names. `EngineRecord` reads 
 
 import json
 import os
+import threading
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from tests.atom_grpc.fake.serve import RECORD_ENV, STAMPS_ENV
+from tests.atom_grpc.fake.serve import COUNTS_ENV, LEAN_ENV, RECORD_ENV, STAMPS_ENV
 
 RECORD = "engine_record.jsonl"  # its name in an instance's workdir
+# What `count_grpc_messages` counts: messages each RPC kind received and sent.
+COUNTED = ("generate_in", "generate_out", "session_in", "session_out")
+COUNT_S = 5.0  # how often it appends its totals
 # SamplingParams' fields as a Sequence holds them (`logprobs` as `return_logprobs`).
 SAMPLING = (
     "temperature",
@@ -54,7 +58,8 @@ def _lines(events) -> bytes:
     return "".join(json.dumps(e, default=_plain) + "\n" for e in events).encode()
 
 
-def _admission(seq, arrival: float) -> dict:
+def _admission(seq, arrival: float, lean: bool = False) -> dict:
+    """`lean`: the prompt's length alone, without its ids or hash chain."""
     sampling = {name: getattr(seq, name) for name in SAMPLING}
     chain = getattr(seq, "prompt_hash_chain", None)  # add_request ships it beside seq
     return {
@@ -62,12 +67,13 @@ def _admission(seq, arrival: float) -> dict:
         "time": arrival,
         "seq_id": seq.id,
         "request_id": seq.external_request_id,
-        "prompt_ids": seq.token_ids[: seq.num_prompt_tokens],
+        "num_prompt_tokens": seq.num_prompt_tokens,
+        "prompt_ids": None if lean else seq.token_ids[: seq.num_prompt_tokens],
         "sampling": sampling | {"logprobs": seq.return_logprobs},
         "stop_token_sequences": seq.stop_token_sequences,
         "kv_transfer_params": seq.kv_transfer_params,
         "data_parallel_rank": seq.data_parallel_rank,
-        "prompt_hash_chain": None if chain is None else chain.hashes,
+        "prompt_hash_chain": None if chain is None or lean else chain.hashes,
     }
 
 
@@ -130,10 +136,11 @@ def record_api_process() -> None:
 
     add_request, load_tokenizer = CoreManager.add_request, api_server.load_tokenizer
     abort_request = CoreManager.abort_request
+    lean = bool(os.environ.get(LEAN_ENV))
 
     def recorded_add_request(manager, seqs):
         now = time.time()
-        lines = _lines([_admission(seq, now) for seq in seqs])  # as given
+        lines = _lines([_admission(seq, now, lean) for seq in seqs])  # as given
         add_request(manager, seqs)
         recorder.write(lines)
 
@@ -180,6 +187,55 @@ def grpc_steps(path: Path) -> list[tuple[int, list[int]]]:
     return [(step["at"], step["seq_ids"]) for step in map(json.loads, lines)]
 
 
+def count_grpc_messages() -> None:
+    """When `COUNTS_ENV` names a file, count the messages Generate and Session calls
+    receive and send, appending the totals at wall time every `COUNT_S` seconds."""
+    path = os.environ.get(COUNTS_ENV)
+    if not path:
+        return
+    from atom.entrypoints.grpc.server import AtomEngineServicer
+
+    counts = dict.fromkeys(COUNTED, 0)  # fixed keys: the writer thread reads them
+    generate, session = AtomEngineServicer.Generate, AtomEngineServicer.Session
+
+    class Written:
+        """A Generate call's context, counting what the call writes."""
+
+        def __init__(self, context):
+            self.context = context
+
+        def __getattr__(self, name):
+            return getattr(self.context, name)
+
+        async def write(self, message) -> None:
+            counts["generate_out"] += 1
+            await self.context.write(message)
+
+    async def counted_generate(servicer, request, context):
+        counts["generate_in"] += 1
+        await generate(servicer, request, Written(context))
+
+    async def counted_session(servicer, request_iterator, context):
+        async def received():
+            async for message in request_iterator:
+                counts["session_in"] += 1
+                yield message
+
+        async for message in session(servicer, received(), context):
+            counts["session_out"] += 1
+            yield message
+
+    def write_totals() -> None:
+        recorder = Recorder(path)
+        while True:
+            time.sleep(COUNT_S)
+            recorder.write(_lines([{"time": time.time(), **counts}]))
+
+    AtomEngineServicer.Generate = counted_generate
+    AtomEngineServicer.Session = counted_session
+    threading.Thread(target=write_totals, name="grpc-counts", daemon=True).start()
+
+
 class Step(NamedTuple):
     time: float  # when the fake GPU ended it, on the wall clock
     dp_rank: int
@@ -207,7 +263,8 @@ class Request:
     seq_id: int
     request_id: str | None
     time: float  # its arrival at `CoreManager.add_request`
-    prompt_ids: list[int]
+    num_prompt_tokens: int
+    prompt_ids: list[int] | None  # None in a lean record
     sampling: dict
     stop_token_sequences: list[list[int]]
     kv_transfer_params: dict | None
