@@ -295,11 +295,8 @@ async fn process_choice(
         index,
         message: ChatCompletionMessage {
             role: "assistant".to_string(),
-            content: if processed_text.is_empty() {
-                None
-            } else {
-                Some(processed_text)
-            },
+            // "" when empty, as ATOM's HTTP chat answers; None would leave the key out.
+            content: Some(processed_text),
             tool_calls,
             reasoning_content: reasoning_text,
         },
