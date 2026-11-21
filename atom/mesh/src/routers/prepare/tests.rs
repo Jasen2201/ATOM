@@ -1246,6 +1246,26 @@ mod h_prepare_chat_generate {
     }
 
     #[test]
+    fn test_prepare_chat_records_its_template_and_encode_stages() {
+        let recorder = metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
+        let metrics = recorder.handle();
+        let _recorder = metrics::set_default_local_recorder(&recorder);
+        let components = test_mocks::app_context_with_hf_tokenizer("m");
+        prepare_chat(
+            chat_req(false),
+            None,
+            Some("m".to_string()),
+            components.as_ref(),
+        )
+        .expect("HF tokenizer must succeed");
+        let rendered = metrics.render();
+        for stage in ["template", "encode"] {
+            let count = format!("mesh_prepare_stage_seconds_count{{stage=\"{stage}\"}} 1");
+            assert!(rendered.lines().any(|line| line == count), "{rendered}");
+        }
+    }
+
+    #[test]
     fn test_prepare_chat_streaming_flag_threads_through() {
         let components = test_mocks::app_context_with_hf_tokenizer("m");
         let (payload, ctx) = prepare_chat(

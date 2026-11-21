@@ -6,8 +6,11 @@ CASE=${1:-}
 case $CASE in
     a2t) CPUS=${ATOM_TIMING_CPUS:-112-115} ;;  # a front end, a rank, atomesh and the client
     a7t) CPUS=${ATOM_TIMING_CPUS:-112-118} ;;  # a front end, up to four ranks, atomesh and the client
-    *) echo "usage: run.sh a2t|a7t" >&2; exit 2 ;;
+    a8) CPUS=${ATOM_TIMING_CPUS:-37-127} ;;  # 57 for the instances, 16 for atomesh, 16 for aiperf, 2 for the driver
+    *) echo "usage: run.sh a2t|a7t|a8" >&2; exit 2 ;;
 esac
+SHM=16g
+[ "$CASE" != a8 ] || SHM=64g  # its hub cache copy, prepared dataset and engine records
 TREE=$(cd "$(dirname "$0")/../../.." && pwd)
 NAME=$(basename "$TREE")
 WHO=$(id -un | cut -d@ -f1)
@@ -18,7 +21,7 @@ COMPASS=$CACHE/compass-$COMPASS_SHA
 ID=$(docker image inspect -f '{{.Id}}' "$IMAGE") || { echo "run.sh: no image $IMAGE here" >&2; exit 2; }
 
 # Compass's evaluator and its laws, checked out once into the cache.
-if [ "$CASE" = a2t ] && [ ! -d "$COMPASS" ]; then
+if [ "$CASE" != a7t ] && [ ! -d "$COMPASS" ]; then
     mkdir -p "$CACHE"
     tmp=$(mktemp -d "$CACHE/.compass.XXXXXX")
     trap 'rm -rf "$tmp"' EXIT
@@ -46,7 +49,7 @@ built=$(docker run --rm --init --name "$WHO-timing-build-$NAME-$(date +%s%N)" --
             jq -r "select(.executable).executable"; fi' \
     build "$GATE/rust.sh" "$RUST" "$RUST/target-$NAME" "$CASE" 2>&1) || { echo "$built" >&2; exit 2; }
 case $CASE in
-    a2t) ARGS=(--compass "$COMPASS") ;;
+    a2t | a8) ARGS=(--compass "$COMPASS") ;;
     a7t) ARGS=(--split "${built##*$'\n'}") ;;
 esac
 
@@ -57,7 +60,7 @@ COMMIT=$(git -C "$TREE" rev-parse HEAD)
 sleeping() { ps -eo ppid=,stat= | awk '$1 == 2 && $2 ~ /^D/' | wc -l; }
 KTHREADS=$(for _ in {1..11}; do sleeping; sleep 0.2; done | sort -n | sed -n 6p)
 exec docker run --rm --init --name "$WHO-timing-$CASE-$NAME-$(date +%s%N)" --hostname "$(hostname -s)" \
-    --cpuset-cpus "$CPUS" --tmpfs /dev/shm:rw,exec,size=16g,mode=1777 --ulimit nofile=1048576 \
+    --cpuset-cpus "$CPUS" --tmpfs "/dev/shm:rw,exec,size=$SHM,mode=1777" --ulimit nofile=1048576 \
     --user "$(id -u):$(id -g)" -e HOME=/dev/shm/home -e "USER=$(id -un)" -e "LOGNAME=$(id -un)" -e TMPDIR=/dev/shm \
     -e PYTHONPATH="$TREE" -e ATOMESH_BIN="$RUST/target-$NAME/ci/atomesh" -e ATOM_TIMING_D_KTHREADS="$KTHREADS" \
     -e ATOM_TIMING_IMAGE="$IMAGE $ID" -e ATOM_TIMING_COMMIT="$COMMIT" \

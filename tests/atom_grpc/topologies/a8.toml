@@ -1,0 +1,66 @@
+# The P and D commands of ROCm/ATOM lirzhang/recipe-6p16d-c1228-share-cache-20261117's C1228 recipe,
+# P on least_requests, no Store tier; timing/a8.py runs P three times and D four, as the recipe does.
+
+# Fake Mooncake: a handshake port per P, 10 apart, names its ranks' sockets; two ranks' 10 GB/s links.
+# 369920: a block's bytes, a V4.1-Flash P's `block_bytes` at these flags; 524288 hold 64 1M prompts.
+[[instance]]
+name = "p"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "2", "--enable-dp-attention", "--dp-load-balance", "least_requests",
+    "--gpu-memory-utilization", "0.85", "--max-num-seqs", "64", "--max-num-batched-tokens", "32768",
+    "--attn-prefill-chunk-size", "65536", "--cudagraph-capture-sizes", "[1,2,4,8,16,24,32,40,48,64]",
+    "--trust-remote-code", "--moe-backend", "standard", "--all2all-backend", "none",
+    "--kv_cache_dtype", "bf16", "--index-cache-dtype", "fp8", "--enable_prefix_caching",
+    "--block-size", "128", "--state-checkpoint-interval-tokens", "8192", "--level", "3",
+    "--cudagraph-mode", "FULL", "--method", "dspark", "--num-speculative-tokens", "5",
+    "--tool-call-parser", "dsml_v41", "--dspark-config", '{"confidence_schedule":false}',
+    "--disable-uvicorn-access-log", "--kv-transfer-config",
+    '{"kv_connector": "mooncake", "kv_role": "kv_producer", "handshake_port": 17300}',
+]
+dp = 2
+cores = { front_end = 5, rank = 1 }
+grpc = true
+
+[instance.fake]
+block_bytes = 369920
+bandwidth_gb_s = 10.0
+num_kvcache_blocks = 524288
+env = { ATOM_FRONTEND_PREFIX_HASH = "1", ATOM_DP_SESSION_AFFINITY = "0" }
+
+# As many blocks as P's: D also holds the prompts it receives beyond its 24 running.
+[[instance]]
+name = "d"
+model = "../fixtures/deepseek_v3_mtp"
+args = [
+    "-tp", "4", "--enable-dp-attention", "--dp-load-balance", "least_requests",
+    "--gpu-memory-utilization", "0.75", "--max-num-seqs", "24", "--max-num-batched-tokens", "1024",
+    "--attn-prefill-chunk-size", "16384", "--cudagraph-capture-sizes", "[1,2,4,8,16,24]",
+    "--trust-remote-code", "--moe-backend", "standard", "--all2all-backend", "none",
+    "--kv_cache_dtype", "bf16", "--index-cache-dtype", "fp8", "--enable_prefix_caching",
+    "--block-size", "128", "--state-checkpoint-interval-tokens", "8192", "--level", "3",
+    "--cudagraph-mode", "FULL", "--method", "dspark", "--num-speculative-tokens", "5",
+    "--tool-call-parser", "dsml_v41", "--dspark-config", '{"confidence_schedule":false}',
+    "--disable-uvicorn-access-log",
+    "--kv-transfer-config", '{"kv_connector": "mooncake", "kv_role": "kv_consumer"}',
+]
+dp = 4
+cores = { front_end = 5, rank = 1 }
+grpc = true
+
+[instance.fake]
+num_kvcache_blocks = 524288
+env = { ATOM_FRONTEND_PREFIX_HASH = "1", ATOM_DP_SESSION_AFFINITY = "0" }
+
+# The recipe's router flags; a8.py adds --model-path, and --atom-grpc-session for the Session.
+[[router]]
+name = "mesh"
+prefill = ["p"]
+decode = ["d"]
+args = [
+    "--dp-aware", "--prefill-policy", "cache_aware", "--decode-policy", "cache_aware",
+    "--cache-threshold", "1.0", "--balance-abs-threshold", "0", "--balance-rel-threshold", "1.0",
+    "--atom-pd-rank-mapping-policy", "none", "--backend", "atom", "--disable-circuit-breaker",
+    "--request-timeout-secs", "1800", "--prepare-queue-timeout-ms", "5000",
+    "--prepare-timeout-ms", "15000",
+]
