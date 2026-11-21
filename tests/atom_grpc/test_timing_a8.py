@@ -5,7 +5,6 @@ extra TTFT and ITL per request, and the criteria with their rerun rule."""
 import json
 import time
 from collections import Counter
-from pathlib import Path
 
 import grpc
 import pytest
@@ -19,7 +18,6 @@ from tests.atom_grpc.test_grpc_generate import WAIT_S, generate_request, prompt_
 from tests.atom_grpc.test_grpc_session import GREEDY, SessionCall, submit
 from tests.atom_grpc.timing import a8
 
-FIXTURE = Path(__file__).resolve().parent / "fixtures" / "deepseek_v3_mtp"
 STARTUP_S = 1500
 
 
@@ -77,7 +75,9 @@ def test_aiperf_records_give_profiled_requests_and_their_outcomes(tmp_path):
     found = a8.clients(export)
     assert found[0] == pytest.approx(a8.Client(1.0, 3.0, 0.25, 0.0075, 640, 20, "ok"))
     outcomes = [client.outcome for client in found]
-    assert outcomes == ["ok", "cancelled", "refused", "503 prepare_queue_full"]
+    assert outcomes == ["ok", "cancelled", "refused", "503 prepare_queue_full: m"]
+    assert [c.outcome for c in a8.clients(export, "warmup")] == ["ok"]
+    assert a8.clients(tmp_path / "none.jsonl") == []  # aiperf wrote none
 
 
 def test_extra_times_take_p_and_d_time_off_and_leave_out_unsure_matches():
@@ -118,7 +118,7 @@ def test_slices_percentiles_and_windowed_samples():
 
 def run(path: str, ttft: tuple, **fields) -> a8.Run:
     base = {
-        "atomesh": 4.0, "stages": {}, "queue_timeouts": 0.0, "front_ends": {"p0 0": 0.5},
+        "atomesh": 4.0, "stages": {}, "queue_errors": 0.0, "front_ends": {"p0 0": 0.5},
         "messages": {}, "itl": (0.0, 0.0), "completed": 10, "left_out": 0,
         "slices": [100.0] * 6, "outcomes": Counter(ok=10), "relay_failed": 0, "prompt": 1000.0,
     }  # fmt: skip
@@ -148,6 +148,10 @@ def test_the_criteria_hold_on_both_grpc_paths_and_a_close_ttft_runs_both_again()
         "no failure or cancel but ATOM's refusals and #71's",
         "mean prompt length",
     }
+    aborted = {"http": [None], "grpc": [None], "session": runs["session"]}  # no window
+    failed = {text.split(": ")[1] for text, ok in a8.verdicts(aborted) if not ok}
+    assert failed >= {"aiperf's profiling window", "mean prompt length"}
+    assert not a8.close(runs["session"][0], None)
 
 
 @pytest.fixture(scope="module")
@@ -158,7 +162,7 @@ def counted(tmp_path_factory):
     fake = {"step_s": 0.001, "env": {LEAN_ENV: "1", COUNTS_ENV: str(counts)}}
     args = ["--method", "mtp", "--num-speculative-tokens", "3"]
     args += ["--grpc-port", str(port)]
-    instance = FakeInstance(workdir, FIXTURE, args, fake)
+    instance = FakeInstance(workdir, a8.FIXTURE, args, fake)
     try:
         instance.start()
         instance.wait_ready(time.monotonic() + STARTUP_S)
