@@ -53,6 +53,7 @@ num_kvcache_blocks = 524288
 env = { ATOM_FRONTEND_PREFIX_HASH = "1", ATOM_DP_SESSION_AFFINITY = "0" }
 
 # The recipe's router flags; a8.py adds --model-path, and --atom-grpc-session for the Session.
+# Two flags the recipe lacks: on 16 cores atomesh's default prepare queue refuses C1228's bursts.
 [[router]]
 name = "mesh"
 prefill = ["p"]
@@ -61,6 +62,6 @@ args = [
     "--dp-aware", "--prefill-policy", "cache_aware", "--decode-policy", "cache_aware",
     "--cache-threshold", "1.0", "--balance-abs-threshold", "0", "--balance-rel-threshold", "1.0",
     "--atom-pd-rank-mapping-policy", "none", "--backend", "atom", "--disable-circuit-breaker",
-    "--request-timeout-secs", "1800", "--prepare-queue-timeout-ms", "5000",
-    "--prepare-timeout-ms", "15000",
+    "--request-timeout-secs", "1800", "--prepare-queue-capacity", "1228",
+    "--prepare-queue-timeout-ms", "60000", "--prepare-timeout-ms", "15000",
 ]
